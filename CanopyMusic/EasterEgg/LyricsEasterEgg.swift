@@ -2,8 +2,8 @@ import CanopyCore
 import Foundation
 import Observation
 
-/// One song gets a full-screen lyrics takeover when it plays. Lyrics come from LRCLIB at runtime
-/// and are cached on the device; they're never bundled (the repo is public).
+/// One song gets a full-screen lyrics takeover when it plays. Lyrics come from `big-stick.lrc` in
+/// the app bundle (hand-corrected, gitignored because the repo is public), falling back to LRCLIB.
 @MainActor
 @Observable
 final class LyricsEasterEgg {
@@ -41,6 +41,11 @@ final class LyricsEasterEgg {
         }
         #endif
 
+        if let bundled = Bundle.main.url(forResource: "big-stick", withExtension: "lrc"),
+           let text = try? String(contentsOf: bundled, encoding: .utf8) {
+            lines = Self.parse(text)
+            return
+        }
         if let cached = try? String(contentsOf: cacheURL, encoding: .utf8) {
             lines = Self.parse(cached)
             return

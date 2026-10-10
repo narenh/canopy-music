@@ -132,6 +132,10 @@ public final class DemoPlaybackEngine: PlaybackEngine {
         currentTime = 0
     }
 
+    public func seek(to time: TimeInterval) {
+        currentTime = time
+    }
+
     public func setCrossfade(enabled: Bool, duration: TimeInterval?) {}
 
     private func moveToStaged() {

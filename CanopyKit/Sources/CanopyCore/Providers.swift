@@ -37,6 +37,7 @@ public protocol PlaybackEngine: AnyObject {
     func skipToStaged() async throws
     /// Seeks back to the start of the current track.
     func restartCurrent()
+    func seek(to time: TimeInterval)
     /// `duration` nil means the system's default crossfade length.
     func setCrossfade(enabled: Bool, duration: TimeInterval?)
 }

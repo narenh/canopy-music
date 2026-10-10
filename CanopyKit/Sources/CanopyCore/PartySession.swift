@@ -108,6 +108,11 @@ public final class PartySession {
         broadcast()
     }
 
+    public func seek(to time: TimeInterval) {
+        engine.seek(to: max(0, time))
+        broadcast()
+    }
+
     public func skip() async {
         let wasPlaying = engine.isPlaying
         if wasPlaying, stagedItemID != nil, (try? await engine.skipToStaged()) != nil { return }

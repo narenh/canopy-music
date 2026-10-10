@@ -426,25 +426,49 @@ private struct ProgressBar: View {
     let duration: TimeInterval?
     let session: PartySession
 
+    /// Where the finger is while scrubbing (0...1); nil when not dragging.
+    @State private var scrub: Double?
+
     var body: some View {
         TimelineView(.periodic(from: .now, by: 0.5)) { _ in
-            let elapsed = session.engine.currentTime
             let total = max(duration ?? 0, 1)
+            let elapsed = scrub.map { $0 * total } ?? session.engine.currentTime
             VStack(spacing: 6) {
                 GeometryReader { geo in
                     ZStack(alignment: .leading) {
                         Capsule().fill(.white.opacity(0.18))
                         Capsule().fill(.white).frame(width: geo.size.width * min(elapsed / total, 1))
                     }
+                    .frame(height: scrub == nil ? 5 : 10)
+                    .frame(maxHeight: .infinity)
+                    .contentShape(Rectangle())
+                    .gesture(
+                        DragGesture(minimumDistance: 0)
+                            .onChanged { value in
+                                scrub = min(max(value.location.x / max(geo.size.width, 1), 0), 1)
+                            }
+                            .onEnded { _ in
+                                if let scrub { session.seek(to: scrub * total) }
+                                scrub = nil
+                            }
+                    )
                 }
-                .frame(height: 5)
+                .frame(height: 28)
+                .animation(.spring(duration: 0.25), value: scrub == nil)
                 HStack {
                     Text(Self.format(elapsed))
                     Spacer()
                     Text("-" + Self.format(max(total - elapsed, 0)))
                 }
                 .font(.system(size: 13, weight: .medium).monospacedDigit())
-                .foregroundStyle(.white.opacity(0.5))
+                .foregroundStyle(.white.opacity(scrub == nil ? 0.5 : 0.9))
+            }
+            .accessibilityElement()
+            .accessibilityLabel("Playback position")
+            .accessibilityValue("\(Self.format(elapsed)) of \(Self.format(total))")
+            .accessibilityAdjustableAction { direction in
+                let step: TimeInterval = direction == .increment ? 10 : -10
+                session.seek(to: min(max(session.engine.currentTime + step, 0), total))
             }
         }
     }

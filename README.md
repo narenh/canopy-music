@@ -48,3 +48,11 @@ Debug launch arguments (simulator): `-autoParty` starts a demo party and locks; 
 - **End-of-queue detection** (`AppleMusicEngine.poll`) is a heuristic.
 - **Library playlists** load through the Apple Music API (`/v1/me/library/...`), which needs Sync Library on. Uploaded or unmatched songs are skipped.
 - **Local network permission** prompt and `canopymusic.local` registration on iPadOS.
+
+## Easter egg
+
+When "Big Stick" by MUNA plays, a full-screen lyrics takeover appears (press and hold to dismiss). Lyrics load from `CanopyMusic/EasterEgg/big-stick.lrc` if it exists. That file is gitignored so lyrics stay out of this public repo. Without it, the app fetches synced lyrics from [LRCLIB](https://lrclib.net) and caches them on the device. To create or refresh the local file:
+
+```bash
+curl -s "https://lrclib.net/api/get/33573170" | python3 -c 'import sys,json; print(json.load(sys.stdin)["syncedLyrics"])' > CanopyMusic/EasterEgg/big-stick.lrc
+```

@@ -79,6 +79,10 @@ final class AppleMusicEngine: PlaybackEngine {
         player.restartCurrentEntry()
     }
 
+    func seek(to time: TimeInterval) {
+        player.playbackTime = time
+    }
+
     func setCrossfade(enabled: Bool, duration: TimeInterval?) {
         player.transition = enabled ? .crossfade(duration: duration) : .none
     }

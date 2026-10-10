@@ -4,3 +4,6 @@ DerivedData/
 .build/
 .swiftpm/
 *.xcuserstate
+
+# Easter egg lyrics: bundled in the app, kept out of the public repo
+CanopyMusic/EasterEgg/*.lrc

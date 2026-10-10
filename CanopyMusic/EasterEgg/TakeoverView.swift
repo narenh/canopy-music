@@ -27,25 +27,15 @@ struct TakeoverView: View {
                         .id(line.time)
                         .transition(.asymmetric(insertion: .opacity, removal: .scale(scale: 1.15).combined(with: .opacity)))
                 }
-                VStack {
-                    Spacer()
-                    HStack {
-                        Label("Tap anywhere to exit", systemImage: "music.note")
-                            .font(.system(size: 15, weight: .semibold))
-                            .foregroundStyle(.white.opacity(0.6))
-                        Spacer()
-                    }
-                }
-                .padding(28)
             }
             .animation(.spring(duration: 0.35, bounce: 0.4), value: revealed)
             .animation(.easeOut(duration: 0.25), value: line?.time)
         }
         .ignoresSafeArea()
         .contentShape(Rectangle())
-        .onTapGesture(perform: onDismiss)
-        .accessibilityAddTraits(.isButton)
-        .accessibilityLabel("Lyrics. Tap to exit.")
+        .onLongPressGesture(minimumDuration: 0.6, perform: onDismiss)
+        .accessibilityLabel("Lyrics")
+        .accessibilityAction(named: "Close lyrics", onDismiss)
     }
 
     /// The album's background color, darkened just enough for white text to read on it.

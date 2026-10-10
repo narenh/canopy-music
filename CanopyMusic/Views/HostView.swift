@@ -374,7 +374,7 @@ private struct SettingsSheet: View {
                     Text("Music")
                 } footer: {
                     if model.provider == .spotify {
-                        Text("Spotify needs your own free developer app: create one at developer.spotify.com/dashboard with redirect URI canopy-music://spotify-callback and the Web API, then paste its Client ID here. Premium required. Full steps are in the README on GitHub.")
+                        Text("Spotify needs your own free developer app: create one at developer.spotify.com/dashboard with redirect URI `canopy-music://spotify-callback` and the `Web API` box checked, then paste its Client ID here. Premium required. Full steps are in the README on GitHub.")
                     } else {
                         #if DEBUG
                         Text("Switching services keeps a separate queue for each. Demo plays fake songs with no audio.")

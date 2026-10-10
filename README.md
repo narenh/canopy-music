@@ -49,7 +49,7 @@ Spotify only lets each developer app have **5 user accounts** in Development Mod
 
 How it works and what to expect:
 
-- Canopy can't stream Spotify audio itself. It controls a Spotify player (the Spotify app on the iPad, an Apple TV, or another Spotify Connect device) through the Web API. Audio comes out wherever that device plays. For the iPad's Spotify app, pick the AirPlay speaker in Control Center. Multi-room AirPlay doesn't stay in sync with Spotify; one speaker works.
+- Canopy can't stream Spotify audio itself. It controls a Spotify player (the Spotify app on the iPad, an Apple TV, or another Spotify Connect device) through the Web API. Audio comes out wherever that device plays. For the iPad's Spotify app, pick AirPlay speakers in Control Center or with Canopy's AirPlay button. Multi-room AirPlay (several speakers at once) stayed in sync in testing on iPadOS 27, despite older reports that Spotify's AirPlay 2 support drifts.
 - Spotify's queue can only be added to, so Canopy hands Spotify the next song about 20 seconds before the current one ends; it shows as locked from then on.
 - Only playlists you own or collaborate on can be base playlists (Development Mode can't read other playlists). Copy an editorial playlist into your library first.
 - If the Spotify app is paused for a long time, iPadOS may suspend it and the device disappears. Open Spotify again and pick it.

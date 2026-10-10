@@ -123,7 +123,7 @@ private struct SpotifySetupStep: View {
 
             VStack(alignment: .leading, spacing: 12) {
                 step(1, "Create an app at developer.spotify.com/dashboard (log in with your Premium account).")
-                step(2, "Set the redirect URI to canopy-music://spotify-callback and check Web API.")
+                step(2, "Set the redirect URI to `canopy-music://spotify-callback` and check the `Web API` box.")
                 step(3, "Copy the app's Client ID and paste it below.")
                 Link("Full instructions on GitHub", destination: Self.readme)
                     .font(.system(size: 15, weight: .semibold))
@@ -170,7 +170,8 @@ private struct SpotifySetupStep: View {
         .padding(40)
     }
 
-    private func step(_ number: Int, _ text: String) -> some View {
+    /// `text` is Markdown, so `code` spans render monospaced.
+    private func step(_ number: Int, _ text: LocalizedStringKey) -> some View {
         HStack(alignment: .firstTextBaseline, spacing: 14) {
             Text("\(number)")
                 .font(.system(size: 15, weight: .bold))

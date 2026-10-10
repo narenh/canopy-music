@@ -35,12 +35,29 @@ enum AppleMusicError: LocalizedError {
 struct AppleMusicCatalog: MusicCatalog {
     let cache: SongCache
 
+    /// Matches from your library first, then Apple Music, without duplicates.
     func searchSongs(_ term: String) async throws -> [CanopyCore.Track] {
+        async let librarySongs = try? searchLibrarySongs(term)
         var request = MusicCatalogSearchRequest(term: term, types: [Song.self])
         request.limit = 25
-        let songs = Array(try await request.response().songs)
-        await cache.store(songs)
-        return songs.map(CanopyCore.Track.init)
+        let catalogSongs = Array(try await request.response().songs)
+
+        let library = await librarySongs ?? []
+        #if DEBUG
+        print("[search] \"\(term)\": library \(library.count), catalog \(catalogSongs.count)")
+        #endif
+        var seen = Set<MusicItemID>()
+        let unique = (library + catalogSongs).filter { seen.insert($0.id).inserted }
+        await cache.store(unique)
+        return unique.map(CanopyCore.Track.init)
+    }
+
+    /// Library search via the Apple Music API, mapped to catalog songs (https artwork, playable by id).
+    private func searchLibrarySongs(_ term: String) async throws -> [Song] {
+        let encoded = term.replacingOccurrences(of: " ", with: "+")
+            .addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? term
+        let response: LibrarySearchResponse = try await fetch("/v1/me/library/search?term=\(encoded)&types=library-songs&limit=10&include=catalog")
+        return try await catalogSongs(for: response.results.librarySongs?.data ?? [])
     }
 
     func searchPlaylists(_ term: String) async throws -> [PlaylistSummary] {
@@ -106,20 +123,24 @@ struct AppleMusicCatalog: MusicCatalog {
 
     /// Library playlist tracks are library songs; map each to its catalog song.
     private func libraryPlaylistSongs(id: String) async throws -> [Song] {
-        enum Slot { case song(Song), pending(String) }
-        var slots: [Slot] = []
+        var resources: [LibrarySongResource] = []
         var path: String? = "/v1/me/library/playlists/\(id)/tracks?limit=100&include=catalog"
         while let next = path {
             let page: APIPage<LibrarySongResource> = try await fetch(next)
-            for resource in page.data {
-                if let song = resource.relationships?.catalog?.data.first {
-                    slots.append(.song(song))
-                } else if let catalogID = resource.attributes?.playParams?.catalogId {
-                    slots.append(.pending(catalogID))
-                }
-                // Songs with no catalog match (uploads, removed tracks) can't be played here; skip them.
-            }
+            resources += page.data
             path = page.next
+        }
+        return try await catalogSongs(for: resources)
+    }
+
+    /// Maps library songs to their catalog songs, keeping order. Songs with no catalog match
+    /// (uploads, removed tracks) can't be played here and are skipped.
+    private func catalogSongs(for resources: [LibrarySongResource]) async throws -> [Song] {
+        enum Slot { case song(Song), pending(String) }
+        let slots: [Slot] = resources.compactMap { resource in
+            if let song = resource.relationships?.catalog?.data.first { return .song(song) }
+            if let catalogID = resource.attributes?.playParams?.catalogId { return .pending(catalogID) }
+            return nil
         }
 
         let pendingIDs = slots.compactMap { if case .pending(let id) = $0 { id } else { nil } }
@@ -168,6 +189,14 @@ private struct LibraryPlaylistResource: Decodable {
     var attributes: Attributes?
 
     var sortDate: String { attributes?.lastModifiedDate ?? attributes?.dateAdded ?? "" }
+}
+
+private struct LibrarySearchResponse: Decodable {
+    struct Results: Decodable {
+        var librarySongs: APIPage<LibrarySongResource>?
+        enum CodingKeys: String, CodingKey { case librarySongs = "library-songs" }
+    }
+    var results: Results
 }
 
 private struct LibrarySongResource: Decodable {

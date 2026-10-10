@@ -6,8 +6,8 @@ struct UpNextList: View {
     let session: PartySession
     /// Which rows get the edit-mode delete control (−). Defaults to none.
     var canDelete: (QueueItem) -> Bool = { _ in false }
-    /// Which rows get an inline × button instead, which keeps artwork aligned.
-    var canRemoveInline: (QueueItem) -> Bool = { _ in false }
+    /// Which rows get a press-and-hold Remove menu instead (keeps artwork aligned).
+    var canRemoveByMenu: (QueueItem) -> Bool = { _ in false }
     /// Items whose row should stay empty while a flying copy is on its way in.
     var arriving: Set<UUID> = []
     var flashing: Set<UUID> = []
@@ -22,13 +22,10 @@ struct UpNextList: View {
             List {
                 ForEach(items) { item in
                     let locked = item.id == session.state.lockedNextID
-                    UpNextRow(
-                        item: item, locked: locked, hidden: arriving.contains(item.id),
-                        onRemove: canRemoveInline(item) && !locked ? {
+                    UpNextRow(item: item, locked: locked, hidden: arriving.contains(item.id), onArtworkFrame: onArtworkFrame)
+                        .modifier(RemoveMenu(enabled: canRemoveByMenu(item) && !locked) {
                             withAnimation(.spring(duration: 0.4, bounce: 0.1)) { _ = session.remove(item.id) }
-                        } : nil,
-                        onArtworkFrame: onArtworkFrame
-                    )
+                        })
                         .listRowBackground(
                             RoundedRectangle(cornerRadius: 10, style: .continuous)
                                 .fill(flashing.contains(item.id) ? theme.accent.opacity(0.32) : .clear)
@@ -64,7 +61,6 @@ private struct UpNextRow: View {
     let item: QueueItem
     let locked: Bool
     let hidden: Bool
-    let onRemove: (() -> Void)?
     let onArtworkFrame: (UUID, CGRect) -> Void
 
     var body: some View {
@@ -85,17 +81,6 @@ private struct UpNextRow: View {
             if let requester = item.requester {
                 RequesterPill(requester: requester)
             }
-            if let onRemove {
-                Button(action: onRemove) {
-                    Image(systemName: "xmark")
-                        .font(.system(size: 13, weight: .semibold))
-                        .foregroundStyle(.white.opacity(0.55))
-                        .frame(width: 32, height: 32)
-                        .contentShape(Rectangle())
-                }
-                .buttonStyle(.borderless)
-                .accessibilityLabel("Remove \(item.track.title)")
-            }
             if locked {
                 Image(systemName: "lock.fill")
                     .font(.system(size: 13))
@@ -105,5 +90,21 @@ private struct UpNextRow: View {
         }
         .opacity(hidden ? 0 : 1)
         .contentShape(Rectangle())
+    }
+}
+
+/// Press-and-hold menu with a single Remove action, only on rows that allow it.
+private struct RemoveMenu: ViewModifier {
+    let enabled: Bool
+    let remove: () -> Void
+
+    func body(content: Content) -> some View {
+        if enabled {
+            content.contextMenu {
+                Button("Remove from queue", systemImage: "trash", role: .destructive, action: remove)
+            }
+        } else {
+            content
+        }
     }
 }

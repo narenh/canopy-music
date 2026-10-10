@@ -35,6 +35,8 @@ final class AppModel {
     }
     var wifiSSID: String { didSet { defaults.set(wifiSSID, forKey: "wifiSSID") } }
     var wifiPassword: String { didSet { defaults.set(wifiPassword, forKey: "wifiPassword") } }
+    /// The `<name>.local` address guests can type. Set through `setLocalName(_:)`.
+    private(set) var localName: String
     /// Runs the LAN web server guests use to queue from their phones.
     var phoneQueueEnabled: Bool {
         didSet {
@@ -46,7 +48,7 @@ final class AppModel {
     @ObservationIgnored private let defaults = UserDefaults.standard
     @ObservationIgnored private var server: PartyServer?
     @ObservationIgnored private var serverTask: Task<Void, Error>?
-    @ObservationIgnored private let hostname = FriendlyHostname(name: "music")
+    @ObservationIgnored private var hostname = FriendlyHostname(name: "music")
 
     init() {
         #if targetEnvironment(simulator)
@@ -63,6 +65,9 @@ final class AppModel {
         wifiSSID = defaults.string(forKey: "wifiSSID") ?? ""
         wifiPassword = defaults.string(forKey: "wifiPassword") ?? ""
         phoneQueueEnabled = defaults.object(forKey: "phoneQueueEnabled") as? Bool ?? true
+        let savedName = Self.sanitizedLocalName(defaults.string(forKey: "localName") ?? "")
+        localName = savedName
+        hostname = FriendlyHostname(name: savedName)
         applyCrossfade()
 
         URLCache.shared = URLCache(memoryCapacity: 64 << 20, diskCapacity: 512 << 20)
@@ -160,6 +165,30 @@ final class AppModel {
         self.server = server
         serverTask = task
         refreshAddresses()
+    }
+
+    /// Changes the `.local` name and re-announces it.
+    func setLocalName(_ raw: String) {
+        let name = Self.sanitizedLocalName(raw)
+        guard name != localName else { return }
+        localName = name
+        defaults.set(name, forKey: "localName")
+        hostname.unregister()
+        hostname = FriendlyHostname(name: name)
+        refreshAddresses()
+    }
+
+    /// Lowercase letters, digits and hyphens, at most 63 characters; empty means "music".
+    static func sanitizedLocalName(_ raw: String) -> String {
+        let allowed = Set("abcdefghijklmnopqrstuvwxyz0123456789-")
+        var name = raw.lowercased()
+            .replacingOccurrences(of: ".local", with: "")
+            .replacingOccurrences(of: " ", with: "-")
+            .filter { allowed.contains($0) }
+        while name.hasPrefix("-") { name.removeFirst() }
+        while name.hasSuffix("-") { name.removeLast() }
+        name = String(name.prefix(63))
+        return name.isEmpty ? "music" : name
     }
 
     func stopServer() async {

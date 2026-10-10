@@ -218,6 +218,9 @@ private struct SpeakersRow: View {
 private struct SettingsSheet: View {
     @Environment(AppModel.self) private var model
     @Environment(\.dismiss) private var dismiss
+    /// Edited locally and applied on return or when the sheet closes, so the network name isn't
+    /// re-announced on every keystroke.
+    @State private var localNameDraft = ""
 
     var body: some View {
         @Bindable var model = model
@@ -225,8 +228,23 @@ private struct SettingsSheet: View {
             Form {
                 Section {
                     Toggle("Queue from phones", isOn: $model.phoneQueueEnabled)
+                    if model.phoneQueueEnabled {
+                        HStack(spacing: 0) {
+                            Text("Address")
+                            Spacer(minLength: 16)
+                            TextField("music", text: $localNameDraft)
+                                .multilineTextAlignment(.trailing)
+                                .textInputAutocapitalization(.never)
+                                .autocorrectionDisabled()
+                                .keyboardType(.asciiCapable)
+                                .submitLabel(.done)
+                                .onSubmit { model.setLocalName(localNameDraft) }
+                            Text(".local")
+                                .foregroundStyle(.secondary)
+                        }
+                    }
                 } footer: {
-                    Text("Runs a small web page on your Wi-Fi at music.local so guests can search and queue from their phones. Turning it off stops the page and hides the QR code.")
+                    Text("Runs a small local web server at \(model.localName).local so guests can search and queue from their phones. Turning it off stops the server and hides the QR code.")
                 }
                 .listRowBackground(Color.white.opacity(0.08))
                 Section {
@@ -268,6 +286,9 @@ private struct SettingsSheet: View {
                 .listRowBackground(Color.white.opacity(0.08))
             }
             .scrollContentBackground(.hidden)
+            .onAppear { localNameDraft = model.localName }
+            .onDisappear { model.setLocalName(localNameDraft) }
+            .onChange(of: model.localName) { _, name in localNameDraft = name }
             .navigationTitle("Settings")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {

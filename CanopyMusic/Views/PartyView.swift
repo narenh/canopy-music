@@ -132,8 +132,11 @@ struct PartyView: View {
             .padding(.top, 20)
             .padding(.bottom, 8)
 
+            // Songs added on the iPad can be removed here (e.g. added by mistake). Phone requests
+            // can only be removed from the phone that added them.
             UpNextList(
-                session: session, arriving: arriving, flashing: flashing, scrollTarget: $scrollTarget,
+                session: session, canDelete: { $0.requester?.origin == .ipad },
+                arriving: arriving, flashing: flashing, scrollTarget: $scrollTarget,
                 onArtworkFrame: { id, frame in rowFrames[id] = frame }
             )
             .reportFrame { listFrame = $0 }

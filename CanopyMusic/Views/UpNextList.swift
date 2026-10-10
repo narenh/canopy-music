@@ -4,7 +4,8 @@ import SwiftUI
 /// The single reorderable queue. Always in edit mode so the drag handles are visible to guests.
 struct UpNextList: View {
     let session: PartySession
-    var allowsDelete = false
+    /// Which rows show a delete control. Defaults to none.
+    var canDelete: (QueueItem) -> Bool = { _ in false }
     /// Items whose row should stay empty while a flying copy is on its way in.
     var arriving: Set<UUID> = []
     var flashing: Set<UUID> = []
@@ -28,15 +29,15 @@ struct UpNextList: View {
                         .listRowInsets(EdgeInsets(top: 6, leading: 12, bottom: 6, trailing: 12))
                         .listRowSeparatorTint(.white.opacity(0.08))
                         .moveDisabled(locked)
-                        .deleteDisabled(!allowsDelete || locked)
+                        .deleteDisabled(!canDelete(item) || locked)
                         .id(item.id)
                 }
                 .onMove { source, destination in
                     guard let from = source.first, items.indices.contains(from) else { return }
                     session.move(items[from].id, to: destination > from ? destination - 1 : destination)
                 }
-                .onDelete(perform: allowsDelete ? { offsets in
-                    for index in offsets where items.indices.contains(index) { session.remove(items[index].id) }
+                .onDelete(perform: items.contains(where: canDelete) ? { offsets in
+                    for index in offsets where items.indices.contains(index) && canDelete(items[index]) { session.remove(items[index].id) }
                 } : nil)
             }
             .listStyle(.plain)

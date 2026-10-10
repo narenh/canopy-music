@@ -152,7 +152,7 @@ struct HostView: View {
                 }
                 .foregroundStyle(.white)
             } else {
-                UpNextList(session: session, allowsDelete: true, scrollTarget: $scrollTarget)
+                UpNextList(session: session, canDelete: { _ in true }, scrollTarget: $scrollTarget)
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)

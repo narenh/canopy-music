@@ -46,15 +46,13 @@ final class AppleMusicEngine: PlaybackEngine {
         currentEntryID = player.queue.currentEntry?.id
     }
 
+    /// Inserts the new next track right after the current one. It never removes the previously
+    /// staged entry: editing `queue.entries` makes the player rebuild its queue, which causes an
+    /// audible dropout. Stale entries sit behind the new one and are never reached, because a new
+    /// track is always staged first. If the player does land on one, `poll` reports it.
     func stage(_ track: CanopyCore.Track?) async throws {
         log("stage \(track?.title ?? "nil") status=\(player.state.playbackStatus) entries=\(player.queue.entries.count)")
         defer { log("staged; status=\(player.state.playbackStatus) entries=\(player.queue.entries.count)") }
-        // Drop anything after the current entry, then insert the new next track.
-        if !Self.insertOnly, let current = player.queue.currentEntry,
-           let index = player.queue.entries.firstIndex(where: { $0.id == current.id }),
-           index + 1 < player.queue.entries.endIndex {
-            player.queue.entries.removeSubrange((index + 1)...)
-        }
         stagedTrackID = nil
         guard let track else { return }
         let song = try await cache.song(for: track.id)
@@ -88,11 +86,18 @@ final class AppleMusicEngine: PlaybackEngine {
     private func poll() {
         let entry = player.queue.currentEntry
         if entry?.id != currentEntryID {
+            let previous = currentEntryID
             currentEntryID = entry?.id
             if let staged = stagedTrackID, entry?.item?.id.rawValue == staged {
                 stagedTrackID = nil
                 reportedEnd = false
                 onEvent?(.advancedToStaged)
+            } else if previous != nil, entry != nil, !reportedEnd {
+                // Landed on something Canopy didn't stage (a stale entry, or the system's
+                // "previous" command). Hand control back to the queue.
+                log("unexpected entry \(entry?.title ?? "?")")
+                reportedEnd = true
+                onEvent?(.reachedEnd)
             }
         }
 
@@ -114,10 +119,8 @@ final class AppleMusicEngine: PlaybackEngine {
     }
 
     #if DEBUG
-    static let insertOnly = ProcessInfo.processInfo.arguments.contains("-stageInsertOnly")
     private func log(_ message: String) { print("[engine] \(message)") }
     #else
-    static let insertOnly = false
     private func log(_ message: String) {}
     #endif
 

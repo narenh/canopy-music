@@ -64,24 +64,13 @@ struct HostView: View {
             }
 
             Section("Base playlist") {
-                Button {
-                    showPicker = true
-                } label: {
-                    LabeledContent("Playlist") {
-                        Text(session.state.playlistName ?? "Choose…")
-                    }
-                }
-                .disabled(!model.isReady)
                 Toggle("Shuffle", isOn: $model.shuffle)
-                if session.state.current != nil && !session.isPlaying {
-                    Button("Resume party") { Task { await model.resumeRestoredParty() } }
-                }
             }
 
             Section("Playback") {
                 HStack(spacing: 16) {
                     Button {
-                        Task { await session.togglePlayPause() }
+                        Task { session.isPlaying ? session.pause() : await model.play() }
                     } label: {
                         Image(systemName: session.isPlaying ? "pause.fill" : "play.fill")
                             .frame(width: 36, height: 36)
@@ -135,7 +124,7 @@ struct HostView: View {
                 Button {
                     model.lock()
                 } label: {
-                    Label("Lock and start the party", systemImage: "lock.fill")
+                    Label("Lock party screen", systemImage: "lock.fill")
                         .font(.headline)
                         .frame(maxWidth: .infinity)
                 }
@@ -170,6 +159,7 @@ struct HostView: View {
                 }
                 .padding(20)
             }
+            playlistBar
             HStack {
                 Text("Up next").font(.system(size: 22, weight: .bold))
                 Spacer()
@@ -177,16 +167,55 @@ struct HostView: View {
             }
             .foregroundStyle(.white)
             .padding(.horizontal, 20)
-            .padding(.top, session.state.current == nil ? 20 : 0)
+            .padding(.top, 8)
             if session.state.upNext.isEmpty {
-                ContentUnavailableView("Pick a playlist to start", systemImage: "music.note.list", description: Text("Songs from it, plus anything guests add, show up here."))
-                    .foregroundStyle(.white)
+                ContentUnavailableView {
+                    Label("Pick a playlist to start", systemImage: "music.note.list")
+                } description: {
+                    Text("Songs from it, plus anything guests add, show up here.")
+                } actions: {
+                    Button("Choose playlist") { showPicker = true }
+                        .buttonStyle(.glassProminent)
+                        .disabled(!model.isReady)
+                }
+                .foregroundStyle(.white)
             } else {
                 UpNextList(session: session, allowsDelete: true, scrollTarget: $scrollTarget)
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
         .glassEffect(.regular.tint(.black.opacity(0.2)), in: RoundedRectangle(cornerRadius: 32, style: .continuous))
+    }
+}
+
+// MARK: - Playlist bar
+
+private extension HostView {
+    var playlistBar: some View {
+        HStack(spacing: 14) {
+            Image(systemName: "music.note.list")
+                .font(.system(size: 20, weight: .semibold))
+                .foregroundStyle(.white.opacity(0.7))
+            VStack(alignment: .leading, spacing: 2) {
+                Text("Base playlist")
+                    .font(.system(size: 13, weight: .semibold))
+                    .foregroundStyle(.white.opacity(0.6))
+                Text(session.state.playlistName ?? "None yet")
+                    .font(.system(size: 17, weight: .semibold))
+                    .foregroundStyle(.white)
+                    .lineLimit(1)
+            }
+            Spacer()
+            Button(session.state.playlistName == nil ? "Choose playlist" : "Change") { showPicker = true }
+                .buttonStyle(.glass)
+                .disabled(!model.isReady)
+        }
+        .padding(.horizontal, 20)
+        .padding(.vertical, 12)
+        .background(.white.opacity(0.06), in: RoundedRectangle(cornerRadius: 18, style: .continuous))
+        .padding(.horizontal, 12)
+        .padding(.top, session.state.current == nil ? 12 : 0)
+        .padding(.bottom, 8)
     }
 }
 
@@ -209,12 +238,10 @@ struct PlaylistPickerView: View {
     var body: some View {
         NavigationStack {
             List {
-                if source == .catalog {
-                    TextField("Search Apple Music playlists", text: $query)
-                        .textInputAutocapitalization(.never)
-                        .autocorrectionDisabled()
-                }
-                ForEach(source == .library ? library : catalogResults) { playlist in
+                TextField(source == .library ? "Filter your playlists" : "Search Apple Music playlists", text: $query)
+                    .textInputAutocapitalization(.never)
+                    .autocorrectionDisabled()
+                ForEach(source == .library ? filteredLibrary : catalogResults) { playlist in
                     Button {
                         choose(playlist)
                     } label: {
@@ -252,8 +279,14 @@ struct PlaylistPickerView: View {
                 ToolbarItem(placement: .cancellationAction) { Button("Cancel") { dismiss() } }
             }
             .task { await loadLibrary() }
-            .task(id: query) { await searchCatalog() }
+            .task(id: "\(source)-\(query)") { await searchCatalog() }
         }
+    }
+
+    private var filteredLibrary: [PlaylistSummary] {
+        let term = query.trimmingCharacters(in: .whitespaces)
+        guard !term.isEmpty else { return library }
+        return library.filter { $0.name.localizedCaseInsensitiveContains(term) }
     }
 
     private func loadLibrary() async {
@@ -267,6 +300,7 @@ struct PlaylistPickerView: View {
     }
 
     private func searchCatalog() async {
+        guard source == .catalog else { return }
         let term = query.trimmingCharacters(in: .whitespaces)
         guard !term.isEmpty else { catalogResults = []; return }
         try? await Task.sleep(for: .milliseconds(300))
@@ -277,7 +311,7 @@ struct PlaylistPickerView: View {
     private func choose(_ playlist: PlaylistSummary) {
         starting = playlist
         Task {
-            await model.start(playlist)
+            await model.load(playlist)
             starting = nil
             dismiss()
         }

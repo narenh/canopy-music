@@ -31,6 +31,8 @@ public final class PartySession {
     @ObservationIgnored public let engine: any PlaybackEngine
 
     @ObservationIgnored private var stagedItemID: UUID?
+    /// The queue item the engine currently has loaded as its current track.
+    @ObservationIgnored private var loadedItemID: UUID?
     @ObservationIgnored private var isSyncing = false
     @ObservationIgnored private var needsSync = false
     @ObservationIgnored private var listeners: [UUID: AsyncStream<PartySnapshot>.Continuation] = [:]
@@ -58,39 +60,54 @@ public final class PartySession {
 
     // MARK: Host actions
 
-    /// Loads a base playlist. Starts playback if nothing is playing yet.
-    public func start(playlist: PlaylistSummary, shuffle: Bool) async throws {
+    /// Loads a base playlist without starting playback. If nothing is current yet, the first song
+    /// becomes current (ready to play). Whatever is playing keeps playing.
+    public func load(playlist: PlaylistSummary, shuffle: Bool) async throws {
         let tracks = try await catalog.tracks(in: playlist)
         mutate { $0.load(playlist: tracks, name: playlist.name, shuffle: shuffle) }
         if state.current == nil {
             mutate { $0.advance() }
         }
-        if !isPlaying, let current = state.current {
+    }
+
+    /// Plays the current song, loading it into the engine first if needed (e.g. after a relaunch).
+    public func play() async throws {
+        if state.current == nil { mutate { $0.advance() } }
+        guard let current = state.current else { return }
+        if loadedItemID == current.id {
+            try await engine.resume()
+            isPlaying = engine.isPlaying
+            broadcast()
+        } else {
             try await play(current)
         }
     }
 
-    /// Starts playing a restored party from the top of its current song.
-    public func resumeRestoredParty() async throws {
-        if state.current == nil { mutate { $0.advance() } }
-        guard let current = state.current else { return }
-        try await play(current)
-    }
-
-    public func togglePlayPause() async {
-        if engine.isPlaying {
-            engine.pause()
-        } else if state.current != nil {
-            try? await engine.resume()
-        }
+    public func pause() {
+        engine.pause()
         isPlaying = engine.isPlaying
         broadcast()
     }
 
+    public func togglePlayPause() async {
+        if engine.isPlaying {
+            pause()
+        } else {
+            try? await play()
+        }
+    }
+
+    /// "Previous" only ever goes back to the start of the current song.
+    public func restartCurrentSong() {
+        engine.restartCurrent()
+        broadcast()
+    }
+
     public func skip() async {
-        if stagedItemID != nil, (try? await engine.skipToStaged()) != nil { return }
+        let wasPlaying = engine.isPlaying
+        if wasPlaying, stagedItemID != nil, (try? await engine.skipToStaged()) != nil { return }
         mutate { $0.advance() }
-        if let current = state.current { try? await play(current) }
+        if wasPlaying, let current = state.current { try? await play(current) }
     }
 
     public func setCrossfade(_ enabled: Bool) { engine.setCrossfade(enabled) }
@@ -164,6 +181,7 @@ public final class PartySession {
 
     private func play(_ item: QueueItem) async throws {
         stagedItemID = nil
+        loadedItemID = item.id
         try await engine.play(item.track)
         isPlaying = engine.isPlaying
         broadcast()
@@ -176,8 +194,10 @@ public final class PartySession {
             let id = stagedItemID
             stagedItemID = nil
             mutate { $0.advance(to: id) }
+            loadedItemID = state.current?.id
         case .reachedEnd:
             stagedItemID = nil
+            loadedItemID = nil
             mutate { $0.advance() }
             if let current = state.current {
                 Task { try? await play(current) }
@@ -196,7 +216,8 @@ public final class PartySession {
         defer { isSyncing = false }
         while needsSync {
             needsSync = false
-            guard state.current != nil else { continue }
+            // Only stage behind a song the engine actually has loaded.
+            guard let current = state.current, loadedItemID == current.id else { continue }
             let desired: QueueItem?
             if engine.canReplaceStaged {
                 desired = state.upNext.first

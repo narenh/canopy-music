@@ -47,8 +47,10 @@ final class AppleMusicEngine: PlaybackEngine {
     }
 
     func stage(_ track: CanopyCore.Track?) async throws {
+        log("stage \(track?.title ?? "nil") status=\(player.state.playbackStatus) entries=\(player.queue.entries.count)")
+        defer { log("staged; status=\(player.state.playbackStatus) entries=\(player.queue.entries.count)") }
         // Drop anything after the current entry, then insert the new next track.
-        if let current = player.queue.currentEntry,
+        if !Self.insertOnly, let current = player.queue.currentEntry,
            let index = player.queue.entries.firstIndex(where: { $0.id == current.id }),
            index + 1 < player.queue.entries.endIndex {
             player.queue.entries.removeSubrange((index + 1)...)
@@ -75,6 +77,10 @@ final class AppleMusicEngine: PlaybackEngine {
         try await player.skipToNextEntry()
     }
 
+    func restartCurrent() {
+        player.restartCurrentEntry()
+    }
+
     func setCrossfade(_ enabled: Bool) {
         player.transition = enabled ? .crossfade : .none
     }
@@ -93,6 +99,7 @@ final class AppleMusicEngine: PlaybackEngine {
         let status = player.state.playbackStatus
         if status == .playing { sawPlaying = true }
         if status != lastStatus {
+            log("status \(String(describing: lastStatus)) -> \(status) t=\(Int(player.playbackTime))")
             lastStatus = status
             onEvent?(.statusChanged)
         }
@@ -101,9 +108,18 @@ final class AppleMusicEngine: PlaybackEngine {
         if sawPlaying, !reportedEnd, stagedTrackID == nil, !pausedByUs, currentEntryID != nil, status == .stopped || status == .paused,
            let duration = entry?.item.flatMap(Self.duration(of:)), player.playbackTime == 0 || player.playbackTime >= duration - 1.5 {
             reportedEnd = true
+            log("reachedEnd")
             onEvent?(.reachedEnd)
         }
     }
+
+    #if DEBUG
+    static let insertOnly = ProcessInfo.processInfo.arguments.contains("-stageInsertOnly")
+    private func log(_ message: String) { print("[engine] \(message)") }
+    #else
+    static let insertOnly = false
+    private func log(_ message: String) {}
+    #endif
 
     private static func duration(of item: MusicPlayer.Queue.Entry.Item) -> TimeInterval? {
         if case .song(let song) = item { return song.duration }

@@ -128,6 +128,10 @@ public final class DemoPlaybackEngine: PlaybackEngine {
         moveToStaged()
     }
 
+    public func restartCurrent() {
+        currentTime = 0
+    }
+
     public func setCrossfade(_ enabled: Bool) {}
 
     private func moveToStaged() {

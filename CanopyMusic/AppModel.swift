@@ -88,19 +88,19 @@ final class AppModel {
 
     // MARK: Party
 
-    func start(_ playlist: PlaylistSummary) async {
+    func load(_ playlist: PlaylistSummary) async {
         do {
-            try await session.start(playlist: playlist, shuffle: shuffle)
+            try await session.load(playlist: playlist, shuffle: shuffle)
         } catch {
             errorMessage = "Couldn't load “\(playlist.name)”. \(error.localizedDescription)"
         }
     }
 
-    func resumeRestoredParty() async {
+    func play() async {
         do {
-            try await session.resumeRestoredParty()
+            try await session.play()
         } catch {
-            errorMessage = "Couldn't resume. \(error.localizedDescription)"
+            errorMessage = "Couldn't start playback. \(error.localizedDescription)"
         }
     }
 
@@ -149,6 +149,60 @@ final class AppModel {
         guestURL = server.url(host: ip)
         friendlyURL = hostname.register(address: ip) ? server.url(host: hostname.hostname) : nil
     }
+
+    #if DEBUG
+    /// `-diagnoseMusicKit`: walks through each Apple Music step and prints what fails.
+    func diagnoseMusicKit() async {
+        print("[diag] bundle=\(Bundle.main.bundleIdentifier ?? "?") provider=\(provider.rawValue)")
+        print("[diag] auth before=\(MusicAuthorization.currentStatus)")
+        let status = await MusicAuthorization.request()
+        authorization = status
+        print("[diag] auth after=\(status)")
+        do {
+            let sub = try await MusicSubscription.current
+            print("[diag] subscription canPlayCatalog=\(sub.canPlayCatalogContent) cloudLibrary=\(sub.hasCloudLibraryEnabled) canBecomeSubscriber=\(sub.canBecomeSubscriber)")
+        } catch {
+            print("[diag] subscription error: \(String(reflecting: error))")
+        }
+        do {
+            var request = MusicCatalogSearchRequest(term: "daft punk", types: [Song.self])
+            request.limit = 3
+            let response = try await request.response()
+            print("[diag] catalog search ok: \(response.songs.map(\.title))")
+        } catch {
+            print("[diag] catalog search error: \(String(reflecting: error))")
+        }
+        do {
+            let url = URL(string: "https://api.music.apple.com/v1/me/storefront")!
+            let response = try await MusicDataRequest(urlRequest: URLRequest(url: url)).response()
+            print("[diag] storefront ok: \(String(decoding: response.data.prefix(200), as: UTF8.self))")
+        } catch {
+            print("[diag] storefront error: \(String(reflecting: error))")
+        }
+        do {
+            let url = URL(string: "https://api.music.apple.com/v1/me/library/playlists?limit=3")!
+            let data = try await MusicDataRequest(urlRequest: URLRequest(url: url)).response().data
+            let object = try JSONSerialization.jsonObject(with: data) as? [String: Any]
+            for item in (object?["data"] as? [[String: Any]]) ?? [] {
+                let attributes = item["attributes"] as? [String: Any] ?? [:]
+                print("[diag] playlist attrs: \(attributes.filter { !($0.value is [String: Any]) })")
+            }
+        } catch {
+            print("[diag] raw playlists error: \(error)")
+        }
+        do {
+            let playlists = try await session.catalog.libraryPlaylists()
+            print("[diag] library playlists ok: \(playlists.count) \(playlists.prefix(5).map(\.name))")
+            if let first = playlists.first {
+                let tracks = try await session.catalog.tracks(in: first)
+                print("[diag] tracks in \(first.name): \(tracks.count)")
+            }
+        } catch {
+            print("[diag] library playlists error: \(String(reflecting: error))")
+        }
+        print("[diag] done")
+    }
+    #endif
 
     var wifiJoinPayload: String? {
         wifiSSID.isEmpty ? nil : LocalNetwork.wifiJoinPayload(ssid: wifiSSID, password: wifiPassword)

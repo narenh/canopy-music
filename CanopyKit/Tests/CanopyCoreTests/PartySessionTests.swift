@@ -18,6 +18,7 @@ final class FakeEngine: PlaybackEngine {
     func resume() async throws { isPlaying = true }
     func pause() { isPlaying = false }
     func skipToStaged() async throws { finishTrack() }
+    func restartCurrent() { currentTime = 0 }
     func setCrossfade(_ enabled: Bool) {}
 
     func finishTrack() {
@@ -41,10 +42,35 @@ let base = PlaylistSummary(id: "p", name: "Base", kind: .library)
 
 @MainActor
 @Suite struct PartySessionTests {
+    @Test func loadingAPlaylistDoesNotPlay() async throws {
+        let engine = FakeEngine()
+        let session = PartySession(catalog: StubCatalog(ids: ["a", "b", "c"]), engine: engine)
+        try await session.load(playlist: base, shuffle: false)
+        await settle()
+        #expect(session.state.current?.track.id == "a")
+        #expect(engine.playing == nil)
+        #expect(engine.staged == nil)
+    }
+
+    @Test func playAfterRestoreLoadsCurrentSong() async throws {
+        let url = FileManager.default.temporaryDirectory.appendingPathComponent("canopy-\(UUID()).json")
+        defer { try? FileManager.default.removeItem(at: url) }
+        let first = PartySession(catalog: StubCatalog(ids: ["a", "b"]), engine: FakeEngine(), storeURL: url)
+        try await first.load(playlist: base, shuffle: false)
+        try await Task.sleep(for: .milliseconds(800))
+        let engine = FakeEngine()
+        let restored = PartySession(catalog: StubCatalog(ids: []), engine: engine, storeURL: url)
+        try await restored.play()
+        await settle()
+        #expect(engine.playing?.id == "a")
+        #expect(engine.staged?.id == "b")
+    }
+
     @Test func startPlaysAndStagesNext() async throws {
         let engine = FakeEngine()
         let session = PartySession(catalog: StubCatalog(ids: ["a", "b", "c"]), engine: engine)
-        try await session.start(playlist: base, shuffle: false)
+        try await session.load(playlist: base, shuffle: false)
+        try await session.play()
         await settle()
         #expect(engine.playing?.id == "a")
         #expect(engine.staged?.id == "b")
@@ -53,7 +79,8 @@ let base = PlaylistSummary(id: "p", name: "Base", kind: .library)
     @Test func requestReplacesStagedTrack() async throws {
         let engine = FakeEngine()
         let session = PartySession(catalog: StubCatalog(ids: ["a", "b", "c"]), engine: engine)
-        try await session.start(playlist: base, shuffle: false)
+        try await session.load(playlist: base, shuffle: false)
+        try await session.play()
         session.add(track("x"), by: guest)
         await settle()
         #expect(engine.staged?.id == "x")
@@ -66,7 +93,8 @@ let base = PlaylistSummary(id: "p", name: "Base", kind: .library)
     @Test func advancesToWhatWasActuallyStaged() async throws {
         let engine = FakeEngine()
         let session = PartySession(catalog: StubCatalog(ids: ["a", "b", "c"]), engine: engine)
-        try await session.start(playlist: base, shuffle: false)
+        try await session.load(playlist: base, shuffle: false)
+        try await session.play()
         await settle()
         // Player already committed to "b"; a reorder lands before staging catches up.
         let c = session.state.upNext[1].id
@@ -79,7 +107,8 @@ let base = PlaylistSummary(id: "p", name: "Base", kind: .library)
 
     @Test func phonesCanOnlyRemoveTheirOwnRequests() async throws {
         let session = PartySession(catalog: StubCatalog(ids: ["a", "b"]), engine: FakeEngine())
-        try await session.start(playlist: base, shuffle: false)
+        try await session.load(playlist: base, shuffle: false)
+        try await session.play()
         guard case .added(let item, _) = session.add(track("x"), by: guest) else { Issue.record("not added"); return }
         #expect(!session.remove(item.id, asClient: "someone-else"))
         let playlistItem = session.state.upNext.first { !$0.isRequest }!
@@ -90,7 +119,8 @@ let base = PlaylistSummary(id: "p", name: "Base", kind: .library)
     @Test func reachingTheEndRestartsFromQueue() async throws {
         let engine = FakeEngine()
         let session = PartySession(catalog: StubCatalog(ids: ["a", "b"]), engine: engine)
-        try await session.start(playlist: base, shuffle: false)
+        try await session.load(playlist: base, shuffle: false)
+        try await session.play()
         await settle()
         engine.staged = nil // simulate a failed stage
         engine.finishTrack()
@@ -102,7 +132,8 @@ let base = PlaylistSummary(id: "p", name: "Base", kind: .library)
         let url = FileManager.default.temporaryDirectory.appendingPathComponent("canopy-\(UUID()).json")
         defer { try? FileManager.default.removeItem(at: url) }
         let session = PartySession(catalog: StubCatalog(ids: ["a", "b"]), engine: FakeEngine(), storeURL: url)
-        try await session.start(playlist: base, shuffle: false)
+        try await session.load(playlist: base, shuffle: false)
+        try await session.play()
         session.add(track("x"), by: guest)
         try await Task.sleep(for: .milliseconds(800))
         let restored = PartySession(catalog: StubCatalog(ids: []), engine: FakeEngine(), storeURL: url)
@@ -115,7 +146,8 @@ let base = PlaylistSummary(id: "p", name: "Base", kind: .library)
         var iterator = session.snapshots().makeAsyncIterator()
         let first = await iterator.next()
         #expect(first?.current == nil)
-        try await session.start(playlist: base, shuffle: false)
+        try await session.load(playlist: base, shuffle: false)
+        try await session.play()
         let next = await iterator.next()
         #expect(next != nil)
         #expect(next!.version > first!.version)

@@ -21,7 +21,6 @@ struct PartyView: View {
     @State private var toast: String?
     @State private var toastTask: Task<Void, Never>?
     @State private var showUnlock = false
-    @State private var showGuidedAccessHint = false
     /// Debug only: a search result to tap Add on automatically (see `-autoSearch`).
     @State private var autoAddTrackID: String?
 
@@ -42,7 +41,6 @@ struct PartyView: View {
         }
         .background { ThemedBackground(track: current?.track, theme: theme) }
         .overlay { FlightLayer(flights: flights, destinations: rowFrames, fallback: fallbackDestination) }
-        .overlay(alignment: .bottom) { guidedAccessHint }
         .environment(\.artworkTheme, theme)
         .animation(.easeInOut(duration: 1.2), value: theme)
         .preferredColorScheme(.dark)
@@ -51,7 +49,6 @@ struct PartyView: View {
         .task(id: query) { await search() }
         .onChange(of: session.state.upNext.map(\.id)) { old, new in flashPhoneRequests(old: old, new: new) }
         .sheet(isPresented: $showUnlock) { UnlockView() }
-        .task { await showHintIfNeeded() }
         #if DEBUG
         .task { await runAutoSearch() }
         #endif
@@ -270,30 +267,10 @@ struct PartyView: View {
                 .padding(.horizontal, 22)
                 .padding(.vertical, 14)
                 .glassEffect(.regular, in: Capsule())
-                .padding(.bottom, showGuidedAccessHint ? 76 : 28)
+                .padding(.bottom, 28)
                 .transition(.move(edge: .bottom).combined(with: .opacity))
                 .id(toast)
         }
-    }
-
-    @ViewBuilder private var guidedAccessHint: some View {
-        if showGuidedAccessHint {
-            Label("Triple-click the top button to start Guided Access", systemImage: "lock.shield")
-                .font(.system(size: 15, weight: .semibold))
-                .foregroundStyle(.white)
-                .padding(.horizontal, 18)
-                .padding(.vertical, 10)
-                .glassEffect(.regular, in: Capsule())
-                .padding(.bottom, 16)
-                .transition(.move(edge: .bottom).combined(with: .opacity))
-        }
-    }
-
-    private func showHintIfNeeded() async {
-        guard !UIAccessibility.isGuidedAccessEnabled else { return }
-        withAnimation { showGuidedAccessHint = true }
-        try? await Task.sleep(for: .seconds(8))
-        withAnimation { showGuidedAccessHint = false }
     }
 }
 
@@ -305,8 +282,8 @@ struct NowPlayingView: View {
 
     var body: some View {
         GeometryReader { geo in
-            let side = min(geo.size.width * 0.62, geo.size.height * 0.6)
-            VStack(spacing: 28) {
+            let side = min(geo.size.width * 0.6, geo.size.height * 0.5)
+            VStack(spacing: 24) {
                 Spacer(minLength: 0)
                 ArtworkView(track: item?.track, large: true, cornerRadius: 18)
                     .frame(width: side, height: side)
@@ -314,6 +291,10 @@ struct NowPlayingView: View {
                     .id(item?.id)
                     .transition(.asymmetric(insertion: .scale(scale: 0.9).combined(with: .opacity), removal: .opacity))
                 VStack(spacing: 6) {
+                    if item != nil {
+                        NowPlayingLabel(isPlaying: session.isPlaying)
+                            .padding(.bottom, 4)
+                    }
                     Text(item?.track.title ?? "Nothing playing yet")
                         .font(.system(size: 36, weight: .bold))
                     Text(item?.track.artist ?? "Search for a song to get things going")
@@ -330,6 +311,7 @@ struct NowPlayingView: View {
                 if let item {
                     ProgressBar(duration: item.track.duration, session: session)
                         .frame(width: side)
+                    TransportControls(session: session)
                 }
                 Spacer(minLength: 0)
             }
@@ -338,6 +320,89 @@ struct NowPlayingView: View {
         }
         .padding(.horizontal, 32)
         .padding(.bottom, 24)
+    }
+}
+
+private struct TransportControls: View {
+    let session: PartySession
+    @Environment(AppModel.self) private var model
+
+    var body: some View {
+        GlassEffectContainer(spacing: 24) {
+            HStack(spacing: 24) {
+                Button {
+                    session.restartCurrentSong()
+                } label: {
+                    Image(systemName: "backward.fill")
+                        .font(.system(size: 22, weight: .semibold))
+                        .frame(width: 48, height: 48)
+                }
+                .accessibilityLabel("Restart song")
+                Button {
+                    Task { session.isPlaying ? session.pause() : await model.play() }
+                } label: {
+                    Image(systemName: session.isPlaying ? "pause.fill" : "play.fill")
+                        .font(.system(size: 30, weight: .semibold))
+                        .contentTransition(.symbolEffect(.replace))
+                        .frame(width: 64, height: 64)
+                }
+                .accessibilityLabel(session.isPlaying ? "Pause" : "Play")
+                Button {
+                    Task { await session.skip() }
+                } label: {
+                    Image(systemName: "forward.fill")
+                        .font(.system(size: 22, weight: .semibold))
+                        .frame(width: 48, height: 48)
+                }
+                .accessibilityLabel("Skip")
+            }
+            .buttonStyle(.glass)
+            .buttonBorderShape(.circle)
+            .foregroundStyle(.white)
+        }
+    }
+}
+
+/// Animated equalizer bars plus "Now playing" / "Paused", in the artwork accent color.
+private struct NowPlayingLabel: View {
+    let isPlaying: Bool
+    @Environment(\.artworkTheme) private var theme
+
+    var body: some View {
+        HStack(spacing: 8) {
+            EqualizerBars(isAnimating: isPlaying)
+                .frame(width: 18, height: 14)
+            Text(isPlaying ? "Now playing" : "Paused")
+                .font(.system(size: 15, weight: .semibold))
+                .contentTransition(.opacity)
+        }
+        .foregroundStyle(theme.accent)
+        .animation(.easeInOut(duration: 0.25), value: isPlaying)
+    }
+}
+
+/// Four bars bouncing at different rates; they settle low when paused.
+struct EqualizerBars: View {
+    let isAnimating: Bool
+    private let speeds: [Double] = [5.1, 7.3, 4.2, 6.4]
+    private let phases: [Double] = [0, 1.7, 3.1, 0.8]
+
+    var body: some View {
+        TimelineView(.animation(paused: !isAnimating)) { context in
+            let t = context.date.timeIntervalSinceReferenceDate
+            GeometryReader { geo in
+                HStack(alignment: .bottom, spacing: geo.size.width * 0.12) {
+                    ForEach(speeds.indices, id: \.self) { i in
+                        let wave = (sin(t * speeds[i] + phases[i]) + 1) / 2
+                        let level = isAnimating ? 0.25 + 0.75 * wave : 0.25
+                        Capsule()
+                            .frame(height: max(2, geo.size.height * level))
+                    }
+                }
+                .frame(width: geo.size.width, height: geo.size.height, alignment: .bottom)
+            }
+        }
+        .accessibilityHidden(true)
     }
 }
 

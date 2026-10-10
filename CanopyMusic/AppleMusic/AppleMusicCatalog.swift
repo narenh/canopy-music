@@ -56,21 +56,29 @@ struct AppleMusicCatalog: MusicCatalog {
 
     /// Uses the Apple Music API rather than `MusicLibraryRequest` so the ids are cloud library ids,
     /// which can be mapped to catalog songs (and therefore to https artwork phones can load).
+    /// Most recently modified first.
     func libraryPlaylists() async throws -> [PlaylistSummary] {
-        var summaries: [PlaylistSummary] = []
+        var resources: [LibraryPlaylistResource] = []
         var path: String? = "/v1/me/library/playlists?limit=100"
         while let next = path {
             let page: APIPage<LibraryPlaylistResource> = try await fetch(next)
-            summaries += page.data.map { resource in
-                PlaylistSummary(
-                    id: resource.id, name: resource.attributes?.name ?? "Untitled playlist",
-                    subtitle: "Your library",
-                    artworkURL: resource.attributes?.artwork?.url(size: 300), kind: .library
-                )
-            }
+            resources += page.data
             path = page.next
         }
-        return summaries
+        // ISO 8601 UTC timestamps sort correctly as strings.
+        resources.sort { $0.sortDate > $1.sortDate }
+        return resources.map { resource in
+            PlaylistSummary(
+                id: resource.id, name: resource.attributes?.name ?? "Untitled playlist",
+                subtitle: resource.attributes?.lastModifiedDate.flatMap(Self.relativeDate),
+                artworkURL: resource.attributes?.artwork?.url(size: 300), kind: .library
+            )
+        }
+    }
+
+    private static func relativeDate(_ iso: String) -> String? {
+        guard let date = try? Date(iso, strategy: .iso8601) else { return nil }
+        return "Updated " + date.formatted(.relative(presentation: .named))
     }
 
     func tracks(in playlist: PlaylistSummary) async throws -> [CanopyCore.Track] {
@@ -153,9 +161,13 @@ private struct LibraryPlaylistResource: Decodable {
     struct Attributes: Decodable {
         var name: String?
         var artwork: APIArtwork?
+        var lastModifiedDate: String?
+        var dateAdded: String?
     }
     var id: String
     var attributes: Attributes?
+
+    var sortDate: String { attributes?.lastModifiedDate ?? attributes?.dateAdded ?? "" }
 }
 
 private struct LibrarySongResource: Decodable {

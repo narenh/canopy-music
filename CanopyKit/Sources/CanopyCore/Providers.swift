@@ -35,5 +35,7 @@ public protocol PlaybackEngine: AnyObject {
     func pause()
     /// Jumps to the staged item.
     func skipToStaged() async throws
+    /// Seeks back to the start of the current track.
+    func restartCurrent()
     func setCrossfade(_ enabled: Bool)
 }

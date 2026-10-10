@@ -113,7 +113,7 @@ struct PartyView: View {
             Image(systemName: "magnifyingglass")
                 .font(.system(size: 22, weight: .semibold))
                 .foregroundStyle(.white.opacity(0.6))
-            TextField("", text: $query, prompt: Text("Search \(model.provider == .demo ? "demo songs" : model.provider.title) to add a song").foregroundStyle(.white.opacity(0.5)))
+            TextField("", text: $query, prompt: Text("Search \(model.isDemo ? "demo songs" : model.provider.title) to add a song").foregroundStyle(.white.opacity(0.5)))
                 .font(.system(size: 22))
                 .foregroundStyle(.white)
                 .focused($searchFocused)

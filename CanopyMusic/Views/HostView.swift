@@ -376,7 +376,11 @@ private struct SettingsSheet: View {
                     if model.provider == .spotify {
                         Text("Spotify needs your own free developer app: create one at developer.spotify.com/dashboard with redirect URI canopy-music://spotify-callback and the Web API, then paste its Client ID here. Premium required. Full steps are in the README on GitHub.")
                     } else {
+                        #if DEBUG
                         Text("Switching services keeps a separate queue for each. Demo plays fake songs with no audio.")
+                        #else
+                        Text("Switching services keeps a separate queue for each.")
+                        #endif
                     }
                 }
                 .listRowBackground(Color.white.opacity(0.08))
@@ -463,7 +467,7 @@ struct PlaylistPickerView: View {
     private func title(_ source: Source) -> String {
         switch source {
         case .library: "Your playlists"
-        case .catalog: model.provider == .demo ? "Search" : model.provider.title
+        case .catalog: model.isDemo ? "Search" : model.provider.title
         }
     }
 

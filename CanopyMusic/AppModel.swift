@@ -11,13 +11,19 @@ import UIKit
 @Observable
 final class AppModel {
     enum Provider: String, CaseIterable {
-        case appleMusic, spotify, demo
+        case appleMusic, spotify
+        #if DEBUG
+        /// Fake songs, no audio. Debug builds only.
+        case demo
+        #endif
 
         var title: String {
             switch self {
             case .appleMusic: "Apple Music"
             case .spotify: "Spotify"
+            #if DEBUG
             case .demo: "Demo"
+            #endif
             }
         }
 
@@ -26,7 +32,9 @@ final class AppModel {
             switch self {
             case .appleMusic: Color(red: 0.98, green: 0.18, blue: 0.28)
             case .spotify: Color(red: 0.12, green: 0.84, blue: 0.38)
+            #if DEBUG
             case .demo: Color("AccentColor")
+            #endif
             }
         }
     }
@@ -86,7 +94,7 @@ final class AppModel {
     @ObservationIgnored private var hostname = FriendlyHostname(name: "music")
 
     init() {
-        #if targetEnvironment(simulator)
+        #if DEBUG && targetEnvironment(simulator)
         let fallback = Provider.demo
         #else
         let fallback = Provider.appleMusic
@@ -131,14 +139,22 @@ final class AppModel {
             return PartySession(catalog: AppleMusicCatalog(cache: cache), engine: AppleMusicEngine(cache: cache), storeURL: store)
         case .spotify:
             return PartySession(catalog: SpotifyCatalog(api: spotify), engine: SpotifyEngine(api: spotify), storeURL: store)
+        #if DEBUG
         case .demo:
             return PartySession(catalog: DemoCatalog(), engine: DemoPlaybackEngine(), storeURL: store)
+        #endif
         }
     }
 
     // MARK: Provider
 
-    var isDemo: Bool { provider == .demo }
+    var isDemo: Bool {
+        #if DEBUG
+        provider == .demo
+        #else
+        false
+        #endif
+    }
 
     /// First-launch choice; always records it, even if it matches the default.
     func chooseProvider(_ next: Provider) {
@@ -198,7 +214,9 @@ final class AppModel {
         switch provider {
         case .appleMusic: authorization == .authorized
         case .spotify: spotifyAuth.isSignedIn && spotifyDeviceID != nil
+        #if DEBUG
         case .demo: true
+        #endif
         }
     }
 

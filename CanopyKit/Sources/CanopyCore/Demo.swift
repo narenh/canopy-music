@@ -1,3 +1,6 @@
+#if DEBUG
+// Demo provider: debug builds only (simulator, previews, the Mac dev server).
+
 import Foundation
 
 /// Fake catalog for the simulator and previews, where MusicKit playback isn't available.
@@ -164,3 +167,4 @@ public final class DemoPlaybackEngine: PlaybackEngine {
         }
     }
 }
+#endif

@@ -58,6 +58,7 @@ struct OnboardingView: View {
                     }
                 }
             }
+            #if DEBUG
             Button("Just looking? Try the demo") {
                 model.chooseProvider(.demo)
                 model.finishOnboarding()
@@ -65,6 +66,7 @@ struct OnboardingView: View {
             .font(.system(size: 16, weight: .medium))
             .foregroundStyle(.white.opacity(0.6))
             .buttonStyle(.plain)
+            #endif
         }
         .padding(40)
     }

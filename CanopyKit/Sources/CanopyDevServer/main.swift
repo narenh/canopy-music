@@ -2,6 +2,7 @@ import CanopyCore
 import CanopyServer
 import Foundation
 
+#if DEBUG
 // Runs the phone web app against the demo catalog on this Mac, for working on the web UI
 // without an iPad. `swift run CanopyDevServer` then open http://localhost:8080.
 
@@ -18,3 +19,6 @@ let registered = hostname.register(address: ip)
 print("Canopy dev server: \(server.url(host: "localhost")!) · LAN \(server.url(host: ip)!)")
 print(registered ? "Also at \(server.url(host: hostname.hostname)!)" : "mDNS hostname registration failed")
 try await task.value
+#else
+print("CanopyDevServer is a debug-only tool.")
+#endif

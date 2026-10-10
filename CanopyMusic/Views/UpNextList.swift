@@ -4,8 +4,10 @@ import SwiftUI
 /// The single reorderable queue. Always in edit mode so the drag handles are visible to guests.
 struct UpNextList: View {
     let session: PartySession
-    /// Which rows show a delete control. Defaults to none.
+    /// Which rows get the edit-mode delete control (−). Defaults to none.
     var canDelete: (QueueItem) -> Bool = { _ in false }
+    /// Which rows get an inline × button instead, which keeps artwork aligned.
+    var canRemoveInline: (QueueItem) -> Bool = { _ in false }
     /// Items whose row should stay empty while a flying copy is on its way in.
     var arriving: Set<UUID> = []
     var flashing: Set<UUID> = []
@@ -20,7 +22,13 @@ struct UpNextList: View {
             List {
                 ForEach(items) { item in
                     let locked = item.id == session.state.lockedNextID
-                    UpNextRow(item: item, locked: locked, hidden: arriving.contains(item.id), onArtworkFrame: onArtworkFrame)
+                    UpNextRow(
+                        item: item, locked: locked, hidden: arriving.contains(item.id),
+                        onRemove: canRemoveInline(item) && !locked ? {
+                            withAnimation(.spring(duration: 0.4, bounce: 0.1)) { _ = session.remove(item.id) }
+                        } : nil,
+                        onArtworkFrame: onArtworkFrame
+                    )
                         .listRowBackground(
                             RoundedRectangle(cornerRadius: 10, style: .continuous)
                                 .fill(flashing.contains(item.id) ? theme.accent.opacity(0.32) : .clear)
@@ -56,6 +64,7 @@ private struct UpNextRow: View {
     let item: QueueItem
     let locked: Bool
     let hidden: Bool
+    let onRemove: (() -> Void)?
     let onArtworkFrame: (UUID, CGRect) -> Void
 
     var body: some View {
@@ -75,6 +84,17 @@ private struct UpNextRow: View {
             Spacer(minLength: 8)
             if let requester = item.requester {
                 RequesterPill(requester: requester)
+            }
+            if let onRemove {
+                Button(action: onRemove) {
+                    Image(systemName: "xmark")
+                        .font(.system(size: 13, weight: .semibold))
+                        .foregroundStyle(.white.opacity(0.55))
+                        .frame(width: 32, height: 32)
+                        .contentShape(Rectangle())
+                }
+                .buttonStyle(.borderless)
+                .accessibilityLabel("Remove \(item.track.title)")
             }
             if locked {
                 Image(systemName: "lock.fill")

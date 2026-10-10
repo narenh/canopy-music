@@ -13,15 +13,14 @@ struct UpNextList: View {
     var flashing: Set<UUID> = []
     @Binding var scrollTarget: UUID?
     var onArtworkFrame: (UUID, CGRect) -> Void = { _, _ in }
-    /// Shows recently played songs, dimmed, above a divider. The list rests at the divider and
-    /// drifts back to it after a stretch of no scrolling.
+    /// Shows recently played songs, dimmed, above the queue. The list rests on the first
+    /// upcoming song and drifts back to it after a stretch of no scrolling.
     var showsHistory = false
 
     @Environment(\.artworkTheme) private var theme
     @State private var returnTask: Task<Void, Never>?
     @State private var isScrolling = false
     private static let fadeHeight: CGFloat = 48
-    private static let queueStartID = "queue-start"
     private static let historyLimit = 20
     private static let returnDelay: Duration = .seconds(10)
 
@@ -40,15 +39,6 @@ struct UpNextList: View {
                             .listRowSeparatorTint(.white.opacity(0.08))
                             .accessibilityLabel("Played: \(item.track.title) by \(item.track.artist)")
                     }
-                    Capsule()
-                        .fill(.white.opacity(0.22))
-                        .frame(height: 2)
-                        .padding(.vertical, 4)
-                        .listRowBackground(Color.clear)
-                        .listRowSeparator(.hidden)
-                        .listRowInsets(EdgeInsets(top: 4, leading: 12, bottom: 4, trailing: 12))
-                        .id(Self.queueStartID)
-                        .accessibilityHidden(true)
                 }
                 ForEach(items) { item in
                     let locked = item.id == session.state.lockedNextID
@@ -77,7 +67,6 @@ struct UpNextList: View {
             }
             .listStyle(.plain)
             .scrollContentBackground(.hidden)
-            .environment(\.defaultMinListRowHeight, 8)
             // Feather the bottom edge instead of a hard cut; the margin lets the last row scroll clear of it.
             .contentMargins(.bottom, Self.fadeHeight, for: .scrollContent)
             .mask {
@@ -122,11 +111,11 @@ struct UpNextList: View {
     }
 
     private func returnToQueue(_ proxy: ScrollViewProxy, animated: Bool) {
-        guard showsHistory, !session.state.history.isEmpty else { return }
+        guard showsHistory, !session.state.history.isEmpty, let first = session.state.upNext.first?.id else { return }
         if animated {
-            withAnimation(.easeInOut(duration: 0.6)) { proxy.scrollTo(Self.queueStartID, anchor: .top) }
+            withAnimation(.easeInOut(duration: 0.6)) { proxy.scrollTo(first, anchor: .top) }
         } else {
-            proxy.scrollTo(Self.queueStartID, anchor: .top)
+            proxy.scrollTo(first, anchor: .top)
         }
     }
 }

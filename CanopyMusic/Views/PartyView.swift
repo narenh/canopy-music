@@ -451,10 +451,12 @@ private struct ProgressBar: View {
                     .gesture(
                         DragGesture(minimumDistance: 0)
                             .onChanged { value in
+                                scrub = min(max(value.location.x / max(geo.size.width, 1), 0), 1)
+                                // After updating `scrub`: the last change in the update decides
+                                // whether it animates.
                                 if !isScrubbing {
                                     withAnimation(.spring(duration: 0.3, bounce: 0.3)) { isScrubbing = true }
                                 }
-                                scrub = min(max(value.location.x / max(geo.size.width, 1), 0), 1)
                             }
                             .onEnded { _ in
                                 if let scrub { session.seek(to: scrub * total) }

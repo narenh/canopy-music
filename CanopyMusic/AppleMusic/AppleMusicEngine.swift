@@ -19,6 +19,7 @@ final class AppleMusicEngine: PlaybackEngine {
     private var reportedEnd = false
     /// Guards against reading the brief `.stopped` right after `play` as the end of the queue.
     private var sawPlaying = false
+    private var isReplacingQueue = false
     private var lastStatus: MusicPlayer.PlaybackStatus?
     private var poller: Task<Void, Never>?
 
@@ -41,9 +42,15 @@ final class AppleMusicEngine: PlaybackEngine {
         reportedEnd = false
         pausedByUs = false
         sawPlaying = false
+        // `poll` runs while we await below; it must not mistake our own queue swap for the
+        // player landing on an unexpected entry (that fed back into another `play`, forever).
+        isReplacingQueue = true
+        defer {
+            currentEntryID = player.queue.currentEntry?.id
+            isReplacingQueue = false
+        }
         player.queue = ApplicationMusicPlayer.Queue(for: [song])
         try await player.play()
-        currentEntryID = player.queue.currentEntry?.id
     }
 
     /// Inserts the new next track right after the current one. It never removes the previously
@@ -88,6 +95,7 @@ final class AppleMusicEngine: PlaybackEngine {
     }
 
     private func poll() {
+        guard !isReplacingQueue else { return }
         let entry = player.queue.currentEntry
         if entry?.id != currentEntryID {
             let previous = currentEntryID

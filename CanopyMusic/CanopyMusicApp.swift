@@ -118,6 +118,11 @@ struct RootView: View {
             if ProcessInfo.processInfo.arguments.contains("-autoResume") {
                 await model.play()
             }
+            // `-autoPrevious` presses back 2 s after starting, to test going back on a device.
+            if ProcessInfo.processInfo.arguments.contains("-autoPrevious") {
+                try? await Task.sleep(for: .seconds(2))
+                await model.session.previous()
+            }
             // `-autoParty` starts a demo party and locks, for screenshots and UI work in the simulator.
             if ProcessInfo.processInfo.arguments.contains("-autoParty"), model.isDemo {
                 if model.session.state.current == nil, let first = try? await model.session.catalog.libraryPlaylists().first {

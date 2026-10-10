@@ -1,0 +1,39 @@
+import Foundation
+
+/// Search and playlists for one music service.
+public protocol MusicCatalog: Sendable {
+    func searchSongs(_ term: String) async throws -> [Track]
+    func libraryPlaylists() async throws -> [PlaylistSummary]
+    func searchPlaylists(_ term: String) async throws -> [PlaylistSummary]
+    func tracks(in playlist: PlaylistSummary) async throws -> [Track]
+}
+
+public enum PlaybackEvent: Sendable, Equatable {
+    /// The player moved on to the item that was staged.
+    case advancedToStaged
+    /// The player ran out of things to play.
+    case reachedEnd
+    /// Play/pause state changed.
+    case statusChanged
+}
+
+/// Plays one current track plus at most one staged "next" track.
+/// `PartySession` owns the real queue and decides what gets staged.
+@MainActor
+public protocol PlaybackEngine: AnyObject {
+    /// True when a staged track can be swapped out. False means stage late and lock it.
+    var canReplaceStaged: Bool { get }
+    var isPlaying: Bool { get }
+    var currentTime: TimeInterval { get }
+    var onEvent: (@MainActor (PlaybackEvent) -> Void)? { get set }
+
+    /// Replaces everything and starts playing `track` immediately.
+    func play(_ track: Track) async throws
+    /// Sets the single item after the current one. `nil` clears it.
+    func stage(_ track: Track?) async throws
+    func resume() async throws
+    func pause()
+    /// Jumps to the staged item.
+    func skipToStaged() async throws
+    func setCrossfade(_ enabled: Bool)
+}

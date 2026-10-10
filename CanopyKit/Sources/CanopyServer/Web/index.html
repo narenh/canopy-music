@@ -1,0 +1,78 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, user-scalable=no">
+<meta name="theme-color" content="#111111">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<title>Canopy</title>
+<link rel="apple-touch-icon" href="/icon.png">
+<link rel="icon" href="/icon.png">
+<link rel="stylesheet" href="/app.css">
+</head>
+<body>
+<div id="backdrop" aria-hidden="true"><img id="backdrop-img" alt=""></div>
+
+<main id="home">
+  <header class="top">
+    <div class="brand">
+      <img class="brand-logo" src="/logo.png" alt="Canopy">
+      <span class="brand-sub" id="playlist-name"></span>
+    </div>
+    <button class="name-chip" id="name-chip" type="button"></button>
+  </header>
+
+  <button class="search-trigger" id="search-trigger" type="button">
+    <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg>
+    <span>Search Apple Music</span>
+  </button>
+
+  <section class="now" id="now" aria-live="polite">
+    <div class="now-art art" id="now-art"></div>
+    <div class="now-meta">
+      <p class="eyebrow" id="now-status">Now playing</p>
+      <p class="now-title" id="now-title">Nothing yet</p>
+      <p class="now-artist" id="now-artist"></p>
+      <div class="progress"><div class="progress-fill" id="progress"></div></div>
+    </div>
+  </section>
+
+  <div class="list-head">
+    <h2>Up next</h2>
+    <span class="hint">Drag to reorder</span>
+  </div>
+  <ol class="queue" id="queue"></ol>
+  <p class="empty" id="queue-empty" hidden>The queue's empty. Search for something to get it going.</p>
+</main>
+
+<section id="search" class="sheet" hidden>
+  <div class="search-bar">
+    <label class="search-field">
+      <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg>
+      <input id="search-input" type="search" placeholder="Songs or artists" autocomplete="off" autocorrect="off" enterkeyhint="search">
+    </label>
+    <button class="text-btn" id="search-cancel" type="button">Done</button>
+  </div>
+  <ul class="results" id="results"></ul>
+  <p class="empty" id="results-empty" hidden></p>
+</section>
+
+<div id="toast" class="toast" role="status" aria-live="polite"></div>
+<div id="offline" class="offline" hidden>Reconnecting…</div>
+
+<div id="name-modal" class="modal" hidden>
+  <form class="modal-card" id="name-form">
+    <h2>What should we call you?</h2>
+    <p>Your name shows next to the songs you add.</p>
+    <input id="name-input" maxlength="24" placeholder="Alex" autocomplete="given-name" enterkeyhint="done">
+    <div class="modal-actions">
+      <button type="button" class="text-btn" id="name-skip">Skip</button>
+      <button type="submit" class="primary-btn">Join</button>
+    </div>
+  </form>
+</div>
+
+<script src="/app.js"></script>
+</body>
+</html>

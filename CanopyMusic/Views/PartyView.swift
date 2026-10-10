@@ -287,7 +287,7 @@ struct NowPlayingView: View {
     var body: some View {
         GeometryReader { geo in
             // Artwork takes whatever height is left after the title, progress and controls.
-            let reserved: CGFloat = item == nil ? 110 : 262
+            let reserved: CGFloat = item == nil ? 110 : 284
             let side = max(200, min(geo.size.width * 0.85, geo.size.height - reserved))
             VStack(spacing: 20) {
                 Spacer(minLength: 0)
@@ -325,14 +325,17 @@ struct NowPlayingView: View {
                         .frame(width: side)
                     TransportControls(session: session)
                 }
-                Spacer(minLength: 0)
             }
             .frame(maxWidth: .infinity)
             .animation(.spring(duration: 0.6, bounce: 0.15), value: item?.id)
         }
         .padding(.horizontal, 32)
-        .padding(.bottom, 24)
+        // Bottom-aligned so the controls line up with the Up next panel's bottom edge
+        // (the right pane's 24 pt vertical padding).
+        .padding(.bottom, Self.bottomInset)
     }
+
+    static let bottomInset: CGFloat = 24
 }
 
 private struct TransportControls: View {

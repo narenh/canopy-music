@@ -113,7 +113,7 @@ struct HostView: View {
                             LabeledContent("Also at", value: GuestQRCard.display(url))
                         }
                     } else {
-                        Text("Connect the iPad to Wi-Fi so guests can queue from their phones.")
+                        Text("Connect the iPad to Wi\u{2011}Fi so guests can queue from their phones.")
                             .foregroundStyle(.secondary)
                     }
                 }
@@ -329,7 +329,7 @@ private struct SettingsSheet: View {
                         .autocorrectionDisabled()
                     SecureField("Password", text: $model.wifiPassword)
                 } header: {
-                    Text("Guest Wi-Fi")
+                    Text("Guest Wi\u{2011}Fi")
                 } footer: {
                     Text("Shows a second QR code on the party screen that joins this network. Leave the name empty to hide it.")
                 }

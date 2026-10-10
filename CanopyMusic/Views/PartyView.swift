@@ -570,13 +570,13 @@ struct GuestQRCard: View {
                         QRCodeView(payload: wifi, inverted: true)
                             .frame(width: 64, height: 64)
                             .opacity(0.75)
-                        Text("Join Wi-Fi")
+                        Text("Join Wi\u{2011}Fi")
                             .font(.system(size: 11, weight: .semibold))
                             .foregroundStyle(.white.opacity(0.5))
                     }
                 }
             } else {
-                Label("Phone queueing is off. Connect the iPad to Wi-Fi.", systemImage: "wifi.slash")
+                Label("Phone queueing is off. Connect the iPad to Wi\u{2011}Fi.", systemImage: "wifi.slash")
                     .font(.system(size: 15))
                     .foregroundStyle(.white.opacity(0.6))
             }

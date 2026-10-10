@@ -130,7 +130,6 @@ struct HostView: View {
             HStack {
                 Text("Up next").font(.system(size: 22, weight: .bold))
                 Spacer()
-                Text("Tap − to remove").font(.footnote).foregroundStyle(.white.opacity(0.45))
                 if session.state.upNext.contains(where: \.isRequest) {
                     Button("Clear requests", role: .destructive) { session.clearRequests() }
                         .buttonStyle(.glass)
@@ -140,6 +139,7 @@ struct HostView: View {
             .foregroundStyle(.white)
             .padding(.horizontal, 20)
             .padding(.top, 8)
+            .padding(.bottom, 6)
             if session.state.upNext.isEmpty {
                 ContentUnavailableView {
                     Label("Pick a playlist to start", systemImage: "music.note.list")

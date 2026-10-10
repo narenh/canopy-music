@@ -170,6 +170,8 @@ final class AppModel {
 
     func finishOnboarding() {
         needsOnboarding = false
+        // The phone page (and its local network prompt) waits until setup is done.
+        Task { await startServerIfNeeded() }
     }
 
     func setProvider(_ next: Provider) {
@@ -274,7 +276,7 @@ final class AppModel {
     // MARK: Phone server
 
     func startServerIfNeeded() async {
-        guard phoneQueueEnabled else { return }
+        guard phoneQueueEnabled, !needsOnboarding else { return }
         if server != nil {
             refreshAddresses()
             return
@@ -284,7 +286,7 @@ final class AppModel {
 
     func restartServer() async {
         await stopServer()
-        guard phoneQueueEnabled else { return }
+        guard phoneQueueEnabled, !needsOnboarding else { return }
         guard let (server, task) = await PartyServer.start(session: session) else {
             guestURL = nil
             friendlyURL = nil

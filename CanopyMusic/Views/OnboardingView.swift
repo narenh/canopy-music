@@ -4,31 +4,47 @@ import SwiftUI
 /// host's own Client ID and sign-in.
 struct OnboardingView: View {
     @Environment(AppModel.self) private var model
-    @State private var showSpotifySetup = false
+
+    private enum Step { case chooser, spotify, network }
+    @State private var step: Step = .chooser
+    /// Where Back on the network step returns to.
+    @State private var networkBack: Step = .chooser
 
     var body: some View {
         ZStack {
             LinearGradient(colors: [Color(white: 0.11), Color(white: 0.04)], startPoint: .top, endPoint: .bottom)
                 .ignoresSafeArea()
-            if showSpotifySetup {
+            switch step {
+            case .chooser:
+                chooser
+                    .transition(.move(edge: .leading).combined(with: .opacity))
+            case .spotify:
                 SpotifySetupStep(
-                    back: { withAnimation(.spring(duration: 0.4)) { showSpotifySetup = false } },
+                    back: { go(.chooser) },
                     done: {
                         model.chooseProvider(.spotify)
-                        model.finishOnboarding()
+                        networkBack = .spotify
+                        go(.network)
                     }
                 )
                 .transition(.move(edge: .trailing).combined(with: .opacity))
-            } else {
-                chooser
-                    .transition(.move(edge: .leading).combined(with: .opacity))
+            case .network:
+                NetworkStep(back: { go(networkBack) })
+                    .transition(.move(edge: .trailing).combined(with: .opacity))
             }
         }
         .preferredColorScheme(.dark)
         .foregroundStyle(.white)
         #if DEBUG
-        .onAppear { if ProcessInfo.processInfo.arguments.contains("-onboardingSpotify") { showSpotifySetup = true } }
+        .onAppear {
+            if ProcessInfo.processInfo.arguments.contains("-onboardingSpotify") { step = .spotify }
+            if ProcessInfo.processInfo.arguments.contains("-onboardingNetwork") { step = .network }
+        }
         #endif
+    }
+
+    private func go(_ next: Step) {
+        withAnimation(.spring(duration: 0.4)) { step = next }
     }
 
     private var chooser: some View {
@@ -51,7 +67,8 @@ struct OnboardingView: View {
                         model.chooseProvider(.appleMusic)
                         Task {
                             await model.requestAuthorization()
-                            model.finishOnboarding()
+                            networkBack = .chooser
+                            go(.network)
                         }
                     }
                     ServiceCard(
@@ -60,7 +77,7 @@ struct OnboardingView: View {
                         detail: "Controls Spotify on this iPad or an Apple TV. Needs Premium and a free developer app."
                     ) {
                         // Spotify is only chosen once sign-in succeeds in the next step.
-                        withAnimation(.spring(duration: 0.4)) { showSpotifySetup = true }
+                        go(.spotify)
                     }
                 }
             }
@@ -182,5 +199,54 @@ struct SpotifySetupStep: View {
                 .font(.system(size: 17))
                 .foregroundStyle(.white.opacity(0.8))
         }
+    }
+}
+
+/// Explains phone queueing before iPadOS asks for local network access. Continue finishes setup,
+/// which starts the phone page and triggers the system prompt; Not now turns queueing off.
+private struct NetworkStep: View {
+    @Environment(AppModel.self) private var model
+    let back: () -> Void
+
+    var body: some View {
+        VStack(spacing: 28) {
+            Image(systemName: "network")
+                .font(.system(size: 56, weight: .medium))
+                .foregroundStyle(.white.opacity(0.85))
+            Text("Let guests queue from their phones")
+                .font(.system(size: 36, weight: .bold))
+            Text("Canopy Music runs a small local web server so guests on your Wi\u{2011}Fi can queue songs. They don't need an app or a music subscription.")
+                .font(.system(size: 19))
+                .foregroundStyle(.white.opacity(0.7))
+                .multilineTextAlignment(.center)
+                .frame(maxWidth: 560)
+
+            HStack(spacing: 16) {
+                Button("Back", action: back)
+                    .buttonStyle(.glass)
+                    .controlSize(.large)
+                Button {
+                    model.phoneQueueEnabled = true
+                    model.finishOnboarding()
+                } label: {
+                    Text("Continue").bold()
+                }
+                .buttonStyle(.glassProminent)
+                .controlSize(.large)
+            }
+
+            Button("Not now") {
+                model.phoneQueueEnabled = false
+                model.finishOnboarding()
+            }
+            .font(.system(size: 16, weight: .medium))
+            .foregroundStyle(.white.opacity(0.6))
+            .buttonStyle(.plain)
+
+            Text("You can change this anytime in Settings.")
+                .font(.system(size: 13))
+                .foregroundStyle(.white.opacity(0.4))
+        }
+        .padding(40)
     }
 }

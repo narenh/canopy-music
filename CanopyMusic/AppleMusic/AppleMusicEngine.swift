@@ -11,7 +11,18 @@ final class AppleMusicEngine: PlaybackEngine {
     let canReplaceStaged = true
     var onEvent: (@MainActor (PlaybackEvent) -> Void)?
 
-    private let player = ApplicationMusicPlayer.shared
+    /// Created on first use: touching `ApplicationMusicPlayer` can trigger the Apple Music
+    /// permission prompt, which shouldn't appear before someone has chosen Apple Music.
+    private var _player: ApplicationMusicPlayer?
+    private var player: ApplicationMusicPlayer {
+        if let _player { return _player }
+        let player = ApplicationMusicPlayer.shared
+        player.transition = transition
+        _player = player
+        startPolling()
+        return player
+    }
+    private var transition: MusicPlayer.Transition = .none
     private let cache: SongCache
     private var stagedTrackID: String?
     private var currentEntryID: String?
@@ -32,6 +43,10 @@ final class AppleMusicEngine: PlaybackEngine {
 
     init(cache: SongCache) {
         self.cache = cache
+    }
+
+    private func startPolling() {
+        guard poller == nil else { return }
         poller = Task { [weak self] in
             while !Task.isCancelled {
                 try? await Task.sleep(for: .milliseconds(400))
@@ -111,7 +126,8 @@ final class AppleMusicEngine: PlaybackEngine {
     }
 
     func setCrossfade(enabled: Bool, duration: TimeInterval?) {
-        player.transition = enabled ? .crossfade(duration: duration) : .none
+        transition = enabled ? .crossfade(duration: duration) : .none
+        _player?.transition = transition
     }
 
     private func poll() {

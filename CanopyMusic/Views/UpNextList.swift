@@ -16,6 +16,8 @@ struct UpNextList: View {
     /// Shows recently played songs, dimmed, above the queue. The list rests on the first
     /// upcoming song and drifts back to it after `Idle.timeout` without scrolling.
     var showsHistory = false
+    /// Changing this scrolls back to the first upcoming song.
+    var homeSignal = 0
 
     @Environment(\.artworkTheme) private var theme
     @State private var returnTask: Task<Void, Never>?
@@ -91,6 +93,11 @@ struct UpNextList: View {
                 }
             }
             .onAppear { returnToQueue(proxy, animated: false) }
+            .onChange(of: homeSignal) {
+                returnTask?.cancel()
+                returnTask = nil
+                scrollHome(proxy)
+            }
             .onChange(of: played.last?.id) {
                 // A song finished: re-anchor unless someone is browsing.
                 if !isScrolling, returnTask == nil { returnToQueue(proxy, animated: true) }
@@ -107,6 +114,11 @@ struct UpNextList: View {
             returnToQueue(proxy, animated: true)
             returnTask = nil
         }
+    }
+
+    private func scrollHome(_ proxy: ScrollViewProxy) {
+        guard let first = session.state.upNext.first?.id else { return }
+        withAnimation(.easeInOut(duration: 0.6)) { proxy.scrollTo(first, anchor: .top) }
     }
 
     private func returnToQueue(_ proxy: ScrollViewProxy, animated: Bool) {

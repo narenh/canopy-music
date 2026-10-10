@@ -11,6 +11,11 @@ struct PartyView: View {
     @State private var searchMessage: String?
     @FocusState private var searchFocused: Bool
     @State private var searchIdleTask: Task<Void, Never>?
+    @State private var listHomeSignal = 0
+    /// Height of the on-screen keyboard. With a hardware keyboard iPadOS still reports a short
+    /// shortcut bar, which doesn't squeeze the layout.
+    @State private var keyboardHeight: CGFloat = 0
+    private var softwareKeyboardShown: Bool { keyboardHeight > 150 }
 
     @State private var flights: [Flight] = []
     @State private var arriving: Set<UUID> = []
@@ -50,6 +55,17 @@ struct PartyView: View {
         .task(id: query) { await search() }
         .onChange(of: query) { noteSearchActivity() }
         .onChange(of: searchFocused) { noteSearchActivity() }
+        .onChange(of: searchActive) { _, active in
+            if !active { listHomeSignal += 1 }
+        }
+        .onReceive(NotificationCenter.default.publisher(for: UIResponder.keyboardWillChangeFrameNotification)) { note in
+            guard let frame = note.userInfo?[UIResponder.keyboardFrameEndUserInfoKey] as? CGRect,
+                  let screen = (UIApplication.shared.connectedScenes.first as? UIWindowScene)?.screen else { return }
+            keyboardHeight = max(0, screen.bounds.maxY - frame.minY)
+        }
+        .onReceive(NotificationCenter.default.publisher(for: UIResponder.keyboardWillHideNotification)) { _ in
+            keyboardHeight = 0
+        }
         .onChange(of: session.state.upNext.map(\.id)) { old, new in flashPhoneRequests(old: old, new: new) }
         .sheet(isPresented: $showUnlock) { UnlockView() }
         #if DEBUG
@@ -138,13 +154,19 @@ struct PartyView: View {
                 session: session, canRemoveByMenu: { $0.requester?.origin == .ipad },
                 arriving: arriving, flashing: flashing, scrollTarget: $scrollTarget,
                 onArtworkFrame: { id, frame in rowFrames[id] = frame },
-                showsHistory: true
+                showsHistory: true,
+                homeSignal: listHomeSignal
             )
             .reportFrame { listFrame = $0 }
 
-            GuestQRCard()
-                .padding(16)
+            // The on-screen keyboard squeezes this pane; give the space to the queue instead.
+            if !softwareKeyboardShown {
+                GuestQRCard()
+                    .padding(16)
+                    .transition(.opacity.combined(with: .move(edge: .bottom)))
+            }
         }
+        .animation(.spring(duration: 0.4, bounce: 0.1), value: softwareKeyboardShown)
         .glassEffect(.regular.tint(.black.opacity(0.2)), in: RoundedRectangle(cornerRadius: 32, style: .continuous))
     }
 

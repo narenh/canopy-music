@@ -81,15 +81,15 @@ final class LyricsEasterEgg {
     #if DEBUG
     /// Placeholder timings for simulator previews (no real lyrics).
     static let placeholderLRC = """
-    [00:00.50] This is the takeover
-    [00:03.50] Big chunky words punch in
-    [00:06.50] One at a time
-    [00:09.00]
-    [00:11.00] Tap anywhere to get out
-    [00:14.00] And the party carries on
-    [00:18.00] Louder now
-    [00:21.00] Every word lands on the beat
-    [00:25.00] Okay that's enough
+    [00:03.00] This is the takeover
+    [00:06.00] Big chunky words punch in
+    [00:09.00] One at a time
+    [00:11.50]
+    [00:13.00] Press and hold to get out
+    [00:16.00] And the party carries on
+    [00:19.00] Every word lands on the beat
+    [00:22.00] Okay that's enough
+    [00:26.00]
     """
     #endif
 }

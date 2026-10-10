@@ -11,8 +11,11 @@ struct TakeoverView: View {
 
     var body: some View {
         let flood = Color(rgb: Self.floodColor(for: track))
+        let window = Self.lyricWindow(lines)
         TimelineView(.animation) { context in
             let time = session.engine.currentTime
+            // Only on screen while lyrics are being sung, not during the intro or outro.
+            let active = window.contains(time)
             let (line, progress) = currentLine(at: time)
             let words = line?.text.split(separator: " ").map(String.init) ?? []
             // Finish revealing a bit before the next line so the full line gets a moment on screen.
@@ -30,12 +33,25 @@ struct TakeoverView: View {
             }
             .animation(.spring(duration: 0.35, bounce: 0.4), value: revealed)
             .animation(.easeOut(duration: 0.25), value: line?.time)
+            .opacity(active ? 1 : 0)
+            .animation(.easeInOut(duration: 0.6), value: active)
+            .contentShape(Rectangle())
+            .onLongPressGesture(minimumDuration: 0.6, perform: onDismiss)
+            .allowsHitTesting(active)
+            .accessibilityHidden(!active)
+            .accessibilityLabel("Lyrics")
+            .accessibilityAction(named: "Close lyrics", onDismiss)
         }
         .ignoresSafeArea()
-        .contentShape(Rectangle())
-        .onLongPressGesture(minimumDuration: 0.6, perform: onDismiss)
-        .accessibilityLabel("Lyrics")
-        .accessibilityAction(named: "Close lyrics", onDismiss)
+    }
+
+    /// From just before the first sung line to the end of the last one (the next timestamp, often
+    /// an empty line marking the outro).
+    static func lyricWindow(_ lines: [LyricsEasterEgg.Line]) -> Range<TimeInterval> {
+        guard let first = lines.firstIndex(where: { !$0.text.isEmpty }),
+              let last = lines.lastIndex(where: { !$0.text.isEmpty }) else { return 0..<0 }
+        let end = last + 1 < lines.count ? lines[last + 1].time : lines[last].time + 4
+        return (lines[first].time - 0.4)..<end
     }
 
     /// The album's background color, darkened just enough for white text to read on it.

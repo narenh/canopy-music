@@ -429,7 +429,18 @@ struct PlaylistPickerView: View {
     @Environment(AppModel.self) private var model
     @Environment(\.dismiss) private var dismiss
 
-    enum Source: String, CaseIterable { case library = "Your playlists", catalog = "Apple Music" }
+    enum Source: CaseIterable { case library, catalog }
+
+    /// Spotify's Development Mode can't read songs from playlists you don't own, so searching
+    /// its catalog for playlists isn't offered.
+    private var offersCatalogSearch: Bool { model.provider != .spotify }
+
+    private func title(_ source: Source) -> String {
+        switch source {
+        case .library: "Your playlists"
+        case .catalog: model.provider == .demo ? "Search" : model.provider.title
+        }
+    }
 
     @State private var source: Source = .library
     @State private var library: [PlaylistSummary] = []
@@ -442,7 +453,7 @@ struct PlaylistPickerView: View {
     var body: some View {
         NavigationStack {
             List {
-                TextField(source == .library ? "Filter your playlists" : "Search Apple Music playlists", text: $query)
+                TextField(source == .library ? "Filter your playlists" : "Search \(title(.catalog)) playlists", text: $query)
                     .textInputAutocapitalization(.never)
                     .autocorrectionDisabled()
                 ForEach(source == .library ? filteredLibrary : catalogResults) { playlist in
@@ -474,11 +485,15 @@ struct PlaylistPickerView: View {
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .principal) {
-                    Picker("Source", selection: $source) {
-                        ForEach(Source.allCases, id: \.self) { Text($0.rawValue) }
+                    if offersCatalogSearch {
+                        Picker("Source", selection: $source) {
+                            ForEach(Source.allCases, id: \.self) { Text(title($0)) }
+                        }
+                        .pickerStyle(.segmented)
+                        .frame(width: 320)
+                    } else {
+                        Text("Your playlists").font(.headline)
                     }
-                    .pickerStyle(.segmented)
-                    .frame(width: 320)
                 }
                 ToolbarItem(placement: .cancellationAction) { Button("Cancel") { dismiss() } }
             }

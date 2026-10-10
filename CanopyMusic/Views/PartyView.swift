@@ -113,7 +113,7 @@ struct PartyView: View {
             Image(systemName: "magnifyingglass")
                 .font(.system(size: 22, weight: .semibold))
                 .foregroundStyle(.white.opacity(0.6))
-            TextField("", text: $query, prompt: Text("Search Apple Music to add a song").foregroundStyle(.white.opacity(0.5)))
+            TextField("", text: $query, prompt: Text("Search \(model.provider == .demo ? "demo songs" : model.provider.title) to add a song").foregroundStyle(.white.opacity(0.5)))
                 .font(.system(size: 22))
                 .foregroundStyle(.white)
                 .focused($searchFocused)
@@ -428,6 +428,7 @@ private struct TransportControls: View {
                 }
                 .buttonStyle(.glass)
                 .buttonBorderShape(.circle)
+                if model.provider != .spotify {
                 Button {
                     model.crossfade.toggle()
                 } label: {
@@ -445,6 +446,7 @@ private struct TransportControls: View {
                 .glassEffect(.regular.interactive(), in: Circle())
                 .accessibilityLabel("Crossfade")
                 .accessibilityValue(model.crossfade ? "On" : "Off")
+                }
             }
             .foregroundStyle(.white)
         }

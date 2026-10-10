@@ -65,7 +65,9 @@ struct HostView: View {
 
             Form {
                 Section("Music") {
-                    if model.isDemo {
+                    if model.provider == .spotify {
+                        SpotifyStatusRows()
+                    } else if model.isDemo {
                         Label("Demo mode: fake songs, no audio", systemImage: "theatermasks")
                     } else if model.authorization == .authorized {
                         Label("Apple Music connected", systemImage: "checkmark.circle.fill")
@@ -82,7 +84,9 @@ struct HostView: View {
                                 .foregroundStyle(.secondary)
                         }
                     }
-                    Toggle("Crossfade", isOn: $model.crossfade)
+                    if model.provider != .spotify {
+                        Toggle("Crossfade", isOn: $model.crossfade)
+                    }
                 }
                 .listRowBackground(Color.white.opacity(0.08))
 
@@ -213,6 +217,65 @@ private struct SpeakersRow: View {
     }
 }
 
+// MARK: - Spotify
+
+/// Sign-in and Spotify Connect device choice for the host Music section.
+private struct SpotifyStatusRows: View {
+    @Environment(AppModel.self) private var model
+    @State private var devices: [SpotifyDevice] = []
+    @State private var loading = false
+
+    var body: some View {
+        if !model.spotifyAuth.isSignedIn {
+            Button {
+                Task { await model.signInToSpotify() }
+            } label: {
+                Label("Sign in to Spotify", systemImage: "person.crop.circle.badge.plus")
+            }
+        } else {
+            Menu {
+                ForEach(devices.filter { $0.id != nil }) { device in
+                    Button {
+                        model.spotifyDeviceID = device.id
+                        model.spotifyDeviceName = device.name
+                    } label: {
+                        Label(device.name, systemImage: device.id == model.spotifyDeviceID ? "checkmark" : Self.icon(for: device.type))
+                    }
+                }
+                Divider()
+                Button("Refresh devices", systemImage: "arrow.clockwise") { Task { await reload() } }
+            } label: {
+                LabeledContent {
+                    Text(model.spotifyDeviceName ?? "Choose…")
+                } label: {
+                    Label("Spotify device", systemImage: "hifispeaker")
+                }
+            }
+            .task { await reload() }
+            if devices.isEmpty, !loading {
+                Text("No devices. Open Spotify on this iPad (or an Apple TV), then refresh.")
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
+            }
+        }
+    }
+
+    private func reload() async {
+        loading = true
+        devices = await model.spotifyDevices()
+        loading = false
+    }
+
+    static func icon(for type: String) -> String {
+        switch type.lowercased() {
+        case "tablet", "smartphone": "ipad"
+        case "tv": "appletv"
+        case "computer": "laptopcomputer"
+        default: "hifispeaker"
+        }
+    }
+}
+
 // MARK: - Settings sheet
 
 private struct SettingsSheet: View {
@@ -279,9 +342,23 @@ private struct SettingsSheet: View {
                 }
                 .listRowBackground(Color.white.opacity(0.08))
                 Section {
-                    Toggle("Demo mode", isOn: Binding(get: { model.isDemo }, set: { model.setDemoMode($0) }))
+                    Picker("Music service", selection: Binding(get: { model.provider }, set: { model.setProvider($0) })) {
+                        ForEach(AppModel.Provider.allCases, id: \.self) { Text($0.title).tag($0) }
+                    }
+                    if model.provider == .spotify {
+                        LabeledContent("Spotify requests", value: "\(model.spotifyAPI.requestCount) (\(Int(model.spotifyAPI.requestsPerMinute.rounded()))/min)")
+                        if model.spotifyAPI.rateLimitedCount > 0 {
+                            LabeledContent("Rate limited", value: "\(model.spotifyAPI.rateLimitedCount)×")
+                                .foregroundStyle(.orange)
+                        }
+                        if model.spotifyAuth.isSignedIn {
+                            Button("Sign out of Spotify", role: .destructive) { model.spotifyAuth.signOut() }
+                        }
+                    }
+                } header: {
+                    Text("Music")
                 } footer: {
-                    Text("Fake songs and no audio, for trying things out without Apple Music.")
+                    Text("Switching services keeps a separate queue for each. Demo plays fake songs with no audio.")
                 }
                 .listRowBackground(Color.white.opacity(0.08))
             }

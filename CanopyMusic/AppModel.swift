@@ -9,7 +9,27 @@ import UIKit
 @MainActor
 @Observable
 final class AppModel {
-    enum Provider: String { case appleMusic, demo }
+    enum Provider: String, CaseIterable {
+        case appleMusic, spotify, demo
+
+        var title: String {
+            switch self {
+            case .appleMusic: "Apple Music"
+            case .spotify: "Spotify"
+            case .demo: "Demo"
+            }
+        }
+    }
+
+    let spotifyAuth: SpotifyAuth
+    let spotifyAPI: SpotifyAPI
+    /// The Spotify Connect device to play on, by id (the iPad's Spotify app, an Apple TV…).
+    var spotifyDeviceID: String? {
+        didSet { UserDefaults.standard.set(spotifyDeviceID, forKey: SpotifyEngine.deviceDefaultsKey) }
+    }
+    var spotifyDeviceName: String? {
+        didSet { UserDefaults.standard.set(spotifyDeviceName, forKey: "spotifyDeviceName") }
+    }
 
     private(set) var provider: Provider
     private(set) var session: PartySession
@@ -58,7 +78,13 @@ final class AppModel {
         #endif
         let provider = Provider(rawValue: defaults.string(forKey: "provider") ?? "") ?? fallback
         self.provider = provider
-        self.session = Self.makeSession(provider)
+        let spotifyAuth = SpotifyAuth()
+        let spotifyAPI = SpotifyAPI(auth: spotifyAuth)
+        self.spotifyAuth = spotifyAuth
+        self.spotifyAPI = spotifyAPI
+        self.spotifyDeviceID = UserDefaults.standard.string(forKey: SpotifyEngine.deviceDefaultsKey)
+        self.spotifyDeviceName = UserDefaults.standard.string(forKey: "spotifyDeviceName")
+        self.session = Self.makeSession(provider, spotify: spotifyAPI)
         hostPIN = defaults.string(forKey: "hostPIN") ?? ""
         crossfade = defaults.bool(forKey: "crossfade")
         crossfadeSeconds = defaults.double(forKey: "crossfadeSeconds")
@@ -76,13 +102,15 @@ final class AppModel {
         try? AVAudioSession.sharedInstance().setCategory(.playback, mode: .default, policy: .longFormAudio)
     }
 
-    private static func makeSession(_ provider: Provider) -> PartySession {
+    private static func makeSession(_ provider: Provider, spotify: SpotifyAPI) -> PartySession {
         let store = URL.applicationSupportDirectory.appending(path: "party-\(provider.rawValue).json")
         try? FileManager.default.createDirectory(at: .applicationSupportDirectory, withIntermediateDirectories: true)
         switch provider {
         case .appleMusic:
             let cache = SongCache()
             return PartySession(catalog: AppleMusicCatalog(cache: cache), engine: AppleMusicEngine(cache: cache), storeURL: store)
+        case .spotify:
+            return PartySession(catalog: SpotifyCatalog(api: spotify), engine: SpotifyEngine(api: spotify), storeURL: store)
         case .demo:
             return PartySession(catalog: DemoCatalog(), engine: DemoPlaybackEngine(), storeURL: store)
         }
@@ -92,22 +120,46 @@ final class AppModel {
 
     var isDemo: Bool { provider == .demo }
 
-    func setDemoMode(_ demo: Bool) {
-        let next: Provider = demo ? .demo : .appleMusic
+    func setProvider(_ next: Provider) {
         guard next != provider else { return }
         session.engine.pause()
         provider = next
         defaults.set(next.rawValue, forKey: "provider")
-        session = Self.makeSession(next)
+        session = Self.makeSession(next, spotify: spotifyAPI)
         applyCrossfade()
         Task { await restartServer() }
+    }
+
+    func signInToSpotify() async {
+        do {
+            try await spotifyAuth.signIn()
+        } catch SpotifyError.signInCancelled {
+        } catch {
+            errorMessage = error.localizedDescription
+        }
+    }
+
+    func spotifyDevices() async -> [SpotifyDevice] {
+        struct Reply: Decodable { var devices: [SpotifyDevice] }
+        do {
+            return try await spotifyAPI.get("/me/player/devices", as: Reply.self)?.devices ?? []
+        } catch {
+            errorMessage = error.localizedDescription
+            return []
+        }
     }
 
     private func applyCrossfade() {
         session.setCrossfade(enabled: crossfade, duration: crossfadeSeconds > 0 ? crossfadeSeconds : nil)
     }
 
-    var isReady: Bool { isDemo || authorization == .authorized }
+    var isReady: Bool {
+        switch provider {
+        case .appleMusic: authorization == .authorized
+        case .spotify: spotifyAuth.isSignedIn && spotifyDeviceID != nil
+        case .demo: true
+        }
+    }
 
     func requestAuthorization() async {
         authorization = await MusicAuthorization.request()

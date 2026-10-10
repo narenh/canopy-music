@@ -35,11 +35,18 @@ final class AppModel {
     }
     var wifiSSID: String { didSet { defaults.set(wifiSSID, forKey: "wifiSSID") } }
     var wifiPassword: String { didSet { defaults.set(wifiPassword, forKey: "wifiPassword") } }
+    /// Runs the LAN web server guests use to queue from their phones.
+    var phoneQueueEnabled: Bool {
+        didSet {
+            defaults.set(phoneQueueEnabled, forKey: "phoneQueueEnabled")
+            Task { phoneQueueEnabled ? await restartServer() : await stopServer() }
+        }
+    }
 
     @ObservationIgnored private let defaults = UserDefaults.standard
     @ObservationIgnored private var server: PartyServer?
     @ObservationIgnored private var serverTask: Task<Void, Error>?
-    @ObservationIgnored private let hostname = FriendlyHostname(name: "canopymusic")
+    @ObservationIgnored private let hostname = FriendlyHostname(name: "music")
 
     init() {
         #if targetEnvironment(simulator)
@@ -55,6 +62,7 @@ final class AppModel {
         crossfadeSeconds = defaults.double(forKey: "crossfadeSeconds")
         wifiSSID = defaults.string(forKey: "wifiSSID") ?? ""
         wifiPassword = defaults.string(forKey: "wifiPassword") ?? ""
+        phoneQueueEnabled = defaults.object(forKey: "phoneQueueEnabled") as? Bool ?? true
         applyCrossfade()
 
         URLCache.shared = URLCache(memoryCapacity: 64 << 20, diskCapacity: 512 << 20)
@@ -133,6 +141,7 @@ final class AppModel {
     // MARK: Phone server
 
     func startServerIfNeeded() async {
+        guard phoneQueueEnabled else { return }
         if server != nil {
             refreshAddresses()
             return
@@ -141,9 +150,8 @@ final class AppModel {
     }
 
     func restartServer() async {
-        serverTask?.cancel()
-        await server?.stop()
-        server = nil
+        await stopServer()
+        guard phoneQueueEnabled else { return }
         guard let (server, task) = await PartyServer.start(session: session) else {
             guestURL = nil
             friendlyURL = nil
@@ -152,6 +160,16 @@ final class AppModel {
         self.server = server
         serverTask = task
         refreshAddresses()
+    }
+
+    func stopServer() async {
+        serverTask?.cancel()
+        serverTask = nil
+        await server?.stop()
+        server = nil
+        hostname.unregister()
+        guestURL = nil
+        friendlyURL = nil
     }
 
     func refreshAddresses() {

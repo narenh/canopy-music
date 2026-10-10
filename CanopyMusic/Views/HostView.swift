@@ -26,7 +26,14 @@ struct HostView: View {
         .environment(\.artworkTheme, theme)
         .preferredColorScheme(.dark)
         .sheet(isPresented: $showPicker) { PlaylistPickerView() }
-        .sheet(isPresented: $showSettings) { SettingsSheet() }
+        .sheet(isPresented: $showSettings) {
+            SettingsSheet()
+                .presentationBackground(.ultraThinMaterial)
+                .preferredColorScheme(.dark)
+        }
+        #if DEBUG
+        .onAppear { if ProcessInfo.processInfo.arguments.contains("-showSettings") { showSettings = true } }
+        #endif
         .alert("Something went wrong", isPresented: Binding(get: { model.errorMessage != nil }, set: { if !$0 { model.errorMessage = nil } })) {
             Button("OK", role: .cancel) {}
         } message: {
@@ -85,7 +92,10 @@ struct HostView: View {
                 .listRowBackground(Color.white.opacity(0.08))
 
                 Section("Guests") {
-                    if let url = model.guestURL {
+                    if !model.phoneQueueEnabled {
+                        Text("Queueing from phones is off. Turn it on in Settings.")
+                            .foregroundStyle(.secondary)
+                    } else if let url = model.guestURL {
                         LabeledContent("Phone link", value: GuestQRCard.display(model.friendlyURL ?? url))
                         if model.friendlyURL != nil {
                             LabeledContent("Also at", value: GuestQRCard.display(url))
@@ -214,6 +224,12 @@ private struct SettingsSheet: View {
         NavigationStack {
             Form {
                 Section {
+                    Toggle("Queue from phones", isOn: $model.phoneQueueEnabled)
+                } footer: {
+                    Text("Runs a small web page on your Wi-Fi at music.local so guests can search and queue from their phones. Turning it off stops the page and hides the QR code.")
+                }
+                .listRowBackground(Color.white.opacity(0.08))
+                Section {
                     TextField("Network name", text: $model.wifiSSID)
                         .textInputAutocapitalization(.never)
                         .autocorrectionDisabled()
@@ -223,6 +239,7 @@ private struct SettingsSheet: View {
                 } footer: {
                     Text("Shows a second QR code on the party screen that joins this network. Leave the name empty to hide it.")
                 }
+                .listRowBackground(Color.white.opacity(0.08))
                 Section {
                     SecureField("Unlock PIN (optional)", text: $model.hostPIN)
                         .keyboardType(.numberPad)
@@ -231,6 +248,7 @@ private struct SettingsSheet: View {
                 } footer: {
                     Text("Asked for when you press and hold the Canopy logo on the party screen.")
                 }
+                .listRowBackground(Color.white.opacity(0.08))
                 Section {
                     Picker("Crossfade length", selection: $model.crossfadeSeconds) {
                         Text("Automatic").tag(0.0)
@@ -241,12 +259,15 @@ private struct SettingsSheet: View {
                 } footer: {
                     Text("Used when crossfade is on. Apple Music's AutoMix isn't available to other apps.")
                 }
+                .listRowBackground(Color.white.opacity(0.08))
                 Section {
                     Toggle("Demo mode", isOn: Binding(get: { model.isDemo }, set: { model.setDemoMode($0) }))
                 } footer: {
                     Text("Fake songs and no audio, for trying things out without Apple Music.")
                 }
+                .listRowBackground(Color.white.opacity(0.08))
             }
+            .scrollContentBackground(.hidden)
             .navigationTitle("Settings")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {

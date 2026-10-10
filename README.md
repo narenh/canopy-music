@@ -17,7 +17,7 @@ The simulator can't play Apple Music, so it runs in **Demo mode** (fake songs, 3
 The iPad serves a web app on your Wi-Fi. The QR code always uses the iPad's IP address. The app also tries to:
 
 - listen on port 80 so the URL has no `:port` (falls back to 8080)
-- announce `canopymusic.local` over Bonjour
+- announce `music.local` over Bonjour (turn phone queueing off in Settings to stop the server)
 
 Both work from the simulator on this Mac. **Not yet verified on a real iPad.** If the friendly name doesn't show in host mode, it fell back to the IP. Some Android phones don't resolve `.local` names; the QR code covers them.
 
@@ -47,7 +47,7 @@ Debug launch arguments (simulator): `-autoParty` starts a demo party and locks; 
 - **Swapping the staged next song.** The engine keeps one song staged after the current one and replaces it when the queue changes (`AppleMusicEngine.stage`). It compiles against the SDK, but I couldn't test playback in the simulator. If replacing causes glitches, set `canReplaceStaged = false` and `PartySession` switches to staging 20 s before the end and showing the next song as locked.
 - **End-of-queue detection** (`AppleMusicEngine.poll`) is a heuristic.
 - **Library playlists** load through the Apple Music API (`/v1/me/library/...`), which needs Sync Library on. Uploaded or unmatched songs are skipped.
-- **Local network permission** prompt and `canopymusic.local` registration on iPadOS.
+- **Local network permission** prompt and `music.local` registration on iPadOS.
 
 ## Easter egg
 

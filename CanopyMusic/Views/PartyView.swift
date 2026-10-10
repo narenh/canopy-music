@@ -160,7 +160,7 @@ struct PartyView: View {
             .reportFrame { listFrame = $0 }
 
             // The on-screen keyboard squeezes this pane; give the space to the queue instead.
-            if !softwareKeyboardShown {
+            if model.phoneQueueEnabled, !softwareKeyboardShown {
                 GuestQRCard()
                     .padding(16)
                     .transition(.opacity.combined(with: .move(edge: .bottom)))

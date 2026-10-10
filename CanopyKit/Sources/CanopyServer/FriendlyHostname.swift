@@ -10,7 +10,7 @@ public final class FriendlyHostname: @unchecked Sendable {
     private var record: DNSRecordRef?
     private let queue = DispatchQueue(label: "canopy.mdns")
 
-    /// `name` without the `.local` suffix, e.g. "canopymusic".
+    /// `name` without the `.local` suffix, e.g. "music".
     public init(name: String) {
         hostname = "\(name).local"
     }

@@ -12,7 +12,7 @@ session.add(DemoCatalog.track(9), by: Requester(name: "Jamie", clientID: "demo-j
 session.add(DemoCatalog.track(16), by: Requester(name: nil, clientID: nil, origin: .ipad))
 
 guard let (server, task) = await PartyServer.start(session: session) else { fatalError("No port available") }
-let hostname = FriendlyHostname(name: "canopymusic")
+let hostname = FriendlyHostname(name: "music-dev")
 let ip = LocalNetwork.lanAddress() ?? "127.0.0.1"
 let registered = hostname.register(address: ip)
 print("Canopy dev server: \(server.url(host: "localhost")!) · LAN \(server.url(host: ip)!)")

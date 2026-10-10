@@ -15,6 +15,7 @@ struct UpNextList: View {
     var onArtworkFrame: (UUID, CGRect) -> Void = { _, _ in }
 
     @Environment(\.artworkTheme) private var theme
+    private static let fadeHeight: CGFloat = 48
 
     var body: some View {
         let items = session.state.upNext
@@ -47,6 +48,15 @@ struct UpNextList: View {
             }
             .listStyle(.plain)
             .scrollContentBackground(.hidden)
+            // Feather the bottom edge instead of a hard cut; the margin lets the last row scroll clear of it.
+            .contentMargins(.bottom, Self.fadeHeight, for: .scrollContent)
+            .mask {
+                VStack(spacing: 0) {
+                    Color.black
+                    LinearGradient(colors: [.black, .clear], startPoint: .top, endPoint: .bottom)
+                        .frame(height: Self.fadeHeight)
+                }
+            }
             .environment(\.editMode, .constant(.active))
             .animation(.spring(duration: 0.45, bounce: 0.12), value: items.map(\.id))
             .onChange(of: scrollTarget) { _, target in

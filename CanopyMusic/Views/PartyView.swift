@@ -285,7 +285,7 @@ struct NowPlayingView: View {
 
     var body: some View {
         GeometryReader { geo in
-            let side = min(geo.size.width * 0.6, geo.size.height * 0.5)
+            let side = min(geo.size.width * 0.6, geo.size.height * 0.46)
             VStack(spacing: 24) {
                 Spacer(minLength: 0)
                 ArtworkView(track: item?.track, large: true, cornerRadius: 18)
@@ -303,11 +303,14 @@ struct NowPlayingView: View {
                         Text(item?.track.title ?? "Nothing playing yet")
                             .font(.system(size: 36, weight: .bold))
                     }
-                    Text(item?.track.artist ?? "Search for a song to get things going")
-                        .font(.system(size: 22, weight: .medium))
-                        .foregroundStyle(.white.opacity(0.65))
-                    if let requester = item?.requester {
-                        RequesterPill(requester: requester).padding(.top, 6)
+                    // The requester badge shares the artist line so it never adds height.
+                    HStack(spacing: 10) {
+                        Text(item?.track.artist ?? "Search for a song to get things going")
+                            .font(.system(size: 22, weight: .medium))
+                            .foregroundStyle(.white.opacity(0.65))
+                        if let requester = item?.requester {
+                            RequesterPill(requester: requester)
+                        }
                     }
                 }
                 .foregroundStyle(.white)
@@ -428,6 +431,8 @@ private struct ProgressBar: View {
 
     /// Where the finger is while scrubbing (0...1); nil when not dragging.
     @State private var scrub: Double?
+    /// Drives the bar thickening, animated separately from the per-frame scrub position.
+    @State private var isScrubbing = false
 
     var body: some View {
         TimelineView(.periodic(from: .now, by: 0.5)) { _ in
@@ -439,29 +444,32 @@ private struct ProgressBar: View {
                         Capsule().fill(.white.opacity(0.18))
                         Capsule().fill(.white).frame(width: geo.size.width * min(elapsed / total, 1))
                     }
-                    .frame(height: scrub == nil ? 5 : 10)
+                    .frame(height: isScrubbing ? 12 : 5)
                     .frame(maxHeight: .infinity)
                     .contentShape(Rectangle())
                     .gesture(
                         DragGesture(minimumDistance: 0)
                             .onChanged { value in
+                                if !isScrubbing {
+                                    withAnimation(.spring(duration: 0.3, bounce: 0.3)) { isScrubbing = true }
+                                }
                                 scrub = min(max(value.location.x / max(geo.size.width, 1), 0), 1)
                             }
                             .onEnded { _ in
                                 if let scrub { session.seek(to: scrub * total) }
                                 scrub = nil
+                                withAnimation(.spring(duration: 0.35, bounce: 0.2)) { isScrubbing = false }
                             }
                     )
                 }
                 .frame(height: 28)
-                .animation(.spring(duration: 0.25), value: scrub == nil)
                 HStack {
                     Text(Self.format(elapsed))
                     Spacer()
                     Text("-" + Self.format(max(total - elapsed, 0)))
                 }
                 .font(.system(size: 13, weight: .medium).monospacedDigit())
-                .foregroundStyle(.white.opacity(scrub == nil ? 0.5 : 0.9))
+                .foregroundStyle(.white.opacity(isScrubbing ? 0.9 : 0.5))
             }
             .accessibilityElement()
             .accessibilityLabel("Playback position")

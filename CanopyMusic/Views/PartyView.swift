@@ -286,8 +286,10 @@ struct NowPlayingView: View {
 
     var body: some View {
         GeometryReader { geo in
-            let side = min(geo.size.width * 0.6, geo.size.height * 0.46)
-            VStack(spacing: 24) {
+            // Artwork takes whatever height is left after the title, progress and controls.
+            let reserved: CGFloat = item == nil ? 110 : 262
+            let side = max(200, min(geo.size.width * 0.85, geo.size.height - reserved))
+            VStack(spacing: 20) {
                 Spacer(minLength: 0)
                 ArtworkView(track: item?.track, large: true, cornerRadius: 18)
                     .frame(width: side, height: side)
@@ -339,9 +341,14 @@ private struct TransportControls: View {
 
     var body: some View {
         @Bindable var model = model
-        VStack(spacing: 16) {
-            GlassEffectContainer(spacing: 24) {
-                HStack(spacing: 24) {
+        GlassEffectContainer(spacing: 20) {
+            HStack(spacing: 20) {
+                // Open AirPlay picker: AirPlay sessions sometimes drop and need re-picking.
+                RoutePicker(tint: .white)
+                    .frame(width: 44, height: 44)
+                    .glassEffect(.regular.interactive(), in: Circle())
+                    .accessibilityLabel("Choose speakers")
+                Group {
                     Button {
                         Task { await session.previous() }
                     } label: {
@@ -370,14 +377,6 @@ private struct TransportControls: View {
                 }
                 .buttonStyle(.glass)
                 .buttonBorderShape(.circle)
-                .foregroundStyle(.white)
-            }
-            HStack(spacing: 20) {
-                // Open AirPlay picker: AirPlay sessions sometimes drop and need re-picking.
-                RoutePicker(tint: .white)
-                    .frame(width: 40, height: 40)
-                    .glassEffect(.regular.interactive(), in: Circle())
-                    .accessibilityLabel("Choose speakers")
                 Button {
                     model.crossfade.toggle()
                 } label: {
@@ -388,15 +387,15 @@ private struct TransportControls: View {
                             .frame(width: 4, height: 4)
                             .opacity(model.crossfade ? 1 : 0)
                     }
-                    .frame(width: 40, height: 40)
+                    .frame(width: 44, height: 44)
                     .offset(y: 2)
                 }
                 .buttonStyle(.plain)
-                .foregroundStyle(.white)
                 .glassEffect(.regular.interactive(), in: Circle())
                 .accessibilityLabel("Crossfade")
                 .accessibilityValue(model.crossfade ? "On" : "Off")
             }
+            .foregroundStyle(.white)
         }
     }
 }

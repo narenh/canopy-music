@@ -58,6 +58,11 @@ final class AppModel {
     private(set) var session: PartySession
     private(set) var isLocked = false
     private(set) var authorization: MusicAuthorization.Status = MusicAuthorization.currentStatus
+    /// Apple Music playback needs a subscription; search works without one. Kept current by
+    /// `MusicSubscription.subscriptionUpdates` once authorized.
+    private(set) var canPlayAppleMusic = true
+    private(set) var canBecomeAppleMusicSubscriber = false
+    @ObservationIgnored private var subscriptionTask: Task<Void, Never>?
     private(set) var guestURL: URL?
     private(set) var friendlyURL: URL?
     var errorMessage: String?
@@ -123,6 +128,7 @@ final class AppModel {
         localName = savedName
         hostname = FriendlyHostname(name: savedName)
         applyCrossfade()
+        watchAppleMusicSubscription()
 
         URLCache.shared = URLCache(memoryCapacity: 64 << 20, diskCapacity: 512 << 20)
 
@@ -212,7 +218,7 @@ final class AppModel {
 
     var isReady: Bool {
         switch provider {
-        case .appleMusic: authorization == .authorized
+        case .appleMusic: authorization == .authorized && canPlayAppleMusic
         case .spotify: spotifyAuth.isSignedIn && spotifyDeviceID != nil
         #if DEBUG
         case .demo: true
@@ -222,6 +228,17 @@ final class AppModel {
 
     func requestAuthorization() async {
         authorization = await MusicAuthorization.request()
+        watchAppleMusicSubscription()
+    }
+
+    func watchAppleMusicSubscription() {
+        guard authorization == .authorized, subscriptionTask == nil else { return }
+        subscriptionTask = Task { [weak self] in
+            for await subscription in MusicSubscription.subscriptionUpdates {
+                self?.canPlayAppleMusic = subscription.canPlayCatalogContent
+                self?.canBecomeAppleMusicSubscriber = subscription.canBecomeSubscriber
+            }
+        }
     }
 
     // MARK: Party

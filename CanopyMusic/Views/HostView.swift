@@ -8,6 +8,7 @@ struct HostView: View {
     @Environment(AppModel.self) private var model
     @State private var showPicker = false
     @State private var showSettings = false
+    @State private var showSubscriptionOffer = false
     @State private var scrollTarget: UUID?
 
     private var session: PartySession { model.session }
@@ -26,6 +27,7 @@ struct HostView: View {
         .environment(\.artworkTheme, theme)
         .preferredColorScheme(.dark)
         .sheet(isPresented: $showPicker) { PlaylistPickerView() }
+        .musicSubscriptionOffer(isPresented: $showSubscriptionOffer)
         .sheet(isPresented: $showSettings) {
             SettingsSheet()
                 .presentationBackground(.ultraThinMaterial)
@@ -69,6 +71,12 @@ struct HostView: View {
                         SpotifyStatusRows()
                     } else if model.isDemo {
                         Label("Demo mode: fake songs, no audio", systemImage: "theatermasks")
+                    } else if model.authorization == .authorized, !model.canPlayAppleMusic {
+                        Label("An Apple Music subscription is needed to play songs", systemImage: "exclamationmark.triangle.fill")
+                            .foregroundStyle(.orange)
+                        if model.canBecomeAppleMusicSubscriber {
+                            Button("See Apple Music offer") { showSubscriptionOffer = true }
+                        }
                     } else if model.authorization == .authorized {
                         Label("Apple Music connected", systemImage: "checkmark.circle.fill")
                             .foregroundStyle(.green)
@@ -125,7 +133,7 @@ struct HostView: View {
                     .buttonStyle(.glassProminent)
                     .controlSize(.large)
                     .listRowBackground(Color.clear)
-                    .disabled(session.state.current == nil && session.state.upNext.isEmpty)
+                    .disabled(!model.isReady || (session.state.current == nil && session.state.upNext.isEmpty))
                 } footer: {
                     Text("To unlock later, press and hold the Canopy logo. Turn on Guided Access (triple-click the top button) so guests can't leave the app.")
                 }

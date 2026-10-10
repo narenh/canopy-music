@@ -40,6 +40,9 @@ final class SpotifyAPI {
             requestCount += 1
             let (data, response) = try await URLSession.shared.data(for: request)
             let status = (response as? HTTPURLResponse)?.statusCode ?? 0
+            #if DEBUG
+            print("[spotify] \(method) \(components.path)\(components.query.map { "?" + $0 } ?? "") -> \(status) \(String(decoding: data.prefix(160), as: UTF8.self).replacingOccurrences(of: "\n", with: " "))")
+            #endif
             switch status {
             case 200..<300:
                 return status == 204 || data.isEmpty ? nil : data
@@ -109,8 +112,23 @@ struct SpotifyDevice: Decodable, Identifiable, Hashable, Sendable {
 
 struct SpotifyPlayerState: Decodable, Sendable {
     struct Device: Decodable, Sendable { var id: String? }
+    /// Only what the engine needs, so podcast episodes, ads or local files still decode.
+    struct Item: Decodable, Sendable {
+        var uri: String
+        var name: String?
+        var duration_ms: Int?
+    }
     var is_playing: Bool
     var progress_ms: Int?
-    var item: SpotifyTrackObject?
+    var item: Item?
     var device: Device?
+
+    init(from decoder: any Decoder) throws {
+        enum Keys: String, CodingKey { case is_playing, progress_ms, item, device }
+        let container = try decoder.container(keyedBy: Keys.self)
+        is_playing = (try? container.decode(Bool.self, forKey: .is_playing)) ?? false
+        progress_ms = try? container.decodeIfPresent(Int.self, forKey: .progress_ms)
+        item = try? container.decodeIfPresent(Item.self, forKey: .item)
+        device = try? container.decodeIfPresent(Device.self, forKey: .device)
+    }
 }

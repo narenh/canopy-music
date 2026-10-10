@@ -20,6 +20,9 @@ final class SpotifyEngine: PlaybackEngine {
     private var poller: Task<Void, Never>?
     /// Skip polling while a command we sent is still settling on Spotify's side.
     private var settleUntil = Date.distantPast
+    /// When we last asked Spotify to play a specific track, and whether we've retried it.
+    private var playRequestedAt = Date.distantPast
+    private var retriedPlay = false
 
     private var cachedPlaying = false
     private var cachedTime: TimeInterval = 0
@@ -64,6 +67,8 @@ final class SpotifyEngine: PlaybackEngine {
             try await api.send("PUT", "/me/player/play", query: deviceQuery, body: Body(uris: [track.id]))
         }
         currentURI = track.id
+        playRequestedAt = Date()
+        retriedPlay = false
         cache(playing: true, time: 0)
     }
 
@@ -111,10 +116,27 @@ final class SpotifyEngine: PlaybackEngine {
         try await Task.sleep(for: .milliseconds(600))
     }
 
+    private func log(_ message: @autoclosure () -> String) {
+        #if DEBUG
+        print("[spotify-engine] \(message())")
+        #endif
+    }
+
     private func poll() async {
         guard api.auth.isSignedIn, currentURI != nil, Date() > settleUntil else { return }
-        guard let state = try? await api.get("/me/player", as: SpotifyPlayerState.self) else { return }
+        let state: SpotifyPlayerState
+        do {
+            guard let fetched = try await api.get("/me/player", as: SpotifyPlayerState.self) else {
+                log("poll: no player state (204)")
+                return
+            }
+            state = fetched
+        } catch {
+            log("poll failed: \(error)")
+            return
+        }
         guard Date() > settleUntil else { return }
+        log("poll: \(state.item?.name ?? "nil") \(state.item?.uri ?? "") playing=\(state.is_playing) t=\((state.progress_ms ?? 0) / 1000) | canopy current=\(currentURI ?? "nil") staged=\(stagedURI ?? "nil")")
         cache(playing: state.is_playing, time: Double(state.progress_ms ?? 0) / 1000)
 
         if state.is_playing != lastPlaying {
@@ -123,6 +145,17 @@ final class SpotifyEngine: PlaybackEngine {
         }
 
         let uri = state.item?.uri
+        // Spotify sometimes ignores a play request (e.g. its app was just waking up). Right
+        // after asking for a track, a mismatch means "retry", not "the song ended".
+        if uri != currentURI, let expected = currentURI, Date().timeIntervalSince(playRequestedAt) < 10 {
+            guard !retriedPlay else { return }
+            retriedPlay = true
+            log("Spotify is playing \(uri ?? "nothing") instead of \(expected); retrying")
+            struct Body: Encodable { var uris: [String] }
+            settleUntil = Date().addingTimeInterval(2)
+            try? await api.send("PUT", "/me/player/play", query: deviceQuery, body: Body(uris: [expected]))
+            return
+        }
         if uri != currentURI {
             let previous = currentURI
             currentURI = uri
@@ -141,7 +174,7 @@ final class SpotifyEngine: PlaybackEngine {
 
         // Stopped at the end with nothing queued.
         if !state.is_playing, !pausedByUs, !reportedEnd, stagedURI == nil, let item = state.item,
-           (state.progress_ms ?? 0) == 0 || Double(state.progress_ms ?? 0) >= Double(item.duration_ms) - 1500 {
+           (state.progress_ms ?? 0) == 0 || Double(state.progress_ms ?? 0) >= Double(item.duration_ms ?? 0) - 1500 {
             reportedEnd = true
             onEvent?(.reachedEnd)
         }

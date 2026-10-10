@@ -33,14 +33,20 @@ public final class PartyServer: Sendable {
     /// Returns the running server and the task driving it.
     public static func start(session: PartySession, ports: [UInt16] = [80, 8080, 8081]) async -> (PartyServer, Task<Void, Error>)? {
         for port in ports {
-            let server = PartyServer(session: session, port: port)
-            let task = Task { try await server.run() }
-            do {
-                try await server.waitUntilListening()
-                return (server, task)
-            } catch {
-                task.cancel()
-                await server.stop()
+            // Right after a restart the previous socket can hold port 80 briefly; retry the
+            // preferred port before falling back.
+            let attempts = port == ports.first ? 3 : 1
+            for attempt in 0..<attempts {
+                if attempt > 0 { try? await Task.sleep(for: .milliseconds(400)) }
+                let server = PartyServer(session: session, port: port)
+                let task = Task { try await server.run() }
+                do {
+                    try await server.waitUntilListening(timeout: 1.5)
+                    return (server, task)
+                } catch {
+                    task.cancel()
+                    await server.stop()
+                }
             }
         }
         return nil

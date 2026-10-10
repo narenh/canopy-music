@@ -13,6 +13,10 @@ struct HostView: View {
 
     private var session: PartySession { model.session }
 
+    private var canStart: Bool {
+        model.isReady && (session.state.current != nil || !session.state.upNext.isEmpty)
+    }
+
     var body: some View {
         @Bindable var model = model
         let theme = ArtworkTheme(session.state.current?.track.colors)
@@ -79,7 +83,7 @@ struct HostView: View {
                         }
                     } else if model.authorization == .authorized {
                         Label("Apple Music connected", systemImage: "checkmark.circle.fill")
-                            .foregroundStyle(.green)
+                            .foregroundStyle(.tint)
                     } else {
                         Button {
                             Task { await model.requestAuthorization() }
@@ -126,14 +130,17 @@ struct HostView: View {
                             model.lock()
                         }
                     } label: {
-                        Label(session.isPlaying ? "Back to party" : "Start", systemImage: session.isPlaying ? "lock.fill" : "play.fill")
+                        Text(session.isPlaying ? "Back to party" : "Start")
                             .font(.headline)
                             .frame(maxWidth: .infinity)
                     }
                     .buttonStyle(.glassProminent)
                     .controlSize(.large)
                     .listRowBackground(Color.clear)
-                    .disabled(!model.isReady || (session.state.current == nil && session.state.upNext.isEmpty))
+                    // Dimmed rather than `.disabled`, which swaps the prominent glass for a gray style.
+                    .opacity(canStart ? 1 : 0.45)
+                    .allowsHitTesting(canStart)
+                    .accessibilityHint(canStart ? "" : "Choose a playlist first")
                 } footer: {
                     Text("To unlock later, press and hold the Canopy logo. Turn on Guided Access (triple-click the top button) so guests can't leave the app.")
                 }

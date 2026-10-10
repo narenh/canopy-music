@@ -8,14 +8,27 @@
   "groups" : [
     {
       "layers" : [
+
+      ],
+      "shadow" : {
+        "kind" : "neutral",
+        "opacity" : 0.5
+      },
+      "translucency" : {
+        "enabled" : true,
+        "value" : 0.3
+      }
+    },
+    {
+      "layers" : [
         {
-          "image-name" : "canopy-music-v1.png",
-          "name" : "canopy-music-v1",
+          "image-name" : "canopy-music-v1.1.png",
+          "name" : "canopy-music-v1.1",
           "position" : {
             "scale" : 0.31,
             "translation-in-points" : [
-              -2.3250000000000455,
-              -15
+              0,
+              0
             ]
           }
         }

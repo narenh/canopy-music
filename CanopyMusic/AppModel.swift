@@ -88,6 +88,7 @@ final class AppModel {
     /// Runs the LAN web server guests use to queue from their phones.
     var phoneQueueEnabled: Bool {
         didSet {
+            guard phoneQueueEnabled != oldValue else { return }
             defaults.set(phoneQueueEnabled, forKey: "phoneQueueEnabled")
             Task { phoneQueueEnabled ? await restartServer() : await stopServer() }
         }
@@ -96,6 +97,9 @@ final class AppModel {
     @ObservationIgnored private let defaults = UserDefaults.standard
     @ObservationIgnored private var server: PartyServer?
     @ObservationIgnored private var serverTask: Task<Void, Error>?
+    /// Serializes server start/stop so two callers can't start two servers (the second would
+    /// lose port 80 and land on 8080).
+    @ObservationIgnored private var serverOperation: Task<Void, Never>?
     @ObservationIgnored private var hostname = FriendlyHostname(name: "music")
 
     init() {
@@ -276,16 +280,36 @@ final class AppModel {
     // MARK: Phone server
 
     func startServerIfNeeded() async {
-        guard phoneQueueEnabled, !needsOnboarding else { return }
-        if server != nil {
-            refreshAddresses()
-            return
+        await serially {
+            guard self.phoneQueueEnabled, !self.needsOnboarding else { return }
+            if self.server != nil {
+                self.refreshAddresses()
+                return
+            }
+            await self.restartServerNow()
         }
-        await restartServer()
     }
 
     func restartServer() async {
-        await stopServer()
+        await serially { await self.restartServerNow() }
+    }
+
+    func stopServer() async {
+        await serially { await self.stopServerNow() }
+    }
+
+    private func serially(_ operation: @escaping @MainActor () async -> Void) async {
+        let previous = serverOperation
+        let task = Task { @MainActor in
+            await previous?.value
+            await operation()
+        }
+        serverOperation = task
+        await task.value
+    }
+
+    private func restartServerNow() async {
+        await stopServerNow()
         guard phoneQueueEnabled, !needsOnboarding else { return }
         guard let (server, task) = await PartyServer.start(session: session) else {
             guestURL = nil
@@ -321,7 +345,7 @@ final class AppModel {
         return name.isEmpty ? "music" : name
     }
 
-    func stopServer() async {
+    private func stopServerNow() async {
         serverTask?.cancel()
         serverTask = nil
         await server?.stop()

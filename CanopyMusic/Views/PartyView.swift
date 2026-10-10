@@ -10,6 +10,7 @@ struct PartyView: View {
     @State private var isSearching = false
     @State private var searchMessage: String?
     @FocusState private var searchFocused: Bool
+    @State private var searchIdleTask: Task<Void, Never>?
 
     @State private var flights: [Flight] = []
     @State private var arriving: Set<UUID> = []
@@ -47,6 +48,8 @@ struct PartyView: View {
         .statusBarHidden()
         .persistentSystemOverlays(.hidden)
         .task(id: query) { await search() }
+        .onChange(of: query) { noteSearchActivity() }
+        .onChange(of: searchFocused) { noteSearchActivity() }
         .onChange(of: session.state.upNext.map(\.id)) { old, new in flashPhoneRequests(old: old, new: new) }
         .sheet(isPresented: $showUnlock) { UnlockView() }
         #if DEBUG
@@ -74,7 +77,8 @@ struct PartyView: View {
                 if searchActive {
                     SearchResultsView(
                         results: results, isLoading: isSearching, message: searchMessage,
-                        status: status(for:), autoAddTrackID: autoAddTrackID, onAdd: add
+                        status: status(for:), autoAddTrackID: autoAddTrackID, onAdd: add,
+                        onInteraction: noteSearchActivity
                     )
                     .padding(.horizontal, 20)
                     .transition(.opacity.combined(with: .move(edge: .bottom)))
@@ -98,11 +102,7 @@ struct PartyView: View {
                 .autocorrectionDisabled()
                 .textInputAutocapitalization(.never)
             if searchActive {
-                Button("Done") {
-                    query = ""
-                    results = []
-                    searchFocused = false
-                }
+                Button("Done", action: closeSearch)
                 .font(.system(size: 18, weight: .semibold))
                 .buttonStyle(.glass)
             }
@@ -156,7 +156,30 @@ struct PartyView: View {
         return .add
     }
 
+    // MARK: Search idle
+
+    /// Restarts the countdown that closes an abandoned search.
+    private func noteSearchActivity() {
+        searchIdleTask?.cancel()
+        searchIdleTask = nil
+        guard searchActive else { return }
+        searchIdleTask = Task {
+            try? await Task.sleep(for: Idle.timeout)
+            guard !Task.isCancelled else { return }
+            closeSearch()
+        }
+    }
+
+    private func closeSearch() {
+        searchIdleTask?.cancel()
+        searchIdleTask = nil
+        query = ""
+        results = []
+        searchFocused = false
+    }
+
     private func add(_ track: Track, from frame: CGRect) {
+        noteSearchActivity()
         let result = withAnimation(.spring(duration: 0.45, bounce: 0.12)) {
             session.add(track, by: Requester(origin: .ipad))
         }

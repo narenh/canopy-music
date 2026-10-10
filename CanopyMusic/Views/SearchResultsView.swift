@@ -13,6 +13,8 @@ struct SearchResultsView: View {
     var autoAddTrackID: String?
     /// Called with the track and its artwork's global frame, which the flight animation starts from.
     let onAdd: (Track, CGRect) -> Void
+    /// Called whenever someone scrolls the results, to keep search open.
+    var onInteraction: () -> Void = {}
 
     var body: some View {
         ScrollView {
@@ -25,6 +27,7 @@ struct SearchResultsView: View {
             .padding(.bottom, 24)
         }
         .scrollDismissesKeyboard(.interactively)
+        .onScrollPhaseChange { _, _ in onInteraction() }
         .overlay {
             if isLoading && results.isEmpty {
                 ProgressView().tint(.white)

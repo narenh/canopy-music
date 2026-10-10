@@ -182,3 +182,9 @@ extension View {
         onGeometryChange(for: CGRect.self) { $0.frame(in: .global) } action: { action($0) }
     }
 }
+
+/// How long the party screen waits without interaction before tidying up (closing search,
+/// scrolling Up next back to the queue).
+enum Idle {
+    static let timeout: Duration = .seconds(12)
+}

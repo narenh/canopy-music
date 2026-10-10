@@ -14,7 +14,7 @@ struct UpNextList: View {
     @Binding var scrollTarget: UUID?
     var onArtworkFrame: (UUID, CGRect) -> Void = { _, _ in }
     /// Shows recently played songs, dimmed, above the queue. The list rests on the first
-    /// upcoming song and drifts back to it after a stretch of no scrolling.
+    /// upcoming song and drifts back to it after `Idle.timeout` without scrolling.
     var showsHistory = false
 
     @Environment(\.artworkTheme) private var theme
@@ -22,7 +22,6 @@ struct UpNextList: View {
     @State private var isScrolling = false
     private static let fadeHeight: CGFloat = 48
     private static let historyLimit = 20
-    private static let returnDelay: Duration = .seconds(10)
 
     var body: some View {
         let items = session.state.upNext
@@ -103,7 +102,7 @@ struct UpNextList: View {
         guard showsHistory else { return }
         returnTask?.cancel()
         returnTask = Task {
-            try? await Task.sleep(for: Self.returnDelay)
+            try? await Task.sleep(for: Idle.timeout)
             guard !Task.isCancelled else { return }
             returnToQueue(proxy, animated: true)
             returnTask = nil

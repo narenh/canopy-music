@@ -226,7 +226,10 @@ private struct SpotifyStatusRows: View {
     @State private var loading = false
 
     var body: some View {
-        if !model.spotifyAuth.isSignedIn {
+        if model.spotifyClientID.isEmpty {
+            Label("Add your Spotify Client ID in Settings (gear)", systemImage: "key")
+                .foregroundStyle(.secondary)
+        } else if !model.spotifyAuth.isSignedIn {
             Button {
                 Task { await model.signInToSpotify() }
             } label: {
@@ -284,6 +287,7 @@ private struct SettingsSheet: View {
     /// Edited locally and applied on return or when the sheet closes, so the network name isn't
     /// re-announced on every keystroke.
     @State private var localNameDraft = ""
+    @State private var spotifyClientIDDraft = ""
 
     var body: some View {
         @Bindable var model = model
@@ -346,6 +350,17 @@ private struct SettingsSheet: View {
                         ForEach(AppModel.Provider.allCases, id: \.self) { Text($0.title).tag($0) }
                     }
                     if model.provider == .spotify {
+                        HStack {
+                            Text("Spotify Client ID")
+                            Spacer(minLength: 16)
+                            TextField("Paste from developer.spotify.com", text: $spotifyClientIDDraft)
+                                .multilineTextAlignment(.trailing)
+                                .textInputAutocapitalization(.never)
+                                .autocorrectionDisabled()
+                                .font(.body.monospaced())
+                                .submitLabel(.done)
+                                .onSubmit { model.setSpotifyClientID(spotifyClientIDDraft) }
+                        }
                         LabeledContent("Spotify requests", value: "\(model.spotifyAPI.requestCount) (\(Int(model.spotifyAPI.requestsPerMinute.rounded()))/min)")
                         if model.spotifyAPI.rateLimitedCount > 0 {
                             LabeledContent("Rate limited", value: "\(model.spotifyAPI.rateLimitedCount)×")
@@ -358,13 +373,23 @@ private struct SettingsSheet: View {
                 } header: {
                     Text("Music")
                 } footer: {
-                    Text("Switching services keeps a separate queue for each. Demo plays fake songs with no audio.")
+                    if model.provider == .spotify {
+                        Text("Spotify needs your own free developer app: create one at developer.spotify.com/dashboard with redirect URI canopy-music://spotify-callback and the Web API, then paste its Client ID here. Premium required. Full steps are in the README on GitHub.")
+                    } else {
+                        Text("Switching services keeps a separate queue for each. Demo plays fake songs with no audio.")
+                    }
                 }
                 .listRowBackground(Color.white.opacity(0.08))
             }
             .scrollContentBackground(.hidden)
-            .onAppear { localNameDraft = model.localName }
-            .onDisappear { model.setLocalName(localNameDraft) }
+            .onAppear {
+                localNameDraft = model.localName
+                spotifyClientIDDraft = SpotifyConfig.clientID
+            }
+            .onDisappear {
+                model.setLocalName(localNameDraft)
+                if model.provider == .spotify { model.setSpotifyClientID(spotifyClientIDDraft) }
+            }
             .onChange(of: model.localName) { _, name in localNameDraft = name }
             .navigationTitle("Settings")
             .navigationBarTitleDisplayMode(.inline)

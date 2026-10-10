@@ -22,6 +22,8 @@ final class AppModel {
     }
 
     let spotifyAuth: SpotifyAuth
+    /// Mirrors `SpotifyConfig.clientID` so views update when it's entered.
+    private(set) var spotifyClientID = SpotifyConfig.clientID
     let spotifyAPI: SpotifyAPI
     /// The Spotify Connect device to play on, by id (the iPad's Spotify app, an Apple TV…).
     var spotifyDeviceID: String? {
@@ -128,6 +130,17 @@ final class AppModel {
         session = Self.makeSession(next, spotify: spotifyAPI)
         applyCrossfade()
         Task { await restartServer() }
+    }
+
+    /// Changing the Spotify app means existing tokens no longer apply.
+    func setSpotifyClientID(_ raw: String) {
+        let id = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard id != SpotifyConfig.clientID else { return }
+        defaults.set(id, forKey: SpotifyConfig.clientIDDefaultsKey)
+        spotifyClientID = id
+        spotifyAuth.signOut()
+        spotifyDeviceID = nil
+        spotifyDeviceName = nil
     }
 
     func signInToSpotify() async {

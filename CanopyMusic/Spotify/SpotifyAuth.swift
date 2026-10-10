@@ -5,8 +5,13 @@ import Security
 import UIKit
 
 enum SpotifyConfig {
-    /// From developer.spotify.com/dashboard → Canopy → Settings. Not a secret: sign-in uses PKCE.
-    static let clientID = "9acb8a9b0890451c811302c09dc93b82"
+    static let clientIDDefaultsKey = "spotifyClientID"
+
+    /// Each host uses their own Spotify developer app (Development Mode allows 5 accounts per app),
+    /// entered in Settings. Not a secret: sign-in uses PKCE. See README › Spotify.
+    static var clientID: String {
+        (UserDefaults.standard.string(forKey: clientIDDefaultsKey) ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+    }
     static let redirectURI = "canopy-music://spotify-callback"
     static let callbackScheme = "canopy-music"
     static let scopes = [
@@ -18,7 +23,7 @@ enum SpotifyConfig {
         "user-library-read",
     ]
 
-    static var isConfigured: Bool { !clientID.hasPrefix("REPLACE") }
+    static var isConfigured: Bool { !clientID.isEmpty }
 }
 
 enum SpotifyError: LocalizedError {
@@ -31,7 +36,7 @@ enum SpotifyError: LocalizedError {
 
     var errorDescription: String? {
         switch self {
-        case .notConfigured: "Spotify isn't set up yet (missing client ID)."
+        case .notConfigured: "Add your Spotify Client ID in Settings first."
         case .notSignedIn: "Sign in to Spotify in host mode."
         case .signInCancelled: "Spotify sign-in was cancelled."
         case .badResponse(let code, let message): "Spotify returned \(code). \(message)"

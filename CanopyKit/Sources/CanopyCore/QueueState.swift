@@ -166,6 +166,18 @@ public struct QueueState: Codable, Equatable, Sendable {
         return current
     }
 
+    /// Makes the most recently played song current again; the current song goes back to the
+    /// top of Up Next. Returns false when there's no history.
+    @discardableResult
+    public mutating func goBack() -> Bool {
+        guard !history.isEmpty else { return false }
+        if let current { upNext.insert(current, at: 0) }
+        current = history.removeFirst()
+        lockedNextID = nil
+        version += 1
+        return true
+    }
+
     public mutating func lockNext() {
         guard let first = upNext.first, lockedNextID != first.id else { return }
         lockedNextID = first.id

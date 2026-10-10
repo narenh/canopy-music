@@ -143,6 +143,24 @@ let base = PlaylistSummary(id: "p", name: "Base", kind: .library)
         #expect(engine.playing?.id == "b")
     }
 
+    @Test func previousRestartsLateInSongOtherwiseGoesBack() async throws {
+        let engine = FakeEngine()
+        let session = PartySession(catalog: StubCatalog(ids: ["a", "b", "c"]), engine: engine)
+        try await session.load(playlist: base)
+        try await session.play()
+        await settle()
+        engine.finishTrack() // now "b"
+        await settle()
+        engine.currentTime = 30
+        await session.previous()
+        #expect(session.state.current?.track.id == "b") // restarted, not gone back
+        #expect(engine.currentTime == 0)
+        await session.previous()
+        #expect(session.state.current?.track.id == "a")
+        #expect(engine.playing?.id == "a")
+        #expect(session.state.upNext.first?.track.id == "b")
+    }
+
     @Test func persistsAndRestores() async throws {
         let url = FileManager.default.temporaryDirectory.appendingPathComponent("canopy-\(UUID()).json")
         defer { try? FileManager.default.removeItem(at: url) }

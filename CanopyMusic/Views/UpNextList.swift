@@ -13,14 +13,43 @@ struct UpNextList: View {
     var flashing: Set<UUID> = []
     @Binding var scrollTarget: UUID?
     var onArtworkFrame: (UUID, CGRect) -> Void = { _, _ in }
+    /// Shows recently played songs, dimmed, above a divider. The list rests at the divider and
+    /// drifts back to it after a stretch of no scrolling.
+    var showsHistory = false
 
     @Environment(\.artworkTheme) private var theme
+    @State private var returnTask: Task<Void, Never>?
+    @State private var isScrolling = false
     private static let fadeHeight: CGFloat = 48
+    private static let queueStartID = "queue-start"
+    private static let historyLimit = 20
+    private static let returnDelay: Duration = .seconds(10)
 
     var body: some View {
         let items = session.state.upNext
+        let played = showsHistory ? Array(session.state.history.prefix(Self.historyLimit).reversed()) : []
         ScrollViewReader { proxy in
             List {
+                if !played.isEmpty {
+                    ForEach(played) { item in
+                        UpNextRow(item: item, locked: false, hidden: false, onArtworkFrame: { _, _ in })
+                            .opacity(0.4)
+                            .allowsHitTesting(false)
+                            .listRowBackground(Color.clear)
+                            .listRowInsets(EdgeInsets(top: 6, leading: 12, bottom: 6, trailing: 12))
+                            .listRowSeparatorTint(.white.opacity(0.08))
+                            .accessibilityLabel("Played: \(item.track.title) by \(item.track.artist)")
+                    }
+                    Capsule()
+                        .fill(.white.opacity(0.22))
+                        .frame(height: 2)
+                        .padding(.vertical, 4)
+                        .listRowBackground(Color.clear)
+                        .listRowSeparator(.hidden)
+                        .listRowInsets(EdgeInsets(top: 4, leading: 12, bottom: 4, trailing: 12))
+                        .id(Self.queueStartID)
+                        .accessibilityHidden(true)
+                }
                 ForEach(items) { item in
                     let locked = item.id == session.state.lockedNextID
                     UpNextRow(item: item, locked: locked, hidden: arriving.contains(item.id), onArtworkFrame: onArtworkFrame)
@@ -48,6 +77,7 @@ struct UpNextList: View {
             }
             .listStyle(.plain)
             .scrollContentBackground(.hidden)
+            .environment(\.defaultMinListRowHeight, 8)
             // Feather the bottom edge instead of a hard cut; the margin lets the last row scroll clear of it.
             .contentMargins(.bottom, Self.fadeHeight, for: .scrollContent)
             .mask {
@@ -63,6 +93,40 @@ struct UpNextList: View {
                 guard let target else { return }
                 withAnimation(.easeInOut(duration: 0.35)) { proxy.scrollTo(target, anchor: .center) }
             }
+            .onScrollPhaseChange { _, phase in
+                isScrolling = phase != .idle
+                if isScrolling {
+                    returnTask?.cancel()
+                    returnTask = nil
+                } else {
+                    scheduleReturn(proxy)
+                }
+            }
+            .onAppear { returnToQueue(proxy, animated: false) }
+            .onChange(of: played.last?.id) {
+                // A song finished: re-anchor unless someone is browsing.
+                if !isScrolling, returnTask == nil { returnToQueue(proxy, animated: true) }
+            }
+        }
+    }
+
+    private func scheduleReturn(_ proxy: ScrollViewProxy) {
+        guard showsHistory else { return }
+        returnTask?.cancel()
+        returnTask = Task {
+            try? await Task.sleep(for: Self.returnDelay)
+            guard !Task.isCancelled else { return }
+            returnToQueue(proxy, animated: true)
+            returnTask = nil
+        }
+    }
+
+    private func returnToQueue(_ proxy: ScrollViewProxy, animated: Bool) {
+        guard showsHistory, !session.state.history.isEmpty else { return }
+        if animated {
+            withAnimation(.easeInOut(duration: 0.6)) { proxy.scrollTo(Self.queueStartID, anchor: .top) }
+        } else {
+            proxy.scrollTo(Self.queueStartID, anchor: .top)
         }
     }
 }

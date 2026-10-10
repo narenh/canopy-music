@@ -135,6 +135,18 @@ func titles(_ items: [QueueItem]) -> [String] { items.map(\.track.id) }
         #expect(s.upNext.filter { !$0.isRequest }.count == QueueState.playlistWindow)
     }
 
+    @Test func goBackRestoresPreviousSong() {
+        var s = started(["a", "b", "c"])
+        s.advance() // b playing, a in history
+        let wentBack = s.goBack()
+        #expect(wentBack)
+        #expect(s.current?.track.id == "a")
+        #expect(s.upNext.first?.track.id == "b")
+        #expect(s.history.isEmpty)
+        let wentBackAgain = s.goBack()
+        #expect(!wentBackAgain)
+    }
+
     @Test func roundTripsThroughJSON() throws {
         var s = started(["a", "b"])
         s.addRequest(track("x"), by: guest)

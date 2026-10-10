@@ -102,10 +102,22 @@ public final class PartySession {
         }
     }
 
-    /// "Previous" only ever goes back to the start of the current song.
-    public func restartCurrentSong() {
-        engine.restartCurrent()
-        broadcast()
+    /// Like the Music app: restarts the song if it's more than a few seconds in, otherwise goes
+    /// to the previous song (and keeps playing or paused as it was).
+    public func previous() async {
+        guard engine.currentTime <= 3, !state.history.isEmpty else {
+            engine.restartCurrent()
+            broadcast()
+            return
+        }
+        let wasPlaying = engine.isPlaying
+        stagedItemID = nil
+        mutate { $0.goBack() }
+        if wasPlaying, let current = state.current {
+            try? await play(current)
+        } else {
+            loadedItemID = nil
+        }
     }
 
     public func seek(to time: TimeInterval) {

@@ -137,7 +137,8 @@ struct PartyView: View {
             UpNextList(
                 session: session, canRemoveByMenu: { $0.requester?.origin == .ipad },
                 arriving: arriving, flashing: flashing, scrollTarget: $scrollTarget,
-                onArtworkFrame: { id, frame in rowFrames[id] = frame }
+                onArtworkFrame: { id, frame in rowFrames[id] = frame },
+                showsHistory: true
             )
             .reportFrame { listFrame = $0 }
 
@@ -342,13 +343,13 @@ private struct TransportControls: View {
             GlassEffectContainer(spacing: 24) {
                 HStack(spacing: 24) {
                     Button {
-                        session.restartCurrentSong()
+                        Task { await session.previous() }
                     } label: {
                         Image(systemName: "backward.fill")
                             .font(.system(size: 22, weight: .semibold))
                             .frame(width: 48, height: 48)
                     }
-                    .accessibilityLabel("Restart song")
+                    .accessibilityLabel("Previous")
                     Button {
                         Task { session.isPlaying ? session.pause() : await model.play() }
                     } label: {

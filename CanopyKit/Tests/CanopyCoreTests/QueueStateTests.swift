@@ -18,11 +18,21 @@ func titles(_ items: [QueueItem]) -> [String] { items.map(\.track.id) }
     @Test func playlistLoadsAndAdvances() {
         let s = started(["a", "b", "c"])
         #expect(s.current?.track.id == "a")
-        #expect(titles(s.upNext).prefix(5) == ["b", "c", "a", "b", "c"])
+        // Short playlist: one copy of each song queued; "a" comes back after "c".
+        #expect(titles(s.upNext) == ["b", "c", "a"])
     }
 
-    @Test func playlistLoopsWithinWindow() {
-        let s = started(["a", "b"])
+    @Test func shortPlaylistNeverShowsDuplicates() {
+        var s = started(["a", "b"])
+        #expect(titles(s.upNext) == ["b", "a"])
+        s.advance()
+        s.advance()
+        #expect(s.current?.track.id == "a")
+        #expect(titles(s.upNext) == ["b", "a"])
+    }
+
+    @Test func longPlaylistQueuesAWindow() {
+        let s = started((0..<40).map { "t\($0)" })
         #expect(s.upNext.filter { !$0.isRequest }.count == QueueState.playlistWindow)
     }
 
@@ -132,7 +142,7 @@ func titles(_ items: [QueueItem]) -> [String] { items.map(\.track.id) }
         s.shufflePlaylist()
         #expect(s.upNext.first?.track.id == "x")
         #expect(Set(s.playlist.map(\.id)) == Set(ids))
-        #expect(s.upNext.filter { !$0.isRequest }.count == QueueState.playlistWindow)
+        #expect(s.upNext.filter { !$0.isRequest }.count == ids.count)
     }
 
     @Test func goBackRestoresPreviousSong() {

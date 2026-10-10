@@ -62,8 +62,11 @@ public struct QueueState: Codable, Equatable, Sendable {
     mutating func refill() {
         guard !playlist.isEmpty else { return }
         var have = upNext.lazy.filter { !$0.isRequest }.count
+        // Never show a playlist song twice: short playlists keep one copy of each queued, and
+        // loop by re-adding songs as they play.
+        let target = min(Self.playlistWindow, playlist.count)
         var guardCount = 0
-        while have < Self.playlistWindow, guardCount < playlist.count * 2 + Self.playlistWindow {
+        while have < target, guardCount < playlist.count * 2 + Self.playlistWindow {
             guardCount += 1
             if cursor >= playlist.count {
                 cursor = 0

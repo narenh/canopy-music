@@ -10,7 +10,7 @@ func titles(_ items: [QueueItem]) -> [String] { items.map(\.track.id) }
 @Suite struct QueueStateTests {
     func started(_ ids: [String]) -> QueueState {
         var s = QueueState()
-        s.load(playlist: ids.map(track), name: "Base", shuffle: false)
+        s.load(playlist: ids.map(track), name: "Base")
         s.advance()
         return s
     }
@@ -116,12 +116,23 @@ func titles(_ items: [QueueItem]) -> [String] { items.map(\.track.id) }
         #expect(s.history.first?.track.id == "a")
     }
 
-    @Test func reloadingPlaylistKeepsRequests() {
+    @Test func reloadingPlaylistClearsEverything() {
         var s = started(["a", "b"])
         s.addRequest(track("x"), by: guest)
-        s.load(playlist: ["m", "n"].map(track), name: "Other", shuffle: false)
-        #expect(s.current?.track.id == "a")
-        #expect(titles(s.upNext).prefix(3) == ["x", "m", "n"])
+        s.load(playlist: ["m", "n"].map(track), name: "Other")
+        #expect(s.current == nil)
+        #expect(titles(s.upNext).prefix(2) == ["m", "n"])
+        #expect(!s.upNext.contains { $0.isRequest })
+    }
+
+    @Test func shuffleKeepsRequestsAndAllSongs() {
+        let ids = (0..<20).map { "t\($0)" }
+        var s = started(ids)
+        s.addRequest(track("x"), by: guest)
+        s.shufflePlaylist()
+        #expect(s.upNext.first?.track.id == "x")
+        #expect(Set(s.playlist.map(\.id)) == Set(ids))
+        #expect(s.upNext.filter { !$0.isRequest }.count == QueueState.playlistWindow)
     }
 
     @Test func roundTripsThroughJSON() throws {

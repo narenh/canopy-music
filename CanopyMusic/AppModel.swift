@@ -20,7 +20,6 @@ final class AppModel {
     var errorMessage: String?
 
     var hostPIN: String { didSet { defaults.set(hostPIN, forKey: "hostPIN") } }
-    var shuffle: Bool { didSet { defaults.set(shuffle, forKey: "shuffle") } }
     var crossfade: Bool {
         didSet {
             defaults.set(crossfade, forKey: "crossfade")
@@ -52,7 +51,6 @@ final class AppModel {
         self.provider = provider
         self.session = Self.makeSession(provider)
         hostPIN = defaults.string(forKey: "hostPIN") ?? ""
-        shuffle = defaults.object(forKey: "shuffle") as? Bool ?? true
         crossfade = defaults.bool(forKey: "crossfade")
         crossfadeSeconds = defaults.double(forKey: "crossfadeSeconds")
         wifiSSID = defaults.string(forKey: "wifiSSID") ?? ""
@@ -106,7 +104,7 @@ final class AppModel {
 
     func load(_ playlist: PlaylistSummary) async {
         do {
-            try await session.load(playlist: playlist, shuffle: shuffle)
+            try await session.load(playlist: playlist)
         } catch {
             errorMessage = "Couldn't load “\(playlist.name)”. \(error.localizedDescription)"
         }

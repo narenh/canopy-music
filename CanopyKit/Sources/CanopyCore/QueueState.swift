@@ -34,12 +34,25 @@ public struct QueueState: Codable, Equatable, Sendable {
 
     // MARK: Playlist
 
-    /// Replaces the base playlist. Pending requests are kept; playlist items are rebuilt.
-    public mutating func load(playlist tracks: [Track], name: String?, shuffle: Bool) {
-        playlist = shuffle ? tracks.shuffled() : tracks
+    /// Starts over with a new base playlist in its original order: clears now playing, requests,
+    /// and everything queued. Nothing is current until playback starts.
+    public mutating func load(playlist tracks: [Track], name: String?) {
+        playlist = tracks
         playlistName = name
         cursor = 0
         cycle = 0
+        skipPositions = []
+        current = nil
+        upNext = []
+        lockedNextID = nil
+        refill()
+        version += 1
+    }
+
+    /// Reshuffles the base playlist and rebuilds the playlist songs in Up Next. Requests stay put.
+    public mutating func shufflePlaylist() {
+        playlist.shuffle()
+        cursor = 0
         skipPositions = []
         upNext.removeAll { !$0.isRequest && $0.id != lockedNextID }
         refill()

@@ -100,16 +100,37 @@ struct QRCodeView: View {
 /// The system AirPlay picker, which lets you pick several AirPlay 2 speakers at once.
 struct RoutePicker: UIViewRepresentable {
     var tint: UIColor = .white
+    /// Lets a larger tap target (a whole row) open this picker.
+    var trigger: RoutePickerTrigger?
 
     func makeUIView(context: Context) -> AVRoutePickerView {
         let view = AVRoutePickerView()
         view.prioritizesVideoDevices = false
         view.tintColor = tint
         view.activeTintColor = tint
+        trigger?.view = view
         return view
     }
 
-    func updateUIView(_ view: AVRoutePickerView, context: Context) {}
+    func updateUIView(_ view: AVRoutePickerView, context: Context) {
+        trigger?.view = view
+    }
+}
+
+/// Opens an `AVRoutePickerView` from elsewhere by tapping its internal button, so the popover
+/// still anchors on the picker's icon.
+@MainActor
+final class RoutePickerTrigger {
+    weak var view: AVRoutePickerView?
+
+    func present() {
+        guard let view else { return }
+        func findButton(in view: UIView) -> UIButton? {
+            if let button = view as? UIButton { return button }
+            return view.subviews.lazy.compactMap(findButton).first
+        }
+        findButton(in: view)?.sendActions(for: .touchUpInside)
+    }
 }
 
 struct ExplicitBadge: View {

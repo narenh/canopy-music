@@ -89,6 +89,11 @@ struct RootView: View {
                 await model.diagnoseMusicKit()
             }
             print("[debug] guest URL \(model.guestURL?.absoluteString ?? "none")")
+            // `-autoLoad` loads the first demo playlist without playing, for host-screen screenshots.
+            if ProcessInfo.processInfo.arguments.contains("-autoLoad"), model.isDemo,
+               let first = try? await model.session.catalog.libraryPlaylists().first {
+                await model.load(first)
+            }
             // `-autoResume` resumes a restored party, for testing playback without touching the iPad.
             if ProcessInfo.processInfo.arguments.contains("-autoResume") {
                 await model.play()

@@ -75,13 +75,14 @@ struct HostView: View {
                                 .foregroundStyle(.secondary)
                         }
                     }
-                    Toggle("Shuffle", isOn: $model.shuffle)
                     Toggle("Crossfade", isOn: $model.crossfade)
                 }
+                .listRowBackground(Color.white.opacity(0.08))
 
                 Section("Speakers") {
                     SpeakersRow()
                 }
+                .listRowBackground(Color.white.opacity(0.08))
 
                 Section("Guests") {
                     if let url = model.guestURL {
@@ -94,21 +95,23 @@ struct HostView: View {
                             .foregroundStyle(.secondary)
                     }
                 }
+                .listRowBackground(Color.white.opacity(0.08))
 
                 Section {
-                    SecureField("PIN to unlock (optional)", text: $model.hostPIN)
-                        .keyboardType(.numberPad)
                     Button {
-                        model.lock()
+                        Task {
+                            if !session.isPlaying { await model.play() }
+                            model.lock()
+                        }
                     } label: {
-                        Label("Lock party screen", systemImage: "lock.fill")
+                        Label(session.isPlaying ? "Back to party" : "Start", systemImage: session.isPlaying ? "lock.fill" : "play.fill")
                             .font(.headline)
                             .frame(maxWidth: .infinity)
                     }
                     .buttonStyle(.glassProminent)
                     .controlSize(.large)
                     .listRowBackground(Color.clear)
-                    .disabled(session.state.current == nil)
+                    .disabled(session.state.current == nil && session.state.upNext.isEmpty)
                 } footer: {
                     Text("To unlock later, press and hold the Canopy logo. Turn on Guided Access (triple-click the top button) so guests can't leave the app.")
                 }
@@ -123,22 +126,6 @@ struct HostView: View {
 
     private var queuePanel: some View {
         VStack(alignment: .leading, spacing: 0) {
-            if let current = session.state.current {
-                HStack(spacing: 16) {
-                    ArtworkView(track: current.track, large: true, cornerRadius: 10)
-                        .frame(width: 88, height: 88)
-                    VStack(alignment: .leading, spacing: 4) {
-                        Text(session.isPlaying ? "Now playing" : "Paused")
-                            .font(.system(size: 13, weight: .semibold))
-                            .foregroundStyle(.white.opacity(0.6))
-                        Text(current.track.title).font(.system(size: 24, weight: .bold))
-                        Text(current.track.artist).foregroundStyle(.white.opacity(0.65))
-                    }
-                    .lineLimit(1)
-                    .foregroundStyle(.white)
-                }
-                .padding(20)
-            }
             playlistBar
             HStack {
                 Text("Up next").font(.system(size: 22, weight: .bold))
@@ -178,9 +165,13 @@ struct HostView: View {
 /// Current audio output (AirPlay speakers, or the iPad) with the system AirPlay picker.
 private struct SpeakersRow: View {
     @State private var outputs: [AVAudioSessionPortDescription] = []
+    @State private var trigger = RoutePickerTrigger()
 
     var body: some View {
-        HStack(spacing: 12) {
+        Button {
+            trigger.present()
+        } label: {
+            HStack(spacing: 12) {
             Image(systemName: "hifispeaker.2.fill")
                 .font(.system(size: 18))
                 .foregroundStyle(.secondary)
@@ -193,10 +184,14 @@ private struct SpeakersRow: View {
                 }
             }
             Spacer()
-            RoutePicker(tint: .white)
+            RoutePicker(tint: .white, trigger: trigger)
                 .frame(width: 44, height: 44)
-                .accessibilityLabel("Choose speakers")
+                .accessibilityHidden(true)
+            }
+            .contentShape(Rectangle())
         }
+        .buttonStyle(.plain)
+        .accessibilityLabel("Choose speakers")
         .onAppear(perform: refresh)
         .onReceive(NotificationCenter.default.publisher(for: AVAudioSession.routeChangeNotification).receive(on: RunLoop.main)) { _ in
             refresh()
@@ -227,6 +222,14 @@ private struct SettingsSheet: View {
                     Text("Guest Wi-Fi")
                 } footer: {
                     Text("Shows a second QR code on the party screen that joins this network. Leave the name empty to hide it.")
+                }
+                Section {
+                    SecureField("Unlock PIN (optional)", text: $model.hostPIN)
+                        .keyboardType(.numberPad)
+                } header: {
+                    Text("Host")
+                } footer: {
+                    Text("Asked for when you press and hold the Canopy logo on the party screen.")
                 }
                 Section {
                     Picker("Crossfade length", selection: $model.crossfadeSeconds) {
@@ -269,8 +272,25 @@ private extension HostView {
                     .font(.system(size: 17, weight: .semibold))
                     .foregroundStyle(.white)
                     .lineLimit(1)
+                if let current = session.state.current {
+                    Text("Playing \(current.track.title) · \(current.track.artist)")
+                        .font(.system(size: 13))
+                        .foregroundStyle(.white.opacity(0.6))
+                        .lineLimit(1)
+                }
             }
             Spacer()
+            if session.state.playlistName != nil {
+                Button {
+                    withAnimation(.spring(duration: 0.45, bounce: 0.12)) { session.shufflePlaylist() }
+                } label: {
+                    Image(systemName: "shuffle")
+                        .frame(width: 22, height: 22)
+                }
+                .buttonStyle(.glass)
+                .buttonBorderShape(.circle)
+                .accessibilityLabel("Shuffle playlist")
+            }
             Button(session.state.playlistName == nil ? "Choose playlist" : "Change") { showPicker = true }
                 .buttonStyle(.glass)
                 .disabled(!model.isReady)
@@ -279,7 +299,7 @@ private extension HostView {
         .padding(.vertical, 12)
         .background(.white.opacity(0.06), in: RoundedRectangle(cornerRadius: 18, style: .continuous))
         .padding(.horizontal, 12)
-        .padding(.top, session.state.current == nil ? 12 : 0)
+        .padding(.top, 12)
         .padding(.bottom, 8)
     }
 }

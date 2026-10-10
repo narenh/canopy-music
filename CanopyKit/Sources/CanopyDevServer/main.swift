@@ -6,7 +6,7 @@ import Foundation
 // without an iPad. `swift run CanopyDevServer` then open http://localhost:8080.
 
 let session = PartySession(catalog: DemoCatalog(), engine: DemoPlaybackEngine())
-try await session.load(playlist: PlaylistSummary(id: "demo-party", name: "House party", kind: .library), shuffle: false)
+try await session.load(playlist: PlaylistSummary(id: "demo-party", name: "House party", kind: .library))
 try await session.play()
 session.add(DemoCatalog.track(9), by: Requester(name: "Jamie", clientID: "demo-jamie", origin: .phone))
 session.add(DemoCatalog.track(16), by: Requester(name: nil, clientID: nil, origin: .ipad))

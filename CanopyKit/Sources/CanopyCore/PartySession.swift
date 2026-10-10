@@ -60,14 +60,19 @@ public final class PartySession {
 
     // MARK: Host actions
 
-    /// Loads a base playlist without starting playback. If nothing is current yet, the first song
-    /// becomes current (ready to play). Whatever is playing keeps playing.
-    public func load(playlist: PlaylistSummary, shuffle: Bool) async throws {
+    /// Starts over with a new base playlist: stops playback and clears the queue and requests.
+    /// Nothing plays until `play()`.
+    public func load(playlist: PlaylistSummary) async throws {
         let tracks = try await catalog.tracks(in: playlist)
-        mutate { $0.load(playlist: tracks, name: playlist.name, shuffle: shuffle) }
-        if state.current == nil {
-            mutate { $0.advance() }
-        }
+        if engine.isPlaying { engine.pause() }
+        stagedItemID = nil
+        loadedItemID = nil
+        isPlaying = false
+        mutate { $0.load(playlist: tracks, name: playlist.name) }
+    }
+
+    public func shufflePlaylist() {
+        mutate { $0.shufflePlaylist() }
     }
 
     /// Plays the current song, loading it into the engine first if needed (e.g. after a relaunch).

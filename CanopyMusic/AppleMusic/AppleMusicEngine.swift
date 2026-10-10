@@ -23,6 +23,13 @@ final class AppleMusicEngine: PlaybackEngine {
     private var lastStatus: MusicPlayer.PlaybackStatus?
     private var poller: Task<Void, Never>?
 
+    // Playback state as of the last poll. Reading `ApplicationMusicPlayer` goes to an
+    // out-of-process service; the UI asks for the time every frame (lyrics takeover), so it
+    // gets a value interpolated from these instead of hitting the service each time.
+    private var cachedPlaying = false
+    private var cachedTime: TimeInterval = 0
+    private var cachedAt = Date()
+
     init(cache: SongCache) {
         self.cache = cache
         poller = Task { [weak self] in
@@ -33,8 +40,16 @@ final class AppleMusicEngine: PlaybackEngine {
         }
     }
 
-    var isPlaying: Bool { player.state.playbackStatus == .playing }
-    var currentTime: TimeInterval { player.playbackTime }
+    var isPlaying: Bool { cachedPlaying }
+    var currentTime: TimeInterval {
+        cachedPlaying ? cachedTime + Date().timeIntervalSince(cachedAt) : cachedTime
+    }
+
+    private func cache(playing: Bool, time: TimeInterval) {
+        cachedPlaying = playing
+        cachedTime = time
+        cachedAt = Date()
+    }
 
     func play(_ track: CanopyCore.Track) async throws {
         let song = try await cache.song(for: track.id)
@@ -51,6 +66,7 @@ final class AppleMusicEngine: PlaybackEngine {
         }
         player.queue = ApplicationMusicPlayer.Queue(for: [song])
         try await player.play()
+        cache(playing: true, time: 0)
     }
 
     /// Inserts the new next track right after the current one. It never removes the previously
@@ -70,10 +86,12 @@ final class AppleMusicEngine: PlaybackEngine {
     func resume() async throws {
         pausedByUs = false
         try await player.play()
+        cache(playing: true, time: cachedTime)
     }
 
     func pause() {
         pausedByUs = true
+        cache(playing: false, time: currentTime)
         player.pause()
     }
 
@@ -83,10 +101,12 @@ final class AppleMusicEngine: PlaybackEngine {
     }
 
     func restartCurrent() {
+        cache(playing: cachedPlaying, time: 0)
         player.restartCurrentEntry()
     }
 
     func seek(to time: TimeInterval) {
+        cache(playing: cachedPlaying, time: time)
         player.playbackTime = time
     }
 
@@ -114,16 +134,18 @@ final class AppleMusicEngine: PlaybackEngine {
         }
 
         let status = player.state.playbackStatus
+        let time = player.playbackTime
+        cache(playing: status == .playing, time: time)
         if status == .playing { sawPlaying = true }
         if status != lastStatus {
-            log("status \(String(describing: lastStatus)) -> \(status) t=\(Int(player.playbackTime))")
+            log("status \(String(describing: lastStatus)) -> \(status) t=\(Int(time))")
             lastStatus = status
             onEvent?(.statusChanged)
         }
 
         // The player stops (or pauses on its own at the end of the last entry) when nothing was staged.
         if sawPlaying, !reportedEnd, stagedTrackID == nil, !pausedByUs, currentEntryID != nil, status == .stopped || status == .paused,
-           let duration = entry?.item.flatMap(Self.duration(of:)), player.playbackTime == 0 || player.playbackTime >= duration - 1.5 {
+           let duration = entry?.item.flatMap(Self.duration(of:)), time == 0 || time >= duration - 1.5 {
             reportedEnd = true
             log("reachedEnd")
             onEvent?(.reachedEnd)

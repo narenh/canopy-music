@@ -41,6 +41,8 @@ final class AppModel {
 
     /// True until a music service has been chosen on the first-launch screen.
     private(set) var needsOnboarding: Bool
+    /// Setup was reopened from Settings › Change Service (cancellable; skips the network step).
+    private(set) var isChangingService = false
 
     let spotifyAuth: SpotifyAuth
     /// Mirrors `SpotifyConfig.clientID` so views update when it's entered.
@@ -172,7 +174,18 @@ final class AppModel {
         defaults.set(next.rawValue, forKey: "provider")
     }
 
+    func changeService() {
+        isChangingService = true
+        needsOnboarding = true
+    }
+
+    func cancelChangeService() {
+        isChangingService = false
+        needsOnboarding = false
+    }
+
     func finishOnboarding() {
+        isChangingService = false
         needsOnboarding = false
         // The phone page (and its local network prompt) waits until setup is done.
         Task { await startServerIfNeeded() }

@@ -302,13 +302,37 @@ private struct SettingsSheet: View {
     /// Edited locally and applied on return or when the sheet closes, so the network name isn't
     /// re-announced on every keystroke.
     @State private var localNameDraft = ""
-    @State private var spotifyClientIDDraft = ""
-    @State private var showSpotifySetup = false
 
     var body: some View {
         @Bindable var model = model
         NavigationStack {
             Form {
+                Section {
+                    Button {
+                        dismiss()
+                        model.changeService()
+                    } label: {
+                        HStack {
+                            Text(model.provider.title)
+                                .foregroundStyle(.primary)
+                            Spacer()
+                            Text("Change Service")
+                                .foregroundStyle(.tint)
+                        }
+                        .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
+                    if model.provider == .spotify {
+                        LabeledContent("Spotify requests", value: "\(model.spotifyAPI.requestCount) (\(Int(model.spotifyAPI.requestsPerMinute.rounded()))/min)")
+                        if model.spotifyAPI.rateLimitedCount > 0 {
+                            LabeledContent("Rate limited", value: "\(model.spotifyAPI.rateLimitedCount)×")
+                                .foregroundStyle(.orange)
+                        }
+                    }
+                } header: {
+                    Text("Music Service")
+                }
+                .listRowBackground(Color.white.opacity(0.08))
                 Section {
                     Toggle("Queue from phones", isOn: $model.phoneQueueEnabled)
                     if model.phoneQueueEnabled {
@@ -336,9 +360,9 @@ private struct SettingsSheet: View {
                         .autocorrectionDisabled()
                     SecureField("Password", text: $model.wifiPassword)
                 } header: {
-                    Text("Guest Wi\u{2011}Fi")
+                    Text("Wi\u{2011}Fi Information")
                 } footer: {
-                    Text("Shows a second QR code on the party screen that joins this network. Leave the name empty to hide it.")
+                    Text("Shows a “Join Wi\u{2011}Fi” QR code.")
                 }
                 .listRowBackground(Color.white.opacity(0.08))
                 Section {
@@ -361,75 +385,10 @@ private struct SettingsSheet: View {
                     Text("Used when crossfade is on. Apple Music's AutoMix isn't available to other apps.")
                 }
                 .listRowBackground(Color.white.opacity(0.08))
-                Section {
-                    Picker("Music service", selection: Binding(get: { model.provider }, set: { next in
-                        // Spotify needs a Client ID and sign-in before it can be selected.
-                        if next == .spotify, !(model.spotifyAuth.isSignedIn && !model.spotifyClientID.isEmpty) {
-                            showSpotifySetup = true
-                        } else {
-                            model.setProvider(next)
-                        }
-                    })) {
-                        ForEach(AppModel.Provider.allCases, id: \.self) { Text($0.title).tag($0) }
-                    }
-                    if model.provider == .spotify {
-                        HStack {
-                            Text("Spotify Client ID")
-                            Spacer(minLength: 16)
-                            TextField("Paste from developer.spotify.com", text: $spotifyClientIDDraft)
-                                .multilineTextAlignment(.trailing)
-                                .textInputAutocapitalization(.never)
-                                .autocorrectionDisabled()
-                                .font(.body.monospaced())
-                                .submitLabel(.done)
-                                .onSubmit { model.setSpotifyClientID(spotifyClientIDDraft) }
-                        }
-                        LabeledContent("Spotify requests", value: "\(model.spotifyAPI.requestCount) (\(Int(model.spotifyAPI.requestsPerMinute.rounded()))/min)")
-                        if model.spotifyAPI.rateLimitedCount > 0 {
-                            LabeledContent("Rate limited", value: "\(model.spotifyAPI.rateLimitedCount)×")
-                                .foregroundStyle(.orange)
-                        }
-                        if model.spotifyAuth.isSignedIn {
-                            Button("Sign out of Spotify", role: .destructive) { model.spotifyAuth.signOut() }
-                        }
-                    }
-                } header: {
-                    Text("Music")
-                } footer: {
-                    if model.provider == .spotify {
-                        Text("Spotify needs your own free developer app: create one at developer.spotify.com/dashboard with redirect URI `canopy-music://spotify-callback` and the `Web API` box checked, then paste its Client ID here. Premium required. Full steps are in the README on GitHub.")
-                    } else {
-                        #if DEBUG
-                        Text("Switching services keeps a separate queue for each. Demo plays fake songs with no audio.")
-                        #else
-                        Text("Switching services keeps a separate queue for each.")
-                        #endif
-                    }
-                }
-                .listRowBackground(Color.white.opacity(0.08))
             }
             .scrollContentBackground(.hidden)
-            .onAppear {
-                localNameDraft = model.localName
-                spotifyClientIDDraft = SpotifyConfig.clientID
-            }
-            .sheet(isPresented: $showSpotifySetup) {
-                ZStack {
-                    LinearGradient(colors: [Color(white: 0.11), Color(white: 0.04)], startPoint: .top, endPoint: .bottom)
-                        .ignoresSafeArea()
-                    SpotifySetupStep(back: { showSpotifySetup = false }, done: {
-                        model.setProvider(.spotify)
-                        spotifyClientIDDraft = SpotifyConfig.clientID
-                        showSpotifySetup = false
-                    })
-                    .foregroundStyle(.white)
-                }
-                .preferredColorScheme(.dark)
-            }
-            .onDisappear {
-                model.setLocalName(localNameDraft)
-                if model.provider == .spotify { model.setSpotifyClientID(spotifyClientIDDraft) }
-            }
+            .onAppear { localNameDraft = model.localName }
+            .onDisappear { model.setLocalName(localNameDraft) }
             .onChange(of: model.localName) { _, name in localNameDraft = name }
             .navigationTitle("Settings")
             .navigationBarTitleDisplayMode(.inline)

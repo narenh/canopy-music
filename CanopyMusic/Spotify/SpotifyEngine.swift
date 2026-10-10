@@ -153,7 +153,7 @@ final class SpotifyEngine: PlaybackEngine {
             log("Spotify is playing \(uri ?? "nothing") instead of \(expected); retrying")
             struct Body: Encodable { var uris: [String] }
             settleUntil = Date().addingTimeInterval(2)
-            try? await api.send("PUT", "/me/player/play", query: deviceQuery, body: Body(uris: [expected]))
+            _ = try? await api.send("PUT", "/me/player/play", query: deviceQuery, body: Body(uris: [expected]))
             return
         }
         if uri != currentURI {

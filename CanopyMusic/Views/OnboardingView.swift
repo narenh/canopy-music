@@ -18,13 +18,25 @@ struct OnboardingView: View {
             case .chooser:
                 chooser
                     .transition(.move(edge: .leading).combined(with: .opacity))
+                    .overlay(alignment: .topLeading) {
+                        if model.isChangingService {
+                            Button("Cancel") { model.cancelChangeService() }
+                                .buttonStyle(.glass)
+                                .controlSize(.large)
+                                .padding(28)
+                        }
+                    }
             case .spotify:
                 SpotifySetupStep(
                     back: { go(.chooser) },
                     done: {
                         model.chooseProvider(.spotify)
-                        networkBack = .spotify
-                        go(.network)
+                        if model.isChangingService {
+                            model.finishOnboarding()
+                        } else {
+                            networkBack = .spotify
+                            go(.network)
+                        }
                     }
                 )
                 .transition(.move(edge: .trailing).combined(with: .opacity))
@@ -67,8 +79,12 @@ struct OnboardingView: View {
                         model.chooseProvider(.appleMusic)
                         Task {
                             await model.requestAuthorization()
-                            networkBack = .chooser
-                            go(.network)
+                            if model.isChangingService {
+                                model.finishOnboarding()
+                            } else {
+                                networkBack = .chooser
+                                go(.network)
+                            }
                         }
                     }
                     ServiceCard(

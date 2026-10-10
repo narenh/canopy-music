@@ -1,3 +1,4 @@
+import AVFoundation
 import CanopyCore
 import MusicKit
 import SwiftUI
@@ -6,6 +7,7 @@ import SwiftUI
 struct HostView: View {
     @Environment(AppModel.self) private var model
     @State private var showPicker = false
+    @State private var showSettings = false
     @State private var scrollTarget: UUID?
 
     private var session: PartySession { model.session }
@@ -24,6 +26,7 @@ struct HostView: View {
         .environment(\.artworkTheme, theme)
         .preferredColorScheme(.dark)
         .sheet(isPresented: $showPicker) { PlaylistPickerView() }
+        .sheet(isPresented: $showSettings) { SettingsSheet() }
         .alert("Something went wrong", isPresented: Binding(get: { model.errorMessage != nil }, set: { if !$0 { model.errorMessage = nil } })) {
             Button("OK", role: .cancel) {}
         } message: {
@@ -35,108 +38,85 @@ struct HostView: View {
 
     private var settings: some View {
         @Bindable var model = model
-        return Form {
-            Section {
-                LogoView(height: 44)
-                    .frame(maxWidth: .infinity)
-                    .listRowBackground(Color.clear)
+        return VStack(spacing: 0) {
+            HStack {
+                LogoView(height: 36)
+                Spacer()
+                Button {
+                    showSettings = true
+                } label: {
+                    Image(systemName: "gearshape")
+                        .font(.system(size: 20, weight: .semibold))
+                        .frame(width: 32, height: 32)
+                }
+                .buttonStyle(.glass)
+                .buttonBorderShape(.circle)
+                .accessibilityLabel("Settings")
             }
+            .padding(.horizontal, 24)
+            .padding(.top, 20)
 
-            Section("Music") {
-                if model.isDemo {
-                    Label("Demo mode: fake songs, no audio", systemImage: "theatermasks")
-                } else if model.authorization == .authorized {
-                    Label("Apple Music connected", systemImage: "checkmark.circle.fill")
-                        .foregroundStyle(.green)
-                } else {
-                    Button {
-                        Task { await model.requestAuthorization() }
-                    } label: {
-                        Label("Connect Apple Music", systemImage: "music.note")
+            Form {
+                Section("Music") {
+                    if model.isDemo {
+                        Label("Demo mode: fake songs, no audio", systemImage: "theatermasks")
+                    } else if model.authorization == .authorized {
+                        Label("Apple Music connected", systemImage: "checkmark.circle.fill")
+                            .foregroundStyle(.green)
+                    } else {
+                        Button {
+                            Task { await model.requestAuthorization() }
+                        } label: {
+                            Label("Connect Apple Music", systemImage: "music.note")
+                        }
+                        if model.authorization == .denied {
+                            Text("Apple Music access is off. Turn it on in Settings › Privacy › Media & Apple Music.")
+                                .font(.footnote)
+                                .foregroundStyle(.secondary)
+                        }
                     }
-                    if model.authorization == .denied {
-                        Text("Apple Music access is off. Turn it on in Settings › Privacy › Media & Apple Music.")
-                            .font(.footnote)
+                    Toggle("Shuffle", isOn: $model.shuffle)
+                    Toggle("Crossfade", isOn: $model.crossfade)
+                }
+
+                Section("Speakers") {
+                    SpeakersRow()
+                }
+
+                Section("Guests") {
+                    if let url = model.guestURL {
+                        LabeledContent("Phone link", value: GuestQRCard.display(model.friendlyURL ?? url))
+                        if model.friendlyURL != nil {
+                            LabeledContent("Also at", value: GuestQRCard.display(url))
+                        }
+                    } else {
+                        Text("Connect the iPad to Wi-Fi so guests can queue from their phones.")
                             .foregroundStyle(.secondary)
                     }
                 }
-                Toggle("Demo mode", isOn: Binding(get: { model.isDemo }, set: { model.setDemoMode($0) }))
-            }
 
-            Section("Base playlist") {
-                Toggle("Shuffle", isOn: $model.shuffle)
-            }
-
-            Section("Playback") {
-                HStack(spacing: 16) {
+                Section {
+                    SecureField("PIN to unlock (optional)", text: $model.hostPIN)
+                        .keyboardType(.numberPad)
                     Button {
-                        Task { session.isPlaying ? session.pause() : await model.play() }
+                        model.lock()
                     } label: {
-                        Image(systemName: session.isPlaying ? "pause.fill" : "play.fill")
-                            .frame(width: 36, height: 36)
+                        Label("Lock party screen", systemImage: "lock.fill")
+                            .font(.headline)
+                            .frame(maxWidth: .infinity)
                     }
-                    .buttonStyle(.glass)
-                    .buttonBorderShape(.circle)
-                    .accessibilityLabel(session.isPlaying ? "Pause" : "Play")
-                    Button {
-                        Task { await session.skip() }
-                    } label: {
-                        Image(systemName: "forward.fill")
-                            .frame(width: 36, height: 36)
-                    }
-                    .buttonStyle(.glass)
-                    .buttonBorderShape(.circle)
-                    .accessibilityLabel("Skip")
-                    Spacer()
-                    RoutePicker(tint: .white)
-                        .frame(width: 44, height: 44)
-                        .accessibilityLabel("Choose speakers")
+                    .buttonStyle(.glassProminent)
+                    .controlSize(.large)
+                    .listRowBackground(Color.clear)
+                    .disabled(session.state.current == nil)
+                } footer: {
+                    Text("To unlock later, press and hold the Canopy logo. Turn on Guided Access (triple-click the top button) so guests can't leave the app.")
                 }
-                .font(.system(size: 22))
-                Toggle("Crossfade", isOn: $model.crossfade)
-                Button("Clear all requests", role: .destructive) { session.clearRequests() }
-                    .disabled(!session.state.upNext.contains(where: \.isRequest))
             }
-
-            Section {
-                if let url = model.guestURL {
-                    LabeledContent("Phone link", value: GuestQRCard.display(model.friendlyURL ?? url))
-                    if model.friendlyURL != nil {
-                        LabeledContent("Also at", value: GuestQRCard.display(url))
-                    }
-                } else {
-                    Text("Connect the iPad to Wi-Fi so guests can queue from their phones.")
-                        .foregroundStyle(.secondary)
-                }
-                TextField("Wi-Fi name (optional)", text: $model.wifiSSID)
-                    .textInputAutocapitalization(.never)
-                    .autocorrectionDisabled()
-                SecureField("Wi-Fi password", text: $model.wifiPassword)
-            } header: {
-                Text("Guests")
-            } footer: {
-                Text("Adding Wi-Fi details shows a second QR code that joins your network.")
-            }
-
-            Section {
-                SecureField("PIN to unlock (optional)", text: $model.hostPIN)
-                    .keyboardType(.numberPad)
-                Button {
-                    model.lock()
-                } label: {
-                    Label("Lock party screen", systemImage: "lock.fill")
-                        .font(.headline)
-                        .frame(maxWidth: .infinity)
-                }
-                .buttonStyle(.glassProminent)
-                .controlSize(.large)
-                .listRowBackground(Color.clear)
-                .disabled(session.state.current == nil)
-            } footer: {
-                Text("To unlock later, press and hold the Canopy logo. Turn on Guided Access (triple-click the top button) so guests can't leave the app.")
-            }
+            .scrollContentBackground(.hidden)
+            .scrollBounceBehavior(.basedOnSize)
+            .listSectionSpacing(.compact)
         }
-        .scrollContentBackground(.hidden)
     }
 
     // MARK: Queue column
@@ -163,7 +143,12 @@ struct HostView: View {
             HStack {
                 Text("Up next").font(.system(size: 22, weight: .bold))
                 Spacer()
-                Text("Swipe or tap − to remove").font(.footnote).foregroundStyle(.white.opacity(0.45))
+                Text("Tap − to remove").font(.footnote).foregroundStyle(.white.opacity(0.45))
+                if session.state.upNext.contains(where: \.isRequest) {
+                    Button("Clear requests", role: .destructive) { session.clearRequests() }
+                        .buttonStyle(.glass)
+                        .controlSize(.small)
+                }
             }
             .foregroundStyle(.white)
             .padding(.horizontal, 20)
@@ -185,6 +170,76 @@ struct HostView: View {
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
         .glassEffect(.regular.tint(.black.opacity(0.2)), in: RoundedRectangle(cornerRadius: 32, style: .continuous))
+    }
+}
+
+// MARK: - Speakers
+
+/// Current audio output (AirPlay speakers, or the iPad) with the system AirPlay picker.
+private struct SpeakersRow: View {
+    @State private var outputs: [AVAudioSessionPortDescription] = []
+
+    var body: some View {
+        HStack(spacing: 12) {
+            Image(systemName: "hifispeaker.2.fill")
+                .font(.system(size: 18))
+                .foregroundStyle(.secondary)
+                .frame(width: 28)
+            VStack(alignment: .leading, spacing: 2) {
+                Text(outputs.isEmpty ? "This iPad" : outputs.map(\.portName).joined(separator: ", "))
+                    .lineLimit(2)
+                if outputs.contains(where: { $0.portType == .airPlay }) {
+                    Text("AirPlay").font(.footnote).foregroundStyle(.secondary)
+                }
+            }
+            Spacer()
+            RoutePicker(tint: .white)
+                .frame(width: 44, height: 44)
+                .accessibilityLabel("Choose speakers")
+        }
+        .onAppear(perform: refresh)
+        .onReceive(NotificationCenter.default.publisher(for: AVAudioSession.routeChangeNotification).receive(on: RunLoop.main)) { _ in
+            refresh()
+        }
+    }
+
+    private func refresh() {
+        outputs = AVAudioSession.sharedInstance().currentRoute.outputs
+    }
+}
+
+// MARK: - Settings sheet
+
+private struct SettingsSheet: View {
+    @Environment(AppModel.self) private var model
+    @Environment(\.dismiss) private var dismiss
+
+    var body: some View {
+        @Bindable var model = model
+        NavigationStack {
+            Form {
+                Section {
+                    TextField("Network name", text: $model.wifiSSID)
+                        .textInputAutocapitalization(.never)
+                        .autocorrectionDisabled()
+                    SecureField("Password", text: $model.wifiPassword)
+                } header: {
+                    Text("Guest Wi-Fi")
+                } footer: {
+                    Text("Shows a second QR code on the party screen that joins this network. Leave the name empty to hide it.")
+                }
+                Section {
+                    Toggle("Demo mode", isOn: Binding(get: { model.isDemo }, set: { model.setDemoMode($0) }))
+                } footer: {
+                    Text("Fake songs and no audio, for trying things out without Apple Music.")
+                }
+            }
+            .navigationTitle("Settings")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .confirmationAction) { Button("Done") { dismiss() } }
+            }
+        }
     }
 }
 

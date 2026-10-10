@@ -279,7 +279,6 @@ struct PartyView: View {
 struct NowPlayingView: View {
     let item: QueueItem?
     let session: PartySession
-    @Environment(\.artworkTheme) private var theme
 
     var body: some View {
         GeometryReader { geo in
@@ -295,7 +294,7 @@ struct NowPlayingView: View {
                     HStack(alignment: .firstTextBaseline, spacing: 12) {
                         if item != nil {
                             EqualizerBars(isAnimating: session.isPlaying)
-                                .foregroundStyle(theme.accent)
+                                .foregroundStyle(.white)
                                 .frame(width: 24, height: 24)
                         }
                         Text(item?.track.title ?? "Nothing playing yet")

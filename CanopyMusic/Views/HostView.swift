@@ -308,32 +308,6 @@ private struct SettingsSheet: View {
         NavigationStack {
             Form {
                 Section {
-                    Button {
-                        dismiss()
-                        model.changeService()
-                    } label: {
-                        HStack {
-                            Text(model.provider.title)
-                                .foregroundStyle(.primary)
-                            Spacer()
-                            Text("Change Service")
-                                .foregroundStyle(.tint)
-                        }
-                        .contentShape(Rectangle())
-                    }
-                    .buttonStyle(.plain)
-                    if model.provider == .spotify {
-                        LabeledContent("Spotify requests", value: "\(model.spotifyAPI.requestCount) (\(Int(model.spotifyAPI.requestsPerMinute.rounded()))/min)")
-                        if model.spotifyAPI.rateLimitedCount > 0 {
-                            LabeledContent("Rate limited", value: "\(model.spotifyAPI.rateLimitedCount)×")
-                                .foregroundStyle(.orange)
-                        }
-                    }
-                } header: {
-                    Text("Music Service")
-                }
-                .listRowBackground(Color.white.opacity(0.08))
-                Section {
                     Toggle("Queue from phones", isOn: $model.phoneQueueEnabled)
                     if model.phoneQueueEnabled {
                         HStack(spacing: 0) {
@@ -383,6 +357,32 @@ private struct SettingsSheet: View {
                     Text("Playback")
                 } footer: {
                     Text("Used when crossfade is on. Apple Music's AutoMix isn't available to other apps.")
+                }
+                .listRowBackground(Color.white.opacity(0.08))
+                Section {
+                    Button {
+                        dismiss()
+                        model.changeService()
+                    } label: {
+                        HStack {
+                            Text(model.provider.title)
+                                .foregroundStyle(.primary)
+                            Spacer()
+                            Text("Change Service")
+                                .foregroundStyle(.tint)
+                        }
+                        .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
+                    if model.provider == .spotify {
+                        LabeledContent("Spotify requests", value: "\(model.spotifyAPI.requestCount) (\(Int(model.spotifyAPI.requestsPerMinute.rounded()))/min)")
+                        if model.spotifyAPI.rateLimitedCount > 0 {
+                            LabeledContent("Rate limited", value: "\(model.spotifyAPI.rateLimitedCount)×")
+                                .foregroundStyle(.orange)
+                        }
+                    }
+                } header: {
+                    Text("Music Service")
                 }
                 .listRowBackground(Color.white.opacity(0.08))
             }

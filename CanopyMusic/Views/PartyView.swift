@@ -279,6 +279,7 @@ struct PartyView: View {
 struct NowPlayingView: View {
     let item: QueueItem?
     let session: PartySession
+    @Environment(\.artworkTheme) private var theme
 
     var body: some View {
         GeometryReader { geo in
@@ -291,12 +292,15 @@ struct NowPlayingView: View {
                     .id(item?.id)
                     .transition(.asymmetric(insertion: .scale(scale: 0.9).combined(with: .opacity), removal: .opacity))
                 VStack(spacing: 6) {
-                    if item != nil {
-                        NowPlayingLabel(isPlaying: session.isPlaying)
-                            .padding(.bottom, 4)
+                    HStack(alignment: .firstTextBaseline, spacing: 12) {
+                        if item != nil {
+                            EqualizerBars(isAnimating: session.isPlaying)
+                                .foregroundStyle(theme.accent)
+                                .frame(width: 24, height: 24)
+                        }
+                        Text(item?.track.title ?? "Nothing playing yet")
+                            .font(.system(size: 36, weight: .bold))
                     }
-                    Text(item?.track.title ?? "Nothing playing yet")
-                        .font(.system(size: 36, weight: .bold))
                     Text(item?.track.artist ?? "Search for a song to get things going")
                         .font(.system(size: 22, weight: .medium))
                         .foregroundStyle(.white.opacity(0.65))
@@ -360,24 +364,6 @@ private struct TransportControls: View {
             .buttonBorderShape(.circle)
             .foregroundStyle(.white)
         }
-    }
-}
-
-/// Animated equalizer bars plus "Now playing" / "Paused", in the artwork accent color.
-private struct NowPlayingLabel: View {
-    let isPlaying: Bool
-    @Environment(\.artworkTheme) private var theme
-
-    var body: some View {
-        HStack(spacing: 8) {
-            EqualizerBars(isAnimating: isPlaying)
-                .frame(width: 18, height: 14)
-            Text(isPlaying ? "Now playing" : "Paused")
-                .font(.system(size: 15, weight: .semibold))
-                .contentTransition(.opacity)
-        }
-        .foregroundStyle(theme.accent)
-        .animation(.easeInOut(duration: 0.25), value: isPlaying)
     }
 }
 

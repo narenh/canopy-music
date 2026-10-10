@@ -62,7 +62,7 @@ struct UpNextList: View {
                         item: item, locked: locked, nowPlaying: row.kind == .nowPlaying,
                         hidden: arriving.contains(item.id), onArtworkFrame: onArtworkFrame
                     )
-                    .opacity(row.kind == .played ? 0.4 : row.kind == .nowPlaying ? 0.6 : 1)
+                    .opacity(row.kind == .upcoming ? 1 : 0.4)
                     .allowsHitTesting(upcoming)
                     .modifier(RemoveMenu(enabled: upcoming && canRemoveByMenu(item) && !locked) {
                         withAnimation(.spring(duration: 0.4, bounce: 0.1)) { _ = session.remove(item.id) }
@@ -179,8 +179,8 @@ private struct UpNextRow: View {
                     .font(.system(size: 12, weight: .semibold))
                     .padding(.horizontal, 9)
                     .padding(.vertical, 4)
-                    .foregroundStyle(.white.opacity(0.85))
-                    .background(.white.opacity(0.18), in: Capsule())
+                    .foregroundStyle(.white.opacity(0.75))
+                    .background(.white.opacity(0.14), in: Capsule())
             } else if let requester = item.requester {
                 RequesterPill(requester: requester)
             }

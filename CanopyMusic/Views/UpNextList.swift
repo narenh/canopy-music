@@ -13,8 +13,8 @@ struct UpNextList: View {
     var flashing: Set<UUID> = []
     @Binding var scrollTarget: UUID?
     var onArtworkFrame: (UUID, CGRect) -> Void = { _, _ in }
-    /// Shows recently played songs, dimmed, above the queue. The list rests on the first
-    /// upcoming song and drifts back to it after `Idle.timeout` without scrolling.
+    /// Shows recently played songs and the current song (dimmed, "Now Playing") above the queue.
+    /// The list rests on the now-playing row and drifts back to it after `Idle.timeout`.
     var showsHistory = false
     /// Changing this scrolls back to the first upcoming song.
     var homeSignal = 0
@@ -25,45 +25,71 @@ struct UpNextList: View {
     private static let fadeHeight: CGFloat = 48
     private static let historyLimit = 20
 
+    /// One row per song. Songs keep the same row as they go from upcoming to now playing to
+    /// played, so the list restyles rows instead of moving them between separate sections
+    /// (which left stale, still-draggable rows behind).
+    private enum Kind { case played, nowPlaying, upcoming }
+    private struct Row: Identifiable {
+        let item: QueueItem
+        let kind: Kind
+        var id: UUID { item.id }
+    }
+
+    private var rows: [Row] {
+        var rows: [Row] = []
+        if showsHistory {
+            rows += session.state.history.prefix(Self.historyLimit).reversed().map { Row(item: $0, kind: .played) }
+            if let current = session.state.current { rows.append(Row(item: current, kind: .nowPlaying)) }
+        }
+        rows += session.state.upNext.map { Row(item: $0, kind: .upcoming) }
+        return rows
+    }
+
+    /// Where the list rests: the now-playing row when shown, otherwise the first upcoming song.
+    private var homeID: UUID? {
+        showsHistory ? (session.state.current?.id ?? session.state.upNext.first?.id) : session.state.upNext.first?.id
+    }
+
     var body: some View {
-        let items = session.state.upNext
-        let played = showsHistory ? Array(session.state.history.prefix(Self.historyLimit).reversed()) : []
+        let rows = rows
+        let firstUpcoming = rows.firstIndex { $0.kind == .upcoming } ?? rows.count
         ScrollViewReader { proxy in
             List {
-                if !played.isEmpty {
-                    ForEach(played) { item in
-                        UpNextRow(item: item, locked: false, hidden: false, onArtworkFrame: { _, _ in })
-                            .opacity(0.4)
-                            .allowsHitTesting(false)
-                            .listRowBackground(Color.clear)
-                            .listRowInsets(EdgeInsets(top: 6, leading: 12, bottom: 6, trailing: 12))
-                            .listRowSeparatorTint(.white.opacity(0.08))
-                            .accessibilityLabel("Played: \(item.track.title) by \(item.track.artist)")
-                    }
-                }
-                ForEach(items) { item in
+                ForEach(rows) { row in
+                    let item = row.item
                     let locked = item.id == session.state.lockedNextID
-                    UpNextRow(item: item, locked: locked, hidden: arriving.contains(item.id), onArtworkFrame: onArtworkFrame)
-                        .modifier(RemoveMenu(enabled: canRemoveByMenu(item) && !locked) {
-                            withAnimation(.spring(duration: 0.4, bounce: 0.1)) { _ = session.remove(item.id) }
-                        })
-                        .listRowBackground(
-                            RoundedRectangle(cornerRadius: 10, style: .continuous)
-                                .fill(flashing.contains(item.id) ? theme.accent.opacity(0.32) : .clear)
-                                .padding(.horizontal, 4)
-                        )
-                        .listRowInsets(EdgeInsets(top: 6, leading: 12, bottom: 6, trailing: 12))
-                        .listRowSeparatorTint(.white.opacity(0.08))
-                        .moveDisabled(locked)
-                        .deleteDisabled(!canDelete(item) || locked)
-                        .id(item.id)
+                    let upcoming = row.kind == .upcoming
+                    UpNextRow(
+                        item: item, locked: locked, nowPlaying: row.kind == .nowPlaying,
+                        hidden: arriving.contains(item.id), onArtworkFrame: onArtworkFrame
+                    )
+                    .opacity(row.kind == .played ? 0.4 : row.kind == .nowPlaying ? 0.6 : 1)
+                    .allowsHitTesting(upcoming)
+                    .modifier(RemoveMenu(enabled: upcoming && canRemoveByMenu(item) && !locked) {
+                        withAnimation(.spring(duration: 0.4, bounce: 0.1)) { _ = session.remove(item.id) }
+                    })
+                    .listRowBackground(
+                        RoundedRectangle(cornerRadius: 10, style: .continuous)
+                            .fill(flashing.contains(item.id) ? theme.accent.opacity(0.32) : .clear)
+                            .padding(.horizontal, 4)
+                    )
+                    .listRowInsets(EdgeInsets(top: 6, leading: 12, bottom: 6, trailing: 12))
+                    .listRowSeparatorTint(.white.opacity(0.08))
+                    .moveDisabled(!upcoming || locked)
+                    .deleteDisabled(!upcoming || !canDelete(item) || locked)
+                    .id(item.id)
                 }
                 .onMove { source, destination in
-                    guard let from = source.first, items.indices.contains(from) else { return }
-                    session.move(items[from].id, to: destination > from ? destination - 1 : destination)
+                    guard let from = source.first, rows.indices.contains(from), rows[from].kind == .upcoming else { return }
+                    // Convert list positions to Up next positions; nothing can go above the queue.
+                    let to = max(destination, firstUpcoming) - firstUpcoming
+                    let fromInQueue = from - firstUpcoming
+                    session.move(rows[from].id, to: to > fromInQueue ? to - 1 : to)
                 }
-                .onDelete(perform: items.contains(where: canDelete) ? { offsets in
-                    for index in offsets where items.indices.contains(index) && canDelete(items[index]) { session.remove(items[index].id) }
+                .onDelete(perform: rows.contains(where: { $0.kind == .upcoming && canDelete($0.item) }) ? { offsets in
+                    for index in offsets where rows.indices.contains(index) && rows[index].kind == .upcoming && canDelete(rows[index].item) {
+                        session.remove(rows[index].id)
+                    }
                 } : nil)
             }
             .listStyle(.plain)
@@ -78,7 +104,7 @@ struct UpNextList: View {
                 }
             }
             .environment(\.editMode, .constant(.active))
-            .animation(.spring(duration: 0.45, bounce: 0.12), value: items.map(\.id))
+            .animation(.spring(duration: 0.45, bounce: 0.12), value: rows.map(\.id))
             .onChange(of: scrollTarget) { _, target in
                 guard let target else { return }
                 withAnimation(.easeInOut(duration: 0.35)) { proxy.scrollTo(target, anchor: .center) }
@@ -92,15 +118,15 @@ struct UpNextList: View {
                     scheduleReturn(proxy)
                 }
             }
-            .onAppear { returnToQueue(proxy, animated: false) }
+            .onAppear { scrollHome(proxy, animated: false) }
             .onChange(of: homeSignal) {
                 returnTask?.cancel()
                 returnTask = nil
-                scrollHome(proxy)
+                scrollHome(proxy, animated: true)
             }
-            .onChange(of: played.last?.id) {
-                // A song finished: re-anchor unless someone is browsing.
-                if !isScrolling, returnTask == nil { returnToQueue(proxy, animated: true) }
+            .onChange(of: session.state.current?.id) {
+                // A song changed: re-anchor unless someone is browsing.
+                if !isScrolling, returnTask == nil { scrollHome(proxy, animated: true) }
             }
         }
     }
@@ -111,22 +137,17 @@ struct UpNextList: View {
         returnTask = Task {
             try? await Task.sleep(for: Idle.timeout)
             guard !Task.isCancelled else { return }
-            returnToQueue(proxy, animated: true)
+            scrollHome(proxy, animated: true)
             returnTask = nil
         }
     }
 
-    private func scrollHome(_ proxy: ScrollViewProxy) {
-        guard let first = session.state.upNext.first?.id else { return }
-        withAnimation(.easeInOut(duration: 0.6)) { proxy.scrollTo(first, anchor: .top) }
-    }
-
-    private func returnToQueue(_ proxy: ScrollViewProxy, animated: Bool) {
-        guard showsHistory, !session.state.history.isEmpty, let first = session.state.upNext.first?.id else { return }
+    private func scrollHome(_ proxy: ScrollViewProxy, animated: Bool) {
+        guard let home = homeID else { return }
         if animated {
-            withAnimation(.easeInOut(duration: 0.6)) { proxy.scrollTo(first, anchor: .top) }
+            withAnimation(.easeInOut(duration: 0.6)) { proxy.scrollTo(home, anchor: .top) }
         } else {
-            proxy.scrollTo(first, anchor: .top)
+            proxy.scrollTo(home, anchor: .top)
         }
     }
 }
@@ -134,6 +155,7 @@ struct UpNextList: View {
 private struct UpNextRow: View {
     let item: QueueItem
     let locked: Bool
+    var nowPlaying = false
     let hidden: Bool
     let onArtworkFrame: (UUID, CGRect) -> Void
 
@@ -152,7 +174,17 @@ private struct UpNextRow: View {
             }
             .lineLimit(1)
             Spacer(minLength: 8)
-            if let requester = item.requester {
+            if nowPlaying {
+                // Who requested it is already shown in the now-playing pane.
+                Text("Now Playing")
+                    .font(.system(size: 12, weight: .semibold))
+                    .padding(.horizontal, 9)
+                    .padding(.vertical, 4)
+                    .foregroundStyle(.white.opacity(0.85))
+                    .background(.white.opacity(0.18), in: Capsule())
+                    // No reorder handle on this row; line the badge up with the others.
+                    .padding(.trailing, 42)
+            } else if let requester = item.requester {
                 RequesterPill(requester: requester)
             }
             if locked {

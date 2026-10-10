@@ -79,7 +79,10 @@ struct PartyView: View {
         VStack(spacing: 0) {
             HStack(spacing: 18) {
                 LogoView(height: 34)
-                    .onLongPressGesture(minimumDuration: 1.5) { showUnlock = true }
+                    .onLongPressGesture(minimumDuration: 1.5) {
+                        // No PIN set: go straight back to host mode, no keypad.
+                        if model.hostPIN.isEmpty { _ = model.unlock(pin: "") } else { showUnlock = true }
+                    }
                 searchField
             }
             .padding(.horizontal, 32)

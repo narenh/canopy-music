@@ -491,9 +491,7 @@ struct UnlockView: View {
         .padding(40)
         .foregroundStyle(.white)
         .preferredColorScheme(.dark)
-        .onAppear {
-            if model.hostPIN.isEmpty, model.unlock(pin: "") { dismiss() }
-        }
+
     }
 
     private func press(_ key: String) {

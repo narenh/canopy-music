@@ -108,12 +108,15 @@ struct UpNextList: View {
                 guard let target else { return }
                 withAnimation(.easeInOut(duration: 0.35)) { proxy.scrollTo(target, anchor: .center) }
             }
-            .onScrollPhaseChange { _, phase in
-                isScrolling = phase != .idle
+            .onScrollPhaseChange { old, new in
+                // Only a person scrolling counts; our own programmatic scrolls (.animating)
+                // shouldn't arm the return timer or block re-anchoring.
+                let byPerson: Set<ScrollPhase> = [.interacting, .decelerating]
+                isScrolling = byPerson.contains(new)
                 if isScrolling {
                     returnTask?.cancel()
                     returnTask = nil
-                } else {
+                } else if byPerson.contains(old) {
                     scheduleReturn(proxy)
                 }
             }
@@ -123,9 +126,16 @@ struct UpNextList: View {
                 returnTask = nil
                 scrollHome(proxy, animated: true)
             }
-            .onChange(of: session.state.current?.id) {
-                // A song changed: re-anchor unless someone is browsing.
-                if !isScrolling, returnTask == nil { scrollHome(proxy, animated: true) }
+            .onChange(of: homeID) {
+                // The first upcoming song changed (song ended, a phone moved or added something):
+                // keep it in view unless someone is browsing the list. Wait for the list's own
+                // reorder animation to settle first; a scroll issued mid-animation gets dropped.
+                guard !isScrolling, returnTask == nil else { return }
+                Task {
+                    try? await Task.sleep(for: .milliseconds(500))
+                    guard !isScrolling, returnTask == nil else { return }
+                    scrollHome(proxy, animated: true)
+                }
             }
         }
     }

@@ -14,7 +14,7 @@ struct UpNextList: View {
     @Binding var scrollTarget: UUID?
     var onArtworkFrame: (UUID, CGRect) -> Void = { _, _ in }
     /// Shows recently played songs and the current song (dimmed, "Now Playing") above the queue.
-    /// The list rests on the now-playing row and drifts back to it after `Idle.timeout`.
+    /// The list rests on the first upcoming song and drifts back to it after `Idle.timeout`.
     var showsHistory = false
     /// Changing this scrolls back to the first upcoming song.
     var homeSignal = 0
@@ -45,10 +45,9 @@ struct UpNextList: View {
         return rows
     }
 
-    /// Where the list rests: the now-playing row when shown, otherwise the first upcoming song.
-    private var homeID: UUID? {
-        showsHistory ? (session.state.current?.id ?? session.state.upNext.first?.id) : session.state.upNext.first?.id
-    }
+    /// Where the list rests: the first upcoming song. Played and now-playing rows sit above it,
+    /// for context when someone scrolls up.
+    private var homeID: UUID? { session.state.upNext.first?.id }
 
     var body: some View {
         let rows = rows
@@ -182,8 +181,6 @@ private struct UpNextRow: View {
                     .padding(.vertical, 4)
                     .foregroundStyle(.white.opacity(0.85))
                     .background(.white.opacity(0.18), in: Capsule())
-                    // No reorder handle on this row; line the badge up with the others.
-                    .padding(.trailing, 42)
             } else if let requester = item.requester {
                 RequesterPill(requester: requester)
             }

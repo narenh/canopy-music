@@ -31,6 +31,8 @@ public final class PartySession {
     @ObservationIgnored public let engine: any PlaybackEngine
 
     @ObservationIgnored private var stagedItemID: UUID?
+    /// Tail of the serial chain of engine operations (see `serially`).
+    @ObservationIgnored private var engineChain: Task<Void, Never>?
     /// The queue item the engine currently has loaded as its current track.
     @ObservationIgnored private var loadedItemID: UUID?
     @ObservationIgnored private var isSyncing = false
@@ -77,6 +79,18 @@ public final class PartySession {
 
     /// Plays the current song, loading it into the engine first if needed (e.g. after a relaunch).
     public func play() async throws {
+        let result: Result<Void, any Error> = await serially {
+            do {
+                try await self.playNow()
+                return .success(())
+            } catch {
+                return .failure(error)
+            }
+        }
+        try result.get()
+    }
+
+    private func playNow() async throws {
         if state.current == nil { mutate { $0.advance() } }
         guard let current = state.current else { return }
         if loadedItemID == current.id {
@@ -105,6 +119,10 @@ public final class PartySession {
     /// Like the Music app: restarts the song if it's more than a few seconds in, otherwise goes
     /// to the previous song (and keeps playing or paused as it was).
     public func previous() async {
+        await serially { await self.previousNow() }
+    }
+
+    private func previousNow() async {
         guard engine.currentTime <= 3, !state.history.isEmpty else {
             engine.restartCurrent()
             broadcast()
@@ -126,6 +144,10 @@ public final class PartySession {
     }
 
     public func skip() async {
+        await serially { await self.skipNow() }
+    }
+
+    private func skipNow() async {
         let wasPlaying = engine.isPlaying
         if wasPlaying, stagedItemID != nil, (try? await engine.skipToStaged()) != nil { return }
         mutate { $0.advance() }
@@ -209,7 +231,20 @@ public final class PartySession {
         try await engine.play(item.track)
         isPlaying = engine.isPlaying
         broadcast()
-        await syncStaging()
+        Task { await syncStaging() }
+    }
+
+    /// Runs engine operations one at a time, in order. Overlapping operations (two quick backs,
+    /// a skip while the next song is being staged) can wedge Apple's out-of-process player,
+    /// which hangs the main thread. Never call this from inside an operation it's running.
+    private func serially<T: Sendable>(_ operation: @escaping @MainActor @Sendable () async -> T) async -> T {
+        let previous = engineChain
+        let task = Task { @MainActor in
+            await previous?.value
+            return await operation()
+        }
+        engineChain = Task { _ = await task.value }
+        return await task.value
     }
 
     private func handle(_ event: PlaybackEvent) {
@@ -224,7 +259,7 @@ public final class PartySession {
             loadedItemID = nil
             mutate { $0.advance() }
             if let current = state.current {
-                Task { try? await play(current) }
+                Task { await serially { try? await self.play(current) } }
             }
         case .statusChanged:
             isPlaying = engine.isPlaying
@@ -240,24 +275,29 @@ public final class PartySession {
         defer { isSyncing = false }
         while needsSync {
             needsSync = false
-            // Only stage behind a song the engine actually has loaded.
-            guard let current = state.current, loadedItemID == current.id else { continue }
-            let desired: QueueItem?
-            if engine.canReplaceStaged {
-                desired = state.upNext.first
-            } else {
-                // Late staging: only stage once the ticker has locked the next item.
-                guard stagedItemID == nil, let locked = state.lockedNextID,
-                      let first = state.upNext.first, first.id == locked else { continue }
-                desired = first
-            }
-            guard desired?.id != stagedItemID else { continue }
-            do {
-                try await engine.stage(desired?.track)
-                stagedItemID = desired?.id
-            } catch {
-                // Leave stagedItemID alone; the next change retries, and `.reachedEnd` covers a miss.
-            }
+            await serially { await self.stageIfNeeded() }
+        }
+    }
+
+    /// Makes the engine's staged track match `upNext.first` (or the locked item).
+    private func stageIfNeeded() async {
+        // Only stage behind a song the engine actually has loaded.
+        guard let current = state.current, loadedItemID == current.id else { return }
+        let desired: QueueItem?
+        if engine.canReplaceStaged {
+            desired = state.upNext.first
+        } else {
+            // Late staging: only stage once the ticker has locked the next item.
+            guard stagedItemID == nil, let locked = state.lockedNextID,
+                  let first = state.upNext.first, first.id == locked else { return }
+            desired = first
+        }
+        guard desired?.id != stagedItemID else { return }
+        do {
+            try await engine.stage(desired?.track)
+            stagedItemID = desired?.id
+        } catch {
+            // Leave stagedItemID alone; the next change retries, and `.reachedEnd` covers a miss.
         }
     }
 

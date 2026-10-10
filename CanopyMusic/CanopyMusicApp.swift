@@ -123,6 +123,14 @@ struct RootView: View {
                 try? await Task.sleep(for: .seconds(2))
                 await model.session.previous()
             }
+            // `-autoStress` fires back, back, next without waiting, like quick taps.
+            if ProcessInfo.processInfo.arguments.contains("-autoStress") {
+                try? await Task.sleep(for: .seconds(4))
+                let session = model.session
+                Task { await session.previous() }
+                Task { await session.previous() }
+                Task { await session.skip() }
+            }
             // `-autoParty` starts a demo party and locks, for screenshots and UI work in the simulator.
             if ProcessInfo.processInfo.arguments.contains("-autoParty"), model.isDemo {
                 if model.session.state.current == nil, let first = try? await model.session.catalog.libraryPlaylists().first {

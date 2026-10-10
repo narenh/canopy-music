@@ -39,7 +39,7 @@ struct StubCatalog: MusicCatalog {
 let base = PlaylistSummary(id: "p", name: "Base", kind: .library)
 
 /// Lets queued `Task { await syncStaging() }` work run.
-@MainActor func settle() async { for _ in 0..<20 { await Task.yield() } }
+@MainActor func settle() async { for _ in 0..<200 { await Task.yield() } }
 
 @MainActor
 @Suite struct PartySessionTests {
@@ -159,6 +159,28 @@ let base = PlaylistSummary(id: "p", name: "Base", kind: .library)
         #expect(session.state.current?.track.id == "a")
         #expect(engine.playing?.id == "a")
         #expect(session.state.upNext.first?.track.id == "b")
+    }
+
+    @Test func rapidBackBackNextStaysConsistent() async throws {
+        let engine = FakeEngine()
+        let session = PartySession(catalog: StubCatalog(ids: ["a", "b", "c", "d"]), engine: engine)
+        try await session.load(playlist: base)
+        try await session.play()
+        await settle()
+        engine.finishTrack() // b
+        await settle()
+        engine.finishTrack() // c
+        await settle()
+        #expect(session.state.current?.track.id == "c")
+        // Fire all three without waiting, like quick taps.
+        async let back1: Void = session.previous()
+        async let back2: Void = session.previous()
+        async let next: Void = session.skip()
+        _ = await (back1, back2, next)
+        await settle()
+        #expect(session.state.current?.track.id == "b")
+        #expect(engine.playing?.id == "b")
+        #expect(engine.staged?.id == session.state.upNext.first?.track.id)
     }
 
     @Test func persistsAndRestores() async throws {

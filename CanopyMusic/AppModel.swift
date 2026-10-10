@@ -3,6 +3,7 @@ import CanopyCore
 import CanopyServer
 import Foundation
 import MusicKit
+import SwiftUI
 import UIKit
 
 /// App-wide state: which provider is active, the party session, the phone server, and host settings.
@@ -19,7 +20,19 @@ final class AppModel {
             case .demo: "Demo"
             }
         }
+
+        /// App tint: Apple Music red, Spotify green, Canopy green for the demo.
+        var accent: Color {
+            switch self {
+            case .appleMusic: Color(red: 0.98, green: 0.18, blue: 0.28)
+            case .spotify: Color(red: 0.12, green: 0.84, blue: 0.38)
+            case .demo: Color("AccentColor")
+            }
+        }
     }
+
+    /// True until a music service has been chosen on the first-launch screen.
+    private(set) var needsOnboarding: Bool
 
     let spotifyAuth: SpotifyAuth
     /// Mirrors `SpotifyConfig.clientID` so views update when it's entered.
@@ -80,6 +93,11 @@ final class AppModel {
         #endif
         let provider = Provider(rawValue: defaults.string(forKey: "provider") ?? "") ?? fallback
         self.provider = provider
+        var needsOnboarding = defaults.string(forKey: "provider") == nil
+        #if DEBUG
+        if ProcessInfo.processInfo.arguments.contains("-onboarding") { needsOnboarding = true }
+        #endif
+        self.needsOnboarding = needsOnboarding
         let spotifyAuth = SpotifyAuth()
         let spotifyAPI = SpotifyAPI(auth: spotifyAuth)
         self.spotifyAuth = spotifyAuth
@@ -121,6 +139,16 @@ final class AppModel {
     // MARK: Provider
 
     var isDemo: Bool { provider == .demo }
+
+    /// First-launch choice; always records it, even if it matches the default.
+    func chooseProvider(_ next: Provider) {
+        setProvider(next)
+        defaults.set(next.rawValue, forKey: "provider")
+    }
+
+    func finishOnboarding() {
+        needsOnboarding = false
+    }
 
     func setProvider(_ next: Provider) {
         guard next != provider else { return }

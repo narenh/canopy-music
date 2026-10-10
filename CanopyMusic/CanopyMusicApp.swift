@@ -80,7 +80,10 @@ struct RootView: View {
             return (item, lines)
         }
         Group {
-            if model.isLocked {
+            if model.needsOnboarding {
+                OnboardingView()
+                    .transition(.opacity)
+            } else if model.isLocked {
                 PartyView()
                     .transition(.opacity)
             } else {
@@ -89,6 +92,8 @@ struct RootView: View {
             }
         }
         .animation(.easeInOut(duration: 0.4), value: model.isLocked)
+        .animation(.easeInOut(duration: 0.5), value: model.needsOnboarding)
+        .tint(model.provider.accent)
         .overlay {
             if let (item, lines) = takeover {
                 TakeoverView(lines: lines, track: item.track, session: model.session) {

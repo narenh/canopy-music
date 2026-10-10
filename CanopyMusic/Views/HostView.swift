@@ -288,6 +288,7 @@ private struct SettingsSheet: View {
     /// re-announced on every keystroke.
     @State private var localNameDraft = ""
     @State private var spotifyClientIDDraft = ""
+    @State private var showSpotifySetup = false
 
     var body: some View {
         @Bindable var model = model
@@ -346,7 +347,14 @@ private struct SettingsSheet: View {
                 }
                 .listRowBackground(Color.white.opacity(0.08))
                 Section {
-                    Picker("Music service", selection: Binding(get: { model.provider }, set: { model.setProvider($0) })) {
+                    Picker("Music service", selection: Binding(get: { model.provider }, set: { next in
+                        // Spotify needs a Client ID and sign-in before it can be selected.
+                        if next == .spotify, !(model.spotifyAuth.isSignedIn && !model.spotifyClientID.isEmpty) {
+                            showSpotifySetup = true
+                        } else {
+                            model.setProvider(next)
+                        }
+                    })) {
                         ForEach(AppModel.Provider.allCases, id: \.self) { Text($0.title).tag($0) }
                     }
                     if model.provider == .spotify {
@@ -389,6 +397,19 @@ private struct SettingsSheet: View {
             .onAppear {
                 localNameDraft = model.localName
                 spotifyClientIDDraft = SpotifyConfig.clientID
+            }
+            .sheet(isPresented: $showSpotifySetup) {
+                ZStack {
+                    LinearGradient(colors: [Color(white: 0.11), Color(white: 0.04)], startPoint: .top, endPoint: .bottom)
+                        .ignoresSafeArea()
+                    SpotifySetupStep(back: { showSpotifySetup = false }, done: {
+                        model.setProvider(.spotify)
+                        spotifyClientIDDraft = SpotifyConfig.clientID
+                        showSpotifySetup = false
+                    })
+                    .foregroundStyle(.white)
+                }
+                .preferredColorScheme(.dark)
             }
             .onDisappear {
                 model.setLocalName(localNameDraft)

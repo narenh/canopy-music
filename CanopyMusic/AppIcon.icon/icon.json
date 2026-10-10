@@ -1,0 +1,39 @@
+{
+  "fill" : {
+    "linear-gradient" : [
+      "display-p3:0.61972,0.00000,0.51368,1.00000",
+      "display-p3:0.32771,0.00000,0.30366,1.00000"
+    ]
+  },
+  "groups" : [
+    {
+      "layers" : [
+        {
+          "image-name" : "canopy-music-v1.png",
+          "name" : "canopy-music-v1",
+          "position" : {
+            "scale" : 0.31,
+            "translation-in-points" : [
+              -2.3250000000000455,
+              -15
+            ]
+          }
+        }
+      ],
+      "shadow" : {
+        "kind" : "neutral",
+        "opacity" : 0.5
+      },
+      "translucency" : {
+        "enabled" : true,
+        "value" : 0.3
+      }
+    }
+  ],
+  "supported-platforms" : {
+    "circles" : [
+      "watchOS"
+    ],
+    "squares" : "shared"
+  }
+}

@@ -11,8 +11,14 @@ struct OnboardingView: View {
             LinearGradient(colors: [Color(white: 0.11), Color(white: 0.04)], startPoint: .top, endPoint: .bottom)
                 .ignoresSafeArea()
             if showSpotifySetup {
-                SpotifySetupStep(back: { withAnimation(.spring(duration: 0.4)) { showSpotifySetup = false } })
-                    .transition(.move(edge: .trailing).combined(with: .opacity))
+                SpotifySetupStep(
+                    back: { withAnimation(.spring(duration: 0.4)) { showSpotifySetup = false } },
+                    done: {
+                        model.chooseProvider(.spotify)
+                        model.finishOnboarding()
+                    }
+                )
+                .transition(.move(edge: .trailing).combined(with: .opacity))
             } else {
                 chooser
                     .transition(.move(edge: .leading).combined(with: .opacity))
@@ -53,7 +59,7 @@ struct OnboardingView: View {
                         name: "Spotify",
                         detail: "Controls Spotify on this iPad or an Apple TV. Needs Premium and a free developer app."
                     ) {
-                        model.chooseProvider(.spotify)
+                        // Spotify is only chosen once sign-in succeeds in the next step.
                         withAnimation(.spring(duration: 0.4)) { showSpotifySetup = true }
                     }
                 }
@@ -105,11 +111,14 @@ private struct ServiceCard: View {
     }
 }
 
-private struct SpotifySetupStep: View {
+/// Client ID + sign-in. There's no skip: Spotify isn't selectable until this succeeds.
+/// Used by onboarding and when switching to Spotify in Settings.
+struct SpotifySetupStep: View {
     @Environment(AppModel.self) private var model
     @State private var clientID = SpotifyConfig.clientID
     @State private var working = false
     let back: () -> Void
+    let done: () -> Void
 
     private static let readme = URL(string: "https://github.com/narenh/canopy-music#spotify")!
 
@@ -149,7 +158,7 @@ private struct SpotifySetupStep: View {
                     Task {
                         await model.signInToSpotify()
                         working = false
-                        if model.spotifyAuth.isSignedIn { model.finishOnboarding() }
+                        if model.spotifyAuth.isSignedIn { done() }
                     }
                 } label: {
                     if working { ProgressView() } else { Text("Sign in to Spotify").bold() }
@@ -158,14 +167,6 @@ private struct SpotifySetupStep: View {
                 .controlSize(.large)
                 .disabled(clientID.trimmingCharacters(in: .whitespaces).isEmpty || working)
             }
-
-            Button("Do this later") {
-                model.setSpotifyClientID(clientID)
-                model.finishOnboarding()
-            }
-            .font(.system(size: 15, weight: .medium))
-            .foregroundStyle(.white.opacity(0.55))
-            .buttonStyle(.plain)
         }
         .padding(40)
     }

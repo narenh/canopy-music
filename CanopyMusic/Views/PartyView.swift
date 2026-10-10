@@ -33,7 +33,7 @@ struct PartyView: View {
         GeometryReader { geo in
             HStack(spacing: 0) {
                 leftPane
-                    .frame(width: geo.size.width * 0.58)
+                    .frame(width: geo.size.width * 0.54)
                 rightPane
                     .padding(.vertical, 24)
                     .padding(.trailing, 24)
@@ -365,15 +365,31 @@ private struct TransportControls: View {
                 .buttonBorderShape(.circle)
                 .foregroundStyle(.white)
             }
-            Toggle(isOn: $model.crossfade) {
-                Label("Crossfade", systemImage: "arrow.left.arrow.right")
-                    .font(.system(size: 14, weight: .semibold))
-                    .foregroundStyle(model.crossfade ? Color.black.opacity(0.85) : .white)
+            HStack(spacing: 20) {
+                // Open AirPlay picker: AirPlay sessions sometimes drop and need re-picking.
+                RoutePicker(tint: .white)
+                    .frame(width: 40, height: 40)
+                    .glassEffect(.regular.interactive(), in: Circle())
+                    .accessibilityLabel("Choose speakers")
+                Button {
+                    model.crossfade.toggle()
+                } label: {
+                    VStack(spacing: 3) {
+                        Image(systemName: "arrow.left.arrow.right")
+                            .font(.system(size: 15, weight: .semibold))
+                        Circle()
+                            .frame(width: 4, height: 4)
+                            .opacity(model.crossfade ? 1 : 0)
+                    }
+                    .frame(width: 40, height: 40)
+                    .offset(y: 2)
+                }
+                .buttonStyle(.plain)
+                .foregroundStyle(.white)
+                .glassEffect(.regular.interactive(), in: Circle())
+                .accessibilityLabel("Crossfade")
+                .accessibilityValue(model.crossfade ? "On" : "Off")
             }
-            .accessibilityValue(model.crossfade ? "On" : "Off")
-            .toggleStyle(.button)
-            .buttonStyle(.glass)
-            .tint(.white)
         }
     }
 }
@@ -460,11 +476,13 @@ struct GuestQRCard: View {
                 .foregroundStyle(.white)
                 Spacer(minLength: 0)
                 if let wifi = model.wifiJoinPayload {
-                    VStack(spacing: 6) {
-                        qr(wifi, size: 84)
+                    VStack(spacing: 4) {
+                        QRCodeView(payload: wifi, inverted: true)
+                            .frame(width: 64, height: 64)
+                            .opacity(0.75)
                         Text("Join Wi-Fi")
-                            .font(.system(size: 12, weight: .semibold))
-                            .foregroundStyle(.white.opacity(0.6))
+                            .font(.system(size: 11, weight: .semibold))
+                            .foregroundStyle(.white.opacity(0.5))
                     }
                 }
             } else {

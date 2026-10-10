@@ -1,3 +1,4 @@
+import AVFoundation
 import CanopyCore
 import CanopyServer
 import Foundation
@@ -59,6 +60,9 @@ final class AppModel {
         applyCrossfade()
 
         URLCache.shared = URLCache(memoryCapacity: 64 << 20, diskCapacity: 512 << 20)
+
+        // Long-form audio is what lets the AirPlay picker select several AirPlay 2 speakers at once.
+        try? AVAudioSession.sharedInstance().setCategory(.playback, mode: .default, policy: .longFormAudio)
     }
 
     private static func makeSession(_ provider: Provider) -> PartySession {

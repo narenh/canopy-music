@@ -65,9 +65,11 @@ struct ThemedBackground: View {
 
 struct QRCodeView: View {
     let payload: String
+    /// White modules on a transparent background, for a quieter secondary code.
+    var inverted = false
 
     var body: some View {
-        if let image = Self.render(payload) {
+        if let image = Self.render(payload, inverted: inverted) {
             Image(uiImage: image)
                 .interpolation(.none)
                 .resizable()
@@ -77,12 +79,20 @@ struct QRCodeView: View {
         }
     }
 
-    static func render(_ payload: String) -> UIImage? {
+    static func render(_ payload: String, inverted: Bool = false) -> UIImage? {
         let filter = CIFilter.qrCodeGenerator()
         filter.message = Data(payload.utf8)
         filter.correctionLevel = "M"
-        guard let output = filter.outputImage,
-              let cgImage = CIContext().createCGImage(output, from: output.extent) else { return nil }
+        guard var output = filter.outputImage else { return nil }
+        if inverted {
+            let recolor = CIFilter.falseColor()
+            recolor.inputImage = output
+            recolor.color0 = CIColor(red: 1, green: 1, blue: 1, alpha: 1)
+            recolor.color1 = CIColor(red: 0, green: 0, blue: 0, alpha: 0)
+            guard let recolored = recolor.outputImage else { return nil }
+            output = recolored
+        }
+        guard let cgImage = CIContext().createCGImage(output, from: output.extent) else { return nil }
         return UIImage(cgImage: cgImage)
     }
 }

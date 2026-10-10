@@ -110,7 +110,9 @@ public final class PartySession {
         if wasPlaying, let current = state.current { try? await play(current) }
     }
 
-    public func setCrossfade(_ enabled: Bool) { engine.setCrossfade(enabled) }
+    public func setCrossfade(enabled: Bool, duration: TimeInterval?) {
+        engine.setCrossfade(enabled: enabled, duration: duration)
+    }
 
     public func clearRequests() {
         mutate { $0.clearRequests() }

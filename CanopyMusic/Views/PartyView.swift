@@ -331,37 +331,49 @@ private struct TransportControls: View {
     @Environment(AppModel.self) private var model
 
     var body: some View {
-        GlassEffectContainer(spacing: 24) {
-            HStack(spacing: 24) {
-                Button {
-                    session.restartCurrentSong()
-                } label: {
-                    Image(systemName: "backward.fill")
-                        .font(.system(size: 22, weight: .semibold))
-                        .frame(width: 48, height: 48)
+        @Bindable var model = model
+        VStack(spacing: 16) {
+            GlassEffectContainer(spacing: 24) {
+                HStack(spacing: 24) {
+                    Button {
+                        session.restartCurrentSong()
+                    } label: {
+                        Image(systemName: "backward.fill")
+                            .font(.system(size: 22, weight: .semibold))
+                            .frame(width: 48, height: 48)
+                    }
+                    .accessibilityLabel("Restart song")
+                    Button {
+                        Task { session.isPlaying ? session.pause() : await model.play() }
+                    } label: {
+                        Image(systemName: session.isPlaying ? "pause.fill" : "play.fill")
+                            .font(.system(size: 30, weight: .semibold))
+                            .contentTransition(.symbolEffect(.replace))
+                            .frame(width: 64, height: 64)
+                    }
+                    .accessibilityLabel(session.isPlaying ? "Pause" : "Play")
+                    Button {
+                        Task { await session.skip() }
+                    } label: {
+                        Image(systemName: "forward.fill")
+                            .font(.system(size: 22, weight: .semibold))
+                            .frame(width: 48, height: 48)
+                    }
+                    .accessibilityLabel("Skip")
                 }
-                .accessibilityLabel("Restart song")
-                Button {
-                    Task { session.isPlaying ? session.pause() : await model.play() }
-                } label: {
-                    Image(systemName: session.isPlaying ? "pause.fill" : "play.fill")
-                        .font(.system(size: 30, weight: .semibold))
-                        .contentTransition(.symbolEffect(.replace))
-                        .frame(width: 64, height: 64)
-                }
-                .accessibilityLabel(session.isPlaying ? "Pause" : "Play")
-                Button {
-                    Task { await session.skip() }
-                } label: {
-                    Image(systemName: "forward.fill")
-                        .font(.system(size: 22, weight: .semibold))
-                        .frame(width: 48, height: 48)
-                }
-                .accessibilityLabel("Skip")
+                .buttonStyle(.glass)
+                .buttonBorderShape(.circle)
+                .foregroundStyle(.white)
             }
+            Toggle(isOn: $model.crossfade) {
+                Label("Crossfade", systemImage: "arrow.left.arrow.right")
+                    .font(.system(size: 14, weight: .semibold))
+                    .foregroundStyle(model.crossfade ? Color.black.opacity(0.85) : .white)
+            }
+            .accessibilityValue(model.crossfade ? "On" : "Off")
+            .toggleStyle(.button)
             .buttonStyle(.glass)
-            .buttonBorderShape(.circle)
-            .foregroundStyle(.white)
+            .tint(.white)
         }
     }
 }

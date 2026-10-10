@@ -23,7 +23,14 @@ final class AppModel {
     var crossfade: Bool {
         didSet {
             defaults.set(crossfade, forKey: "crossfade")
-            session.setCrossfade(crossfade)
+            applyCrossfade()
+        }
+    }
+    /// Crossfade length in seconds; 0 means the system default.
+    var crossfadeSeconds: Double {
+        didSet {
+            defaults.set(crossfadeSeconds, forKey: "crossfadeSeconds")
+            applyCrossfade()
         }
     }
     var wifiSSID: String { didSet { defaults.set(wifiSSID, forKey: "wifiSSID") } }
@@ -46,9 +53,10 @@ final class AppModel {
         hostPIN = defaults.string(forKey: "hostPIN") ?? ""
         shuffle = defaults.object(forKey: "shuffle") as? Bool ?? true
         crossfade = defaults.bool(forKey: "crossfade")
+        crossfadeSeconds = defaults.double(forKey: "crossfadeSeconds")
         wifiSSID = defaults.string(forKey: "wifiSSID") ?? ""
         wifiPassword = defaults.string(forKey: "wifiPassword") ?? ""
-        session.setCrossfade(crossfade)
+        applyCrossfade()
 
         URLCache.shared = URLCache(memoryCapacity: 64 << 20, diskCapacity: 512 << 20)
     }
@@ -76,8 +84,12 @@ final class AppModel {
         provider = next
         defaults.set(next.rawValue, forKey: "provider")
         session = Self.makeSession(next)
-        session.setCrossfade(crossfade)
+        applyCrossfade()
         Task { await restartServer() }
+    }
+
+    private func applyCrossfade() {
+        session.setCrossfade(enabled: crossfade, duration: crossfadeSeconds > 0 ? crossfadeSeconds : nil)
     }
 
     var isReady: Bool { isDemo || authorization == .authorized }

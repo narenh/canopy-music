@@ -19,7 +19,7 @@ final class FakeEngine: PlaybackEngine {
     func pause() { isPlaying = false }
     func skipToStaged() async throws { finishTrack() }
     func restartCurrent() { currentTime = 0 }
-    func setCrossfade(_ enabled: Bool) {}
+    func setCrossfade(enabled: Bool, duration: TimeInterval?) {}
 
     func finishTrack() {
         if let staged { playing = staged; self.staged = nil; onEvent?(.advancedToStaged) }

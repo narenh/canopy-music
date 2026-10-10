@@ -229,6 +229,16 @@ private struct SettingsSheet: View {
                     Text("Shows a second QR code on the party screen that joins this network. Leave the name empty to hide it.")
                 }
                 Section {
+                    Picker("Crossfade length", selection: $model.crossfadeSeconds) {
+                        Text("Automatic").tag(0.0)
+                        ForEach([3.0, 6.0, 10.0, 12.0], id: \.self) { Text("\(Int($0)) seconds").tag($0) }
+                    }
+                } header: {
+                    Text("Playback")
+                } footer: {
+                    Text("Used when crossfade is on. Apple Music's AutoMix isn't available to other apps.")
+                }
+                Section {
                     Toggle("Demo mode", isOn: Binding(get: { model.isDemo }, set: { model.setDemoMode($0) }))
                 } footer: {
                     Text("Fake songs and no audio, for trying things out without Apple Music.")

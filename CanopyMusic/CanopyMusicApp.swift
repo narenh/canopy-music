@@ -1,3 +1,4 @@
+import CanopyCore
 import SwiftUI
 import UIKit
 
@@ -69,8 +70,15 @@ final class LandscapeHostingController<Content: View>: UIHostingController<Conte
 
 struct RootView: View {
     let model: AppModel
+    @State private var easterEgg = LyricsEasterEgg()
 
     var body: some View {
+        let current = model.session.state.current
+        let takeover = current.flatMap { item -> (QueueItem, [LyricsEasterEgg.Line])? in
+            guard easterEgg.matches(item.track), easterEgg.dismissedItemID != item.id,
+                  let lines = easterEgg.lines else { return nil }
+            return (item, lines)
+        }
         Group {
             if model.isLocked {
                 PartyView()
@@ -81,6 +89,18 @@ struct RootView: View {
             }
         }
         .animation(.easeInOut(duration: 0.4), value: model.isLocked)
+        .overlay {
+            if let (item, lines) = takeover {
+                TakeoverView(lines: lines, track: item.track, session: model.session) {
+                    easterEgg.dismissedItemID = item.id
+                }
+                .transition(.opacity)
+            }
+        }
+        .animation(.easeInOut(duration: 0.6), value: takeover?.0.id)
+        .task(id: current?.id) {
+            if let current, easterEgg.matches(current.track) { await easterEgg.loadIfNeeded() }
+        }
         .environment(model)
         .task {
             await model.startServerIfNeeded()

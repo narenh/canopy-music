@@ -91,6 +91,8 @@ final class AppModel {
 
     private(set) var provider: Provider
     private(set) var session: PartySession
+    /// Last fetched "Your playlists", so reopening the picker shows them at once while it refreshes.
+    @ObservationIgnored var libraryPlaylistsCache: [PlaylistSummary] = []
     private(set) var isLocked = false
     private(set) var authorization: MusicAuthorization.Status = MusicAuthorization.currentStatus
     /// Apple Music playback needs a subscription; search works without one. Kept current by
@@ -240,6 +242,7 @@ final class AppModel {
         provider = next
         defaults.set(next.rawValue, forKey: "provider")
         session = Self.makeSession(next, spotify: spotifyAPI)
+        libraryPlaylistsCache = []
         applyCrossfade()
         Task { await restartServer() }
     }

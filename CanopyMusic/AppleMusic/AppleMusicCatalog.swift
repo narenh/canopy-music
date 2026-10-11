@@ -75,12 +75,27 @@ struct AppleMusicCatalog: MusicCatalog {
     /// which can be mapped to catalog songs (and therefore to https artwork phones can load).
     /// Most recently modified first.
     func libraryPlaylists() async throws -> [PlaylistSummary] {
-        var resources: [LibraryPlaylistResource] = []
-        var path: String? = "/v1/me/library/playlists?limit=100"
-        while let next = path {
-            let page: APIPage<LibraryPlaylistResource> = try await fetch(next)
-            resources += page.data
-            path = page.next
+        // Pages are 100 at most. The first page says how many there are, so fetch the rest in
+        // parallel (one at a time took ~6 s for 500 playlists).
+        let first: APIPage<LibraryPlaylistResource> = try await fetch("/v1/me/library/playlists?limit=100")
+        var resources = first.data
+        if let total = first.meta?.total, total > first.data.count {
+            try await withThrowingTaskGroup(of: [LibraryPlaylistResource].self) { group in
+                for offset in stride(from: first.data.count, to: total, by: 100) {
+                    group.addTask {
+                        let page: APIPage<LibraryPlaylistResource> = try await fetch("/v1/me/library/playlists?limit=100&offset=\(offset)")
+                        return page.data
+                    }
+                }
+                for try await page in group { resources += page }
+            }
+        } else {
+            var path = first.next
+            while let next = path {
+                let page: APIPage<LibraryPlaylistResource> = try await fetch(next)
+                resources += page.data
+                path = page.next
+            }
         }
         // ISO 8601 UTC timestamps sort correctly as strings.
         resources.sort { $0.sortDate > $1.sortDate }
@@ -157,6 +172,29 @@ struct AppleMusicCatalog: MusicCatalog {
         }
     }
 
+    #if DEBUG
+    static func benchmark() async {
+        guard MusicAuthorization.currentStatus == .authorized else {
+            print("[bench] Apple Music not authorized; skipping")
+            return
+        }
+        let catalog = AppleMusicCatalog(cache: SongCache())
+        let clock = ContinuousClock()
+        do {
+            var playlists: [PlaylistSummary] = []
+            let listTime = try await clock.measure { playlists = try await catalog.libraryPlaylists() }
+            print("[bench] library playlists: \(playlists.count) in \(listTime)")
+            for playlist in playlists.prefix(4) {
+                var count = 0
+                let time = try await clock.measure { count = try await catalog.tracks(in: playlist).count }
+                print("[bench] \"\(playlist.name)\": \(count) songs in \(time)")
+            }
+        } catch {
+            print("[bench] failed: \(error)")
+        }
+    }
+    #endif
+
     private func fetch<T: Decodable>(_ path: String) async throws -> T {
         guard let url = URL(string: "https://api.music.apple.com" + path) else { throw AppleMusicError.badResponse }
         let response = try await MusicDataRequest(urlRequest: URLRequest(url: url)).response()
@@ -167,8 +205,10 @@ struct AppleMusicCatalog: MusicCatalog {
 // MARK: - Apple Music API shapes
 
 private struct APIPage<Resource: Decodable>: Decodable {
+    struct Meta: Decodable { var total: Int? }
     var data: [Resource]
     var next: String?
+    var meta: Meta?
 }
 
 private struct APIArtwork: Decodable {

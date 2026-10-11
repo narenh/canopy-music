@@ -479,12 +479,15 @@ struct PlaylistPickerView: View {
     }
 
     private func loadLibrary() async {
-        loading = true
+        // Show the last list right away and refresh behind it.
+        if library.isEmpty { library = model.libraryPlaylistsCache }
+        loading = library.isEmpty
         defer { loading = false }
         do {
             library = try await model.session.catalog.libraryPlaylists()
+            model.libraryPlaylistsCache = library
         } catch {
-            errorText = error.localizedDescription
+            if library.isEmpty { errorText = error.localizedDescription }
         }
     }
 

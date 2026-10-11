@@ -113,6 +113,10 @@ struct RootView: View {
             if ProcessInfo.processInfo.arguments.contains("-diagnoseMusicKit") {
                 await model.diagnoseMusicKit()
             }
+            // `-benchAppleMusic` times playlist loading without touching the chosen service.
+            if ProcessInfo.processInfo.arguments.contains("-benchAppleMusic") {
+                await AppleMusicCatalog.benchmark()
+            }
             print("[debug] guest URL \(model.guestURL?.absoluteString ?? "none")")
             // `-autoLoad` loads the first demo playlist without playing, for host-screen screenshots.
             if ProcessInfo.processInfo.arguments.contains("-autoLoad"), model.isDemo,

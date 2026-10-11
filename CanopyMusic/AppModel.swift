@@ -263,6 +263,7 @@ final class AppModel {
         struct Reply: Decodable { var devices: [SpotifyDevice] }
         guard spotifyAuth.isSignedIn,
               let reply = try? await spotifyAPI.get("/me/player/devices", as: Reply.self) else { return }
+        let wasAvailable = spotifyDevicesLoaded && spotifyDeviceAvailable
         spotifyDevices = reply.devices.filter { $0.id != nil }
         #if DEBUG
         print("[spotify-devices] " + reply.devices.map { "\($0.name) type=\($0.type) active=\($0.is_active) volume=\($0.supports_volume.map(String.init) ?? "?")" }.joined(separator: " | "))
@@ -271,6 +272,10 @@ final class AppModel {
         if let id = spotifyDeviceID, let device = spotifyDevices.first(where: { $0.id == id }) {
             spotifyDeviceName = device.name
             spotifyDeviceType = device.type
+        }
+        // Lost the device mid-party: ask where music should play (once per loss, so Done sticks).
+        if wasAvailable, !spotifyDeviceAvailable, provider == .spotify, session.state.current != nil {
+            isPickingSpotifyDevice = true
         }
     }
 

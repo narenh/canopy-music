@@ -1,7 +1,8 @@
 // Composes an iPad (landscape) and iPhone screenshot in drawn device frames on a background.
 // Usage: swift Tools/compose-device-shot.swift background.png ipad.png iphone.png out.png
 // Env: SQUARE=<side> for a square canvas, LOGO=<png> centered above (ICON=<png> beside it),
-//      DOCK=<png> app icon in a glass dock centered on the iPad (DOCK_POS=over|below), OVERLAP=<0..1> phone over the iPad, NO_ISLAND=1 for simulator phone shots.
+//      DOCK=<png> app icon centered on the iPad's bottom edge (DOCK_POS=over|below, DOCK_SCALE=<share of iPad width>,
+//      DOCK_BG=0 for the icon alone without the glass tile), OVERLAP=<0..1> phone over the iPad, NO_ISLAND=1 for simulator phone shots.
 import AppKit
 import CoreGraphics
 import CoreImage
@@ -99,8 +100,9 @@ let ipadOuterExtra = 6.5 * pxPerMM, phoneOuterExtra = 2.6 * pxPerMM
 let phoneDrop = overlap > 0 ? 9 * pxPerMM : 0
 let dockIcon = env["DOCK"].map(load)
 let dockBelow = env["DOCK_POS"] == "below"
-let dockIconSide = ipadScreenW * 0.105
-let dockPad = dockIconSide * 0.2
+let dockGlass = env["DOCK_BG"] != "0"
+let dockIconSide = ipadScreenW * CGFloat(env["DOCK_SCALE"].flatMap(Double.init) ?? 0.105)
+let dockPad = dockGlass ? dockIconSide * 0.2 : 0
 let dockH = dockIconSide + 2 * dockPad
 // How far the dock reaches below the iPad's outer edge.
 let dockReach: CGFloat = dockIcon == nil ? 0 : (dockBelow ? dockH + dockIconSide * 0.35 : dockH / 2)
@@ -134,6 +136,7 @@ if let dockIcon {
     let dock = CGRect(x: ipadScreen.midX - dockW / 2, y: dockY, width: dockW, height: dockH)
     let radius = dockH * 0.32
     let shape = CGPath(roundedRect: dock, cornerWidth: radius, cornerHeight: radius, transform: nil)
+    if dockGlass {
     // Shadow.
     ctx.saveGState()
     ctx.setShadow(offset: CGSize(width: 0, height: -dockH * 0.06), blur: dockH * 0.35, color: CGColor(gray: 0, alpha: 0.45))
@@ -151,7 +154,12 @@ if let dockIcon {
     }
     ctx.saveGState(); ctx.addPath(shape); ctx.setFillColor(CGColor(gray: 1, alpha: 0.16)); ctx.fillPath(); ctx.restoreGState()
     ctx.saveGState(); ctx.addPath(shape); ctx.setStrokeColor(CGColor(gray: 1, alpha: 0.32)); ctx.setLineWidth(max(2, dockH * 0.012)); ctx.strokePath(); ctx.restoreGState()
+    }
+    // The icon, with its own shadow when there's no tile under it.
+    ctx.saveGState()
+    if !dockGlass { ctx.setShadow(offset: CGSize(width: 0, height: -dockIconSide * 0.04), blur: dockIconSide * 0.18, color: CGColor(gray: 0, alpha: 0.5)) }
     drawImage(dockIcon, in: CGRect(x: dock.minX + dockPad, y: dock.minY + dockPad, width: dockIconSide, height: dockIconSide))
+    ctx.restoreGState()
 }
 
 // The phone stands beside it, bottoms aligned.

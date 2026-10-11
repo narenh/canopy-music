@@ -67,7 +67,6 @@ CanopyKit/                   Swift package (no MusicKit or Spotify code)
 CanopyMusic/                 iPad app (SwiftUI, iPadOS 26)
   AppleMusic/                MusicKit catalog + ApplicationMusicPlayer engine
   Spotify/                   Spotify sign-in, Web API client, catalog and Connect engine
-  EasterEgg/                 lyrics takeover
   Views/                     host, party (locked), Up Next, search, fly-in animation
 ```
 
@@ -75,12 +74,4 @@ CanopyMusic/                 iPad app (SwiftUI, iPadOS 26)
 cd CanopyKit && swift test
 ```
 
-Debug launch arguments: `-autoParty` starts a demo party and locks; `-autoSearch <term>` searches and adds the first result; `-autoLoad`, `-autoResume`, `-autoPrevious`, `-autoStress`, `-showSettings`, `-showPicker`, `-appleMusicState ready|unsynced|nosub|denied`, `-benchAppleMusic`, `-qrGallery`, `-easterEggPreview` and `-diagnoseMusicKit` exist for testing specific paths.
-
-## Easter egg
-
-When "Big Stick" by MUNA plays, a full-screen lyrics takeover appears while the lyrics are sung (press and hold to dismiss). Lyrics load from `CanopyMusic/EasterEgg/big-stick.lrc` if it exists. That file is gitignored so lyrics stay out of this public repo. Without it, the app fetches synced lyrics from [LRCLIB](https://lrclib.net) and caches them on the device. To create or refresh the local file:
-
-```bash
-curl -s "https://lrclib.net/api/get/33573170" | python3 -c 'import sys,json; print(json.load(sys.stdin)["syncedLyrics"])' > CanopyMusic/EasterEgg/big-stick.lrc
-```
+Debug launch arguments: `-autoParty` starts a demo party and locks; `-autoSearch <term>` searches and adds the first result; `-autoLoad`, `-autoResume`, `-autoPrevious`, `-autoStress`, `-showSettings`, `-showPicker`, `-appleMusicState ready|unsynced|nosub|denied`, `-benchAppleMusic`, `-qrGallery` and `-diagnoseMusicKit` exist for testing specific paths.

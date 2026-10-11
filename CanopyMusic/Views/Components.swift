@@ -188,3 +188,20 @@ extension View {
 enum Idle {
     static let timeout: Duration = .seconds(12)
 }
+
+/// A colored status dot and footnote text. Wrapped lines indent past the dot.
+struct StatusDot: View {
+    let color: Color
+    let text: String
+
+    var body: some View {
+        // The dot sits on the first line's baseline (its bottom is its baseline), so wrapped
+        // lines hang under the text rather than under the dot.
+        HStack(alignment: .firstTextBaseline, spacing: 6) {
+            Circle().fill(color).frame(width: 8, height: 8)
+            Text(text)
+        }
+        .font(.footnote)
+        .foregroundStyle(.secondary)
+    }
+}

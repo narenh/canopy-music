@@ -99,6 +99,8 @@ final class AppModel {
     /// `MusicSubscription.subscriptionUpdates` once authorized.
     private(set) var canPlayAppleMusic = true
     private(set) var canBecomeAppleMusicSubscriber = false
+    /// Sync Library on. Without it the Apple Music API has no library playlists to list.
+    private(set) var appleMusicLibrarySynced = true
     @ObservationIgnored private var subscriptionTask: Task<Void, Never>?
     private(set) var guestURL: URL?
     private(set) var friendlyURL: URL?
@@ -172,6 +174,19 @@ final class AppModel {
         hostname = FriendlyHostname(name: savedName)
         applyCrossfade()
         watchAppleMusicSubscription()
+        #if DEBUG
+        // `-appleMusicState ready|unsynced|nosub|denied`: fakes the host Music row for screenshots.
+        let args = ProcessInfo.processInfo.arguments
+        if let i = args.firstIndex(of: "-appleMusicState"), i + 1 < args.count {
+            self.provider = .appleMusic
+            switch args[i + 1] {
+            case "unsynced": authorization = .authorized; appleMusicLibrarySynced = false
+            case "nosub": authorization = .authorized; canPlayAppleMusic = false; canBecomeAppleMusicSubscriber = true
+            case "denied": authorization = .denied
+            default: authorization = .authorized
+            }
+        }
+        #endif
 
         URLCache.shared = URLCache(memoryCapacity: 64 << 20, diskCapacity: 512 << 20)
 
@@ -342,6 +357,7 @@ final class AppModel {
             for await subscription in MusicSubscription.subscriptionUpdates {
                 self?.canPlayAppleMusic = subscription.canPlayCatalogContent
                 self?.canBecomeAppleMusicSubscriber = subscription.canBecomeSubscriber
+                self?.appleMusicLibrarySynced = subscription.hasCloudLibraryEnabled
             }
         }
     }

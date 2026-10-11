@@ -75,7 +75,7 @@ CanopyMusic/                 iPad app (SwiftUI, iPadOS 26)
 cd CanopyKit && swift test
 ```
 
-Debug launch arguments: `-autoParty` starts a demo party and locks; `-autoSearch <term>` searches and adds the first result; `-autoLoad`, `-autoResume`, `-autoPrevious`, `-autoStress`, `-showSettings`, `-easterEggPreview` and `-diagnoseMusicKit` exist for testing specific paths.
+Debug launch arguments: `-autoParty` starts a demo party and locks; `-autoSearch <term>` searches and adds the first result; `-autoLoad`, `-autoResume`, `-autoPrevious`, `-autoStress`, `-showSettings`, `-showPicker`, `-appleMusicState ready|unsynced|nosub|denied`, `-benchAppleMusic`, `-easterEggPreview` and `-diagnoseMusicKit` exist for testing specific paths.
 
 ## Easter egg
 

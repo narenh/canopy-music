@@ -79,29 +79,14 @@ struct HostView: View {
                         SpotifyStatusRows()
                     } else if model.isDemo {
                         Label("Demo mode: fake songs, no audio", systemImage: "theatermasks")
-                    } else if model.authorization == .authorized, !model.canPlayAppleMusic {
-                        Label("An Apple Music subscription is needed to play songs", systemImage: "exclamationmark.triangle.fill")
-                            .foregroundStyle(.orange)
-                        if model.canBecomeAppleMusicSubscriber {
-                            Button("See Apple Music offer") { showSubscriptionOffer = true }
-                        }
-                    } else if model.authorization == .authorized {
-                        Label("Apple Music connected", systemImage: "checkmark.circle.fill")
-                            .foregroundStyle(.tint)
                     } else {
-                        Button {
-                            Task { await model.requestAuthorization() }
-                        } label: {
-                            Label("Connect Apple Music", systemImage: "music.note")
-                        }
-                        if model.authorization == .denied {
-                            Text("Apple Music access is off. Turn it on in Settings › Privacy › Media & Apple Music.")
-                                .font(.footnote)
-                                .foregroundStyle(.secondary)
-                        }
+                        AppleMusicStatusRow(showOffer: $showSubscriptionOffer)
                     }
-                    if model.provider != .spotify {
-                        Toggle("Crossfade", isOn: $model.crossfade)
+                    if model.provider != .spotify, model.isDemo || model.authorization == .authorized {
+                        Toggle(isOn: $model.crossfade) {
+                            Text("Crossfade")
+                            Text(model.crossfadeSeconds > 0 ? "\(Int(model.crossfadeSeconds)) seconds" : "Automatic length")
+                        }
                     }
                 }
                 .listRowBackground(Color.white.opacity(0.08))
@@ -196,6 +181,67 @@ struct HostView: View {
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
         .glassEffect(.regular.tint(.black.opacity(0.2)), in: RoundedRectangle(cornerRadius: 32, style: .continuous))
+    }
+}
+
+// MARK: - Apple Music
+
+/// The service with a one-line status; problem states carry their fix in the row.
+private struct AppleMusicStatusRow: View {
+    @Environment(AppModel.self) private var model
+    @Binding var showOffer: Bool
+
+    var body: some View {
+        HStack(spacing: 12) {
+            Image("AppleMusicIcon")
+                .resizable()
+                .frame(width: 28, height: 28)
+                .clipShape(RoundedRectangle(cornerRadius: 7, style: .continuous))
+                .saturation(model.authorization == .authorized ? 1 : 0)
+                .opacity(model.authorization == .authorized ? 1 : 0.5)
+            VStack(alignment: .leading, spacing: 2) {
+                Text("Apple Music")
+                status
+            }
+            Spacer(minLength: 8)
+            action
+        }
+    }
+
+    @ViewBuilder private var status: some View {
+        switch model.authorization {
+        case .authorized:
+            if !model.canPlayAppleMusic {
+                StatusDot(color: .orange, text: "Needs a subscription to play songs")
+            } else if !model.appleMusicLibrarySynced {
+                StatusDot(color: .orange, text: "Your library isn't synced, so your playlists won't show. Turn on Sync Library in Settings › Apps › Music.")
+            } else {
+                StatusDot(color: .green, text: "Ready")
+            }
+        case .denied, .restricted:
+            Text("Access is off").font(.footnote).foregroundStyle(.secondary)
+        default:
+            Text("Not connected").font(.footnote).foregroundStyle(.secondary)
+        }
+    }
+
+    @ViewBuilder private var action: some View {
+        switch model.authorization {
+        case .authorized:
+            if !model.canPlayAppleMusic, model.canBecomeAppleMusicSubscriber {
+                Button("See offer") { showOffer = true }
+                    .buttonStyle(.glassProminent)
+            }
+        case .denied, .restricted:
+            Button("Open Settings") {
+                if let url = URL(string: UIApplication.openSettingsURLString) { UIApplication.shared.open(url) }
+            }
+            .buttonStyle(.glass)
+            .tint(.primary)
+        default:
+            Button("Connect") { Task { await model.requestAuthorization() } }
+                .buttonStyle(.glassProminent)
+        }
     }
 }
 

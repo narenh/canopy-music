@@ -128,19 +128,6 @@ private struct SpotifyDevicePickerPresenter: ViewModifier {
     }
 }
 
-private struct StatusDot: View {
-    let color: Color
-    let text: String
-
-    var body: some View {
-        HStack(spacing: 6) {
-            Circle().fill(color).frame(width: 8, height: 8)
-            Text(text)
-        }
-        .font(.footnote)
-        .foregroundStyle(.secondary)
-    }
-}
 
 /// "Where should music play?" Lists Spotify Connect devices and keeps looking while open.
 struct SpotifyDevicePicker: View {

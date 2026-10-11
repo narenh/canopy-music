@@ -177,6 +177,7 @@ struct HostView: View {
                 } actions: {
                     Button("Choose playlist") { showPicker = true }
                         .buttonStyle(.glassProminent)
+                        .controlSize(.large)
                         .disabled(!model.isReady)
                 }
                 .foregroundStyle(.white)

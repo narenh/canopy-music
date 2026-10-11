@@ -10,7 +10,10 @@ import UIKit
 @MainActor
 @Observable
 final class AppModel {
-    enum Provider: String, CaseIterable {
+    enum Provider: String {
+        /// No service chosen yet (fresh install, during setup). Never offered in the UI; its
+        /// session can't search or play, so neither Apple Music nor Spotify is touched.
+        case none
         case appleMusic, spotify
         #if DEBUG
         /// Fake songs, no audio. Debug builds only.
@@ -19,6 +22,7 @@ final class AppModel {
 
         var title: String {
             switch self {
+            case .none: "No service"
             case .appleMusic: "Apple Music"
             case .spotify: "Spotify"
             #if DEBUG
@@ -27,9 +31,10 @@ final class AppModel {
             }
         }
 
-        /// App tint: Apple Music red, Spotify green, Canopy green for the demo.
+        /// App tint: Apple Music red, Spotify green, Canopy green before a choice and for the demo.
         var accent: Color {
             switch self {
+            case .none: Color("AccentColor")
             case .appleMusic: Color(red: 0.98, green: 0.18, blue: 0.28)
             case .spotify: Color(red: 0.12, green: 0.84, blue: 0.38)
             #if DEBUG
@@ -105,14 +110,12 @@ final class AppModel {
     @ObservationIgnored private var hostname = FriendlyHostname(name: "music")
 
     init() {
-        #if DEBUG && targetEnvironment(simulator)
-        let fallback = Provider.demo
-        #else
-        let fallback = Provider.appleMusic
-        #endif
-        let provider = Provider(rawValue: defaults.string(forKey: "provider") ?? "") ?? fallback
-        self.provider = provider
-        var needsOnboarding = defaults.string(forKey: "provider") == nil
+        // Nothing saved (or a choice this build doesn't have, e.g. "demo" in a release build):
+        // start with no service and show setup.
+        let saved = Provider(rawValue: defaults.string(forKey: "provider") ?? "")
+        let provider = saved == Provider.none ? nil : saved
+        self.provider = provider ?? .none
+        var needsOnboarding = provider == nil
         #if DEBUG
         if ProcessInfo.processInfo.arguments.contains("-onboarding") { needsOnboarding = true }
         #endif
@@ -123,7 +126,7 @@ final class AppModel {
         self.spotifyAPI = spotifyAPI
         self.spotifyDeviceID = UserDefaults.standard.string(forKey: SpotifyEngine.deviceDefaultsKey)
         self.spotifyDeviceName = UserDefaults.standard.string(forKey: "spotifyDeviceName")
-        self.session = Self.makeSession(provider, spotify: spotifyAPI)
+        self.session = Self.makeSession(provider ?? .none, spotify: spotifyAPI)
         hostPIN = defaults.string(forKey: "hostPIN") ?? ""
         crossfade = defaults.bool(forKey: "crossfade")
         crossfadeSeconds = defaults.double(forKey: "crossfadeSeconds")
@@ -146,6 +149,8 @@ final class AppModel {
         let store = URL.applicationSupportDirectory.appending(path: "party-\(provider.rawValue).json")
         try? FileManager.default.createDirectory(at: .applicationSupportDirectory, withIntermediateDirectories: true)
         switch provider {
+        case .none:
+            return PartySession(catalog: NoServiceCatalog(), engine: NoServiceEngine())
         case .appleMusic:
             let cache = SongCache()
             return PartySession(catalog: AppleMusicCatalog(cache: cache), engine: AppleMusicEngine(cache: cache), storeURL: store)
@@ -232,6 +237,7 @@ final class AppModel {
 
     var isReady: Bool {
         switch provider {
+        case .none: false
         case .appleMusic: authorization == .authorized && canPlayAppleMusic
         case .spotify: spotifyAuth.isSignedIn && spotifyDeviceID != nil
         #if DEBUG
@@ -430,4 +436,30 @@ final class AppModel {
     var wifiJoinPayload: String? {
         wifiSSID.isEmpty ? nil : LocalNetwork.wifiJoinPayload(ssid: wifiSSID, password: wifiPassword)
     }
+}
+
+// MARK: - No service yet
+
+/// Session parts for before a service is chosen: nothing to search, nothing to play.
+private struct NoServiceCatalog: MusicCatalog {
+    func searchSongs(_ term: String) async throws -> [CanopyCore.Track] { [] }
+    func libraryPlaylists() async throws -> [PlaylistSummary] { [] }
+    func searchPlaylists(_ term: String) async throws -> [PlaylistSummary] { [] }
+    func tracks(in playlist: PlaylistSummary) async throws -> [CanopyCore.Track] { [] }
+}
+
+@MainActor
+private final class NoServiceEngine: PlaybackEngine {
+    let canReplaceStaged = true
+    let isPlaying = false
+    let currentTime: TimeInterval = 0
+    var onEvent: (@MainActor (PlaybackEvent) -> Void)?
+    func play(_ track: CanopyCore.Track) async throws {}
+    func stage(_ track: CanopyCore.Track?) async throws {}
+    func resume() async throws {}
+    func pause() {}
+    func skipToStaged() async throws {}
+    func restartCurrent() {}
+    func seek(to time: TimeInterval) {}
+    func setCrossfade(enabled: Bool, duration: TimeInterval?) {}
 }

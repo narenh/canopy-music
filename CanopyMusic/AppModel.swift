@@ -41,7 +41,7 @@ final class AppModel {
 
     /// True until a music service has been chosen on the first-launch screen.
     private(set) var needsOnboarding: Bool
-    /// Setup was reopened from Settings › Change Service (cancellable; skips the network step).
+    /// Setup was reopened from Settings › Change Service (skips the network step).
     private(set) var isChangingService = false
 
     let spotifyAuth: SpotifyAuth
@@ -177,11 +177,6 @@ final class AppModel {
     func changeService() {
         isChangingService = true
         needsOnboarding = true
-    }
-
-    func cancelChangeService() {
-        isChangingService = false
-        needsOnboarding = false
     }
 
     func finishOnboarding() {

@@ -18,14 +18,6 @@ struct OnboardingView: View {
             case .chooser:
                 chooser
                     .transition(.move(edge: .leading).combined(with: .opacity))
-                    .overlay(alignment: .topLeading) {
-                        if model.isChangingService {
-                            Button("Cancel") { model.cancelChangeService() }
-                                .buttonStyle(.glass)
-                                .controlSize(.large)
-                                .padding(28)
-                        }
-                    }
             case .spotify:
                 SpotifySetupStep(
                     back: { go(.chooser) },
@@ -92,8 +84,14 @@ struct OnboardingView: View {
                         name: "Spotify",
                         detail: "Controls Spotify on this iPad or an Apple TV. Needs Premium and a free developer app."
                     ) {
-                        // Spotify is only chosen once sign-in succeeds in the next step.
-                        go(.spotify)
+                        // Already set up (e.g. switching back from Apple Music): no need to sign in again.
+                        if model.spotifyAuth.isSignedIn, !model.spotifyClientID.isEmpty {
+                            model.chooseProvider(.spotify)
+                            if model.isChangingService { model.finishOnboarding() } else { networkBack = .chooser; go(.network) }
+                        } else {
+                            // Spotify is only chosen once sign-in succeeds in the next step.
+                            go(.spotify)
+                        }
                     }
                 }
             }

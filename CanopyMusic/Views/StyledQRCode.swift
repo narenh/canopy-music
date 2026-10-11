@@ -1,3 +1,4 @@
+import CanopyCore
 import CoreImage
 import CoreImage.CIFilterBuiltins
 import SwiftUI
@@ -341,6 +342,36 @@ private struct DecodeBadge: View {
         filter.inputImage = CIImage(cgImage: image)
         guard let output = filter.outputImage else { return nil }
         return CIContext().createCGImage(output, from: output.extent)
+    }
+}
+
+/// `-backgroundFor "<search>"`: the party background alone for the first Apple Music match.
+struct BackgroundPreview: View {
+    let term: String
+    @State private var track: QueueTrack?
+    @State private var status = "Searching…"
+
+    var body: some View {
+        ZStack {
+            Color.black
+            if let track {
+                ThemedBackground(track: track, theme: ArtworkTheme(track.colors))
+            } else {
+                Text(status).foregroundStyle(.white)
+            }
+        }
+        .ignoresSafeArea()
+        .task {
+            do {
+                let found = try await AppleMusicCatalog(cache: SongCache()).searchSongs(term)
+                track = found.first
+                print("[background] \(found.first.map { "\($0.title) – \($0.artist) colors=\(String(describing: $0.colors))" } ?? "no match")")
+                if found.isEmpty { status = "No match" }
+            } catch {
+                status = "Search failed: \(error)"
+                print("[background] \(error)")
+            }
+        }
     }
 }
 #endif

@@ -76,6 +76,10 @@ struct RootView: View {
     @ViewBuilder private var debugOverlay: some View {
         #if DEBUG
         if ProcessInfo.processInfo.arguments.contains("-qrGallery") { QRGallery() }
+        if let i = ProcessInfo.processInfo.arguments.firstIndex(of: "-backgroundFor"),
+           i + 1 < ProcessInfo.processInfo.arguments.count {
+            BackgroundPreview(term: ProcessInfo.processInfo.arguments[i + 1])
+        }
         #endif
     }
 

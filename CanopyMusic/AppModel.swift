@@ -124,6 +124,8 @@ final class AppModel {
     }
     var wifiSSID: String { didSet { defaults.set(wifiSSID, forKey: "wifiSSID") } }
     var wifiPassword: String { didSet { defaults.set(wifiPassword, forKey: "wifiPassword") } }
+    /// Plain Join Wi‑Fi code with a caption, for phones that struggle with the Wi‑Fi symbol design.
+    var wifiSimpleQR: Bool { didSet { defaults.set(wifiSimpleQR, forKey: "wifiSimpleQR") } }
     /// The `<name>.local` address guests can type. Set through `setLocalName(_:)`.
     private(set) var localName: String
     /// Runs the LAN web server guests use to queue from their phones.
@@ -168,6 +170,7 @@ final class AppModel {
         crossfadeSeconds = defaults.double(forKey: "crossfadeSeconds")
         wifiSSID = defaults.string(forKey: "wifiSSID") ?? ""
         wifiPassword = defaults.string(forKey: "wifiPassword") ?? ""
+        wifiSimpleQR = defaults.bool(forKey: "wifiSimpleQR")
         phoneQueueEnabled = defaults.object(forKey: "phoneQueueEnabled") as? Bool ?? true
         let savedName = Self.sanitizedLocalName(defaults.string(forKey: "localName") ?? "")
         localName = savedName

@@ -184,6 +184,36 @@ struct HostView: View {
     }
 }
 
+/// Wi‑Fi password with a show/hide button. Marked as a one-time code so iOS and password
+/// managers don't offer to save it as an account password.
+private struct WifiPasswordField: View {
+    @Binding var password: String
+    @State private var visible = false
+
+    var body: some View {
+        HStack {
+            Group {
+                if visible {
+                    TextField("Password", text: $password)
+                } else {
+                    SecureField("Password", text: $password)
+                }
+            }
+            .textContentType(.oneTimeCode)
+            .textInputAutocapitalization(.never)
+            .autocorrectionDisabled()
+            Button {
+                visible.toggle()
+            } label: {
+                Image(systemName: visible ? "eye.slash" : "eye")
+                    .foregroundStyle(.secondary)
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel(visible ? "Hide password" : "Show password")
+        }
+    }
+}
+
 // MARK: - Apple Music
 
 /// The service with a one-line status; problem states carry their fix in the row.
@@ -329,11 +359,13 @@ private struct SettingsSheet: View {
                     TextField("Network name", text: $model.wifiSSID)
                         .textInputAutocapitalization(.never)
                         .autocorrectionDisabled()
-                    SecureField("Password", text: $model.wifiPassword)
+                        .textContentType(nil)
+                    WifiPasswordField(password: $model.wifiPassword)
+                    Toggle("Simple QR Code", isOn: $model.wifiSimpleQR)
                 } header: {
                     Text("Wi\u{2011}Fi Information")
                 } footer: {
-                    Text("Shows a “Join Wi\u{2011}Fi” QR code.")
+                    Text("Shows a “Join Wi\u{2011}Fi” QR code. Turn on Simple QR Code if a phone has trouble scanning it.")
                 }
                 .listRowBackground(Color.white.opacity(0.08))
                 Section {

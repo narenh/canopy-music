@@ -625,13 +625,21 @@ struct GuestQRCard: View {
                 .foregroundStyle(.white)
                 Spacer(minLength: 0)
                 if let wifi = model.wifiJoinPayload {
-                    VStack(spacing: 4) {
+                    if model.wifiSimpleQR {
+                        VStack(spacing: 4) {
+                            QRCodeView(payload: wifi, inverted: true)
+                                .frame(width: 64, height: 64)
+                                .opacity(0.75)
+                            Text("Join Wi\u{2011}Fi")
+                                .font(.system(size: 11, weight: .semibold))
+                                .foregroundStyle(.white.opacity(0.5))
+                        }
+                    } else {
+                        // The Wi‑Fi symbol says what it is, so no caption; it takes the caption's room.
                         HalftoneQRCode(payload: wifi, symbol: "wifi", symbolScale: 0.6, dotScale: 0.7)
-                            .frame(width: 64, height: 64)
+                            .frame(width: 80, height: 80)
                             .opacity(0.75)
-                        Text("Join Wi\u{2011}Fi")
-                            .font(.system(size: 11, weight: .semibold))
-                            .foregroundStyle(.white.opacity(0.5))
+                            .accessibilityLabel("Join Wi\u{2011}Fi QR code")
                     }
                 }
             } else {

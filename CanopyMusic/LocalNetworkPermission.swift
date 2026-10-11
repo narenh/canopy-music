@@ -1,9 +1,9 @@
 import Foundation
 import Network
 
-/// Triggers (and waits for) the Local Network permission prompt. Registering the `.local` name
-/// alone doesn't show it; browsing for a Bonjour service does. Without the permission, iPadOS
-/// silently drops the `music.local` announcement while the IP address keeps working.
+/// Triggers (and waits for) the Local Network permission prompt by browsing for a Bonjour
+/// service, so a fresh install asks as soon as the server starts. Without the permission the
+/// `music.local` announcement doesn't work, while the IP address keeps working.
 @MainActor
 final class LocalNetworkPermission {
     private let browser = NWBrowser(for: .bonjour(type: "_http._tcp", domain: nil), using: .tcp)

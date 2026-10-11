@@ -140,7 +140,6 @@ final class AppModel {
     /// lose port 80 and land on 8080).
     @ObservationIgnored private var serverOperation: Task<Void, Never>?
     @ObservationIgnored private var hostname = FriendlyHostname(name: "music")
-    @ObservationIgnored private var localNetworkRequested = false
 
     init() {
         // Nothing saved (or a choice this build doesn't have, e.g. "demo" in a release build):
@@ -180,8 +179,8 @@ final class AppModel {
         try? AVAudioSession.sharedInstance().setCategory(.playback, mode: .default, policy: .longFormAudio)
 
         // When Canopy isn't playing audio itself (Spotify), iPadOS suspends it in the background
-        // (e.g. while you open Spotify), which kills the listening socket and the mDNS name.
-        // Bring both back on return.
+        // (e.g. while you open Spotify) and can reclaim the listening socket. Restart the server
+        // on return so phones and the .local name keep working.
         NotificationCenter.default.addObserver(forName: UIApplication.willEnterForegroundNotification, object: nil, queue: .main) { [weak self] _ in
             MainActor.assumeIsolated {
                 guard let self, self.server != nil || self.phoneQueueEnabled else { return }
@@ -425,21 +424,6 @@ final class AppModel {
         self.server = server
         serverTask = task
         refreshAddresses()
-        requestLocalNetworkPermission()
-    }
-
-    /// The `.local` name only works once Local Network access is allowed, and registering it
-    /// doesn't show the prompt. Ask once per launch, then re-announce the name.
-    private func requestLocalNetworkPermission() {
-        guard !localNetworkRequested else { return }
-        localNetworkRequested = true
-        Task {
-            let allowed = await LocalNetworkPermission.request()
-            #if DEBUG
-            print("[local-network] allowed=\(allowed)")
-            #endif
-            if allowed { refreshAddresses() }
-        }
     }
 
     /// Changes the `.local` name and re-announces it.
@@ -483,7 +467,7 @@ final class AppModel {
             return
         }
         guestURL = server.url(host: ip)
-        friendlyURL = hostname.register(address: ip, port: server.port) ? server.url(host: hostname.hostname) : nil
+        friendlyURL = hostname.register(address: ip) ? server.url(host: hostname.hostname) : nil
     }
 
     #if DEBUG

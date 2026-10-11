@@ -166,7 +166,9 @@ final class SpotifyAuth {
 private final class PresentationAnchor: NSObject, ASWebAuthenticationPresentationContextProviding {
     func presentationAnchor(for session: ASWebAuthenticationSession) -> ASPresentationAnchor {
         MainActor.assumeIsolated {
-            UIApplication.shared.connectedScenes.compactMap { ($0 as? UIWindowScene)?.keyWindow }.first ?? ASPresentationAnchor()
+            let scenes = UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }
+            if let window = scenes.compactMap(\.keyWindow).first ?? scenes.first?.windows.first { return window }
+            return ASPresentationAnchor(windowScene: scenes.first!)
         }
     }
 }

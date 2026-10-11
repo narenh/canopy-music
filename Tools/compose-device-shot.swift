@@ -84,7 +84,8 @@ let phoneScreen = CGRect(x: ipadScreen.maxX + ipadOuterExtra + gap + 2.6 * pxPer
                          y: ipadScreen.maxY + ipadOuterExtra - phoneScreenH + 60,
                          width: phoneScreenW, height: phoneScreenH)
 device(screen: phoneScreen, image: phoneShot, bezel: 1.7 * pxPerMM, screenRadius: 10.5 * pxPerMM, rim: 0.9 * pxPerMM,
-       island: CGSize(width: 21 * pxPerMM, height: 6.2 * pxPerMM))
+       // Simulator screenshots already include the island; real device screenshots don't.
+       island: ProcessInfo.processInfo.environment["NO_ISLAND"] == nil ? CGSize(width: 21 * pxPerMM, height: 6.2 * pxPerMM) : nil)
 
 let out = ctx.makeImage()!
 let dest = CGImageDestinationCreateWithURL(URL(fileURLWithPath: args[4]) as CFURL, UTType.png.identifier as CFString, 1, nil)!

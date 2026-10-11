@@ -16,6 +16,9 @@
   }
 
   const clientId = store.get("canopy.clientId") || (() => { const id = uuid(); store.set("canopy.clientId", id); return id; })();
+  // A link can carry a name (`?name=Sam`), which skips the name prompt.
+  const linkName = new URLSearchParams(location.search).get("name");
+  if (linkName) { store.set("canopy.name", linkName.slice(0, 30)); store.set("canopy.nameAsked", "1"); }
   let myName = store.get("canopy.name") || null;
 
   let snap = null;

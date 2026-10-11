@@ -166,7 +166,7 @@ struct RootView: View {
             if let i = args.firstIndex(of: "-screenshotParty"), i + 1 < args.count, let scene = ScreenshotScene.all[args[i + 1]] {
                 let tracks = await scene.resolve(with: AppleMusicCatalog(cache: SongCache()))
                 let session = PartySession(catalog: FixedCatalog(tracks: tracks), engine: PosedEngine(time: scene.time))
-                try? await session.load(playlist: PlaylistSummary(id: "screenshot", name: "Party", kind: .library))
+                try? await session.load(playlist: PlaylistSummary(id: "screenshot", name: "2026 June", kind: .library))
                 try? await session.play()
                 model.installScreenshotSession(session)
             }

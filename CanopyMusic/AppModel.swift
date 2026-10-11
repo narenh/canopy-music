@@ -397,6 +397,8 @@ final class AppModel {
         self.session = session
         needsOnboarding = false
         lock()
+        // The phone server was started with the old session.
+        Task { await restartServer() }
     }
     #endif
 

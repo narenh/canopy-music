@@ -188,7 +188,7 @@ final class AppModel {
 
     func setProvider(_ next: Provider) {
         guard next != provider else { return }
-        session.engine.pause()
+        if session.engine.isPlaying { session.engine.pause() }
         provider = next
         defaults.set(next.rawValue, forKey: "provider")
         session = Self.makeSession(next, spotify: spotifyAPI)

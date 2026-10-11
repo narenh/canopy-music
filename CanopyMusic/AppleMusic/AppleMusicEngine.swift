@@ -107,7 +107,8 @@ final class AppleMusicEngine: PlaybackEngine {
     func pause() {
         pausedByUs = true
         cache(playing: false, time: currentTime)
-        player.pause()
+        // Never create the player just to pause it (that can prompt for Apple Music access).
+        _player?.pause()
     }
 
     func skipToStaged() async throws {
@@ -117,12 +118,12 @@ final class AppleMusicEngine: PlaybackEngine {
 
     func restartCurrent() {
         cache(playing: cachedPlaying, time: 0)
-        player.restartCurrentEntry()
+        _player?.restartCurrentEntry()
     }
 
     func seek(to time: TimeInterval) {
         cache(playing: cachedPlaying, time: time)
-        player.playbackTime = time
+        _player?.playbackTime = time
     }
 
     func setCrossfade(enabled: Bool, duration: TimeInterval?) {

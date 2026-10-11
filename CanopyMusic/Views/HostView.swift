@@ -31,7 +31,7 @@ struct HostView: View {
         .environment(\.artworkTheme, theme)
         .preferredColorScheme(.dark)
         .sheet(isPresented: $showPicker) { PlaylistPickerView() }
-        .musicSubscriptionOffer(isPresented: $showSubscriptionOffer)
+        .modifier(AppleMusicOffer(enabled: model.provider == .appleMusic, isPresented: $showSubscriptionOffer))
         .sheet(isPresented: $showSettings) {
             SettingsSheet()
                 .presentationBackground(.ultraThinMaterial)
@@ -623,6 +623,21 @@ struct UnlockView: View {
         } else {
             wrong = true
             pin = ""
+        }
+    }
+}
+
+/// Apple's subscription offer sheet, attached only in Apple Music mode so nothing Apple
+/// Music-related runs (or prompts) while using Spotify.
+private struct AppleMusicOffer: ViewModifier {
+    let enabled: Bool
+    @Binding var isPresented: Bool
+
+    func body(content: Content) -> some View {
+        if enabled {
+            content.musicSubscriptionOffer(isPresented: $isPresented)
+        } else {
+            content
         }
     }
 }

@@ -24,7 +24,7 @@ struct PartyView: View {
     @State private var listFrame: CGRect = .zero
     @State private var scrollTarget: UUID?
 
-    @State private var toast: String?
+    @State private var toast: Announcement?
     @State private var toastTask: Task<Void, Never>?
     @State private var showUnlock = false
     /// Debug only: a search result to tap Add on automatically (see `-autoSearch`).
@@ -169,12 +169,19 @@ struct PartyView: View {
                     .font(.system(size: 26, weight: .bold))
                 Spacer()
                 // Announcements briefly take over the hint, then it fades back.
-                Text(toast ?? "Drag to reorder")
-                    .font(.system(size: 14, weight: toast == nil ? .regular : .semibold))
-                    .foregroundStyle(.white.opacity(toast == nil ? 0.45 : 0.85))
-                    .lineLimit(1)
-                    .id(toast ?? "hint")
-                    .transition(.opacity)
+                Group {
+                    if let toast {
+                        Text(toast.styled)
+                            .foregroundStyle(.white.opacity(0.85))
+                    } else {
+                        Text("Drag to reorder")
+                            .font(.system(size: 14))
+                            .foregroundStyle(.white.opacity(0.45))
+                    }
+                }
+                .lineLimit(1)
+                .id(toast?.id ?? "hint")
+                .transition(.opacity)
             }
             .foregroundStyle(.white)
             .padding(.horizontal, 20)
@@ -256,12 +263,12 @@ struct PartyView: View {
                 }
             }
         case .alreadyQueued(let item, let index):
-            showToast("Already queued · #\(index + 1) in line")
+            showToast(Announcement(lead: "Already queued · #\(index + 1) in line"))
             scrollTarget = nil
             scrollTarget = item.id
             flash(item.id)
         case .nowPlaying:
-            showToast("That's playing right now")
+            showToast(Announcement(lead: "That's playing right now"))
         }
     }
 
@@ -283,9 +290,9 @@ struct PartyView: View {
         for item in session.state.upNext where added.contains(item.id) && item.requester?.origin == .phone {
             flash(item.id)
             if let name = item.requester?.name {
-                showToast("\(name) added \(item.track.title)")
+                showToast(Announcement(lead: "\(name) added", title: item.track.title))
             } else {
-                showToast("Someone added \(item.track.title)")
+                showToast(Announcement(lead: "Someone added", title: item.track.title))
             }
         }
     }
@@ -330,8 +337,27 @@ struct PartyView: View {
 
     // MARK: Chrome
 
+    /// A short message shown in place of the Up next hint: "Naren added" + "Big Stick".
+    struct Announcement: Equatable {
+        var lead: String
+        var title: String?
+        var id: String { lead + (title ?? "") }
+
+        /// "Naren added" in medium, the song title in semibold.
+        var styled: AttributedString {
+            var text = AttributedString(lead)
+            text.font = .system(size: 14, weight: .medium)
+            if let title {
+                var part = AttributedString(" " + title)
+                part.font = .system(size: 14, weight: .semibold)
+                text += part
+            }
+            return text
+        }
+    }
+
     /// Shows `text` in place of the Up next hint for a moment.
-    private func showToast(_ text: String) {
+    private func showToast(_ text: Announcement) {
         toastTask?.cancel()
         withAnimation(.easeInOut(duration: 0.15)) { toast = text }
         toastTask = Task {

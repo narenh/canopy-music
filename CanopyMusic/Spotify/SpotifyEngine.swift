@@ -85,8 +85,16 @@ final class SpotifyEngine: PlaybackEngine {
         do {
             try await api.send("PUT", "/me/player/play", query: deviceQuery)
         } catch SpotifyError.noDevice {
-            try await transferToDevice()
-            try await api.send("PUT", "/me/player/play", query: deviceQuery)
+            do {
+                try await transferToDevice()
+                try await api.send("PUT", "/me/player/play", query: deviceQuery)
+            } catch {
+                // Spotify lost the playback state along with the old device: start the current
+                // song again on this one where it left off.
+                guard let currentURI else { throw error }
+                struct Body: Encodable { var uris: [String]; var position_ms: Int }
+                try await api.send("PUT", "/me/player/play", query: deviceQuery, body: Body(uris: [currentURI], position_ms: Int(cachedTime * 1000)))
+            }
         }
         cache(playing: true, time: cachedTime)
     }

@@ -4,9 +4,9 @@ import UIKit
 /// Host Music section rows for Spotify: who's signed in, and where music plays with a live status.
 struct SpotifyStatusRows: View {
     @Environment(AppModel.self) private var model
-    @State private var showPicker = false
 
     var body: some View {
+        @Bindable var model = model
         if model.spotifyClientID.isEmpty || !model.spotifyAuth.isSignedIn {
             Button {
                 Task { await model.signInToSpotify() }
@@ -31,7 +31,7 @@ struct SpotifyStatusRows: View {
             .task { if model.spotifyDisplayName == nil { await model.refreshSpotifyProfile() } }
 
             Button {
-                showPicker = true
+                model.isPickingSpotifyDevice = true
             } label: {
                 HStack(spacing: 12) {
                     Image(systemName: SpotifyDeviceKind.icon(model.spotifyDeviceType))
@@ -50,11 +50,7 @@ struct SpotifyStatusRows: View {
                 .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
-            .sheet(isPresented: $showPicker) {
-                SpotifyDevicePicker()
-                    .presentationBackground(.ultraThinMaterial)
-                    .preferredColorScheme(.dark)
-            }
+            .spotifyDevicePicker()
             // Keep the status current while host mode is open (one request every 10 s).
             .task {
                 while !Task.isCancelled {
@@ -74,6 +70,60 @@ struct SpotifyStatusRows: View {
             StatusDot(color: .green, text: "Ready")
         } else {
             StatusDot(color: .orange, text: "Not available. Open Spotify on it.")
+        }
+    }
+}
+
+/// Party screen button (where crossfade sits for Apple Music): shows the device type, with an
+/// orange dot when it isn't available. Opens the device picker.
+struct SpotifyDeviceButton: View {
+    @Environment(AppModel.self) private var model
+
+    var body: some View {
+        let unavailable = model.spotifyDevicesLoaded && !model.spotifyDeviceAvailable
+        Button {
+            model.isPickingSpotifyDevice = true
+        } label: {
+            VStack(spacing: 3) {
+                Image(systemName: SpotifyDeviceKind.icon(model.spotifyDeviceType))
+                    .font(.system(size: 15, weight: .semibold))
+                Circle()
+                    .fill(.orange)
+                    .frame(width: 4, height: 4)
+                    .opacity(unavailable ? 1 : 0)
+            }
+            .frame(width: 44, height: 44)
+            .offset(y: 2)
+        }
+        .buttonStyle(.plain)
+        .glassEffect(.regular.interactive(), in: Circle())
+        .accessibilityLabel("Where music plays")
+        .accessibilityValue(model.spotifyDeviceName.map { unavailable ? "\($0), not available" : $0 } ?? "Not chosen")
+        .spotifyDevicePicker()
+        .task {
+            while !Task.isCancelled {
+                await model.refreshSpotifyDevices()
+                try? await Task.sleep(for: .seconds(10))
+            }
+        }
+    }
+}
+
+extension View {
+    func spotifyDevicePicker() -> some View {
+        modifier(SpotifyDevicePickerPresenter())
+    }
+}
+
+private struct SpotifyDevicePickerPresenter: ViewModifier {
+    @Environment(AppModel.self) private var model
+
+    func body(content: Content) -> some View {
+        @Bindable var model = model
+        content.sheet(isPresented: $model.isPickingSpotifyDevice) {
+            SpotifyDevicePicker()
+                .presentationBackground(.ultraThinMaterial)
+                .preferredColorScheme(.dark)
         }
     }
 }

@@ -118,6 +118,7 @@ struct SpotifyDevice: Decodable, Identifiable, Hashable, Sendable {
     var name: String
     var type: String
     var is_active: Bool
+    var supports_volume: Bool?
 }
 
 struct SpotifyPlayerState: Decodable, Sendable {

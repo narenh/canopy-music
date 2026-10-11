@@ -401,6 +401,9 @@ private struct TransportControls: View {
                         .frame(width: 44, height: 44)
                         .glassEffect(.regular.interactive(), in: Circle())
                         .accessibilityLabel("Choose speakers")
+                } else {
+                    // Keeps play/pause centered.
+                    Color.clear.frame(width: 44, height: 44)
                 }
                 Group {
                     Button {
@@ -431,7 +434,10 @@ private struct TransportControls: View {
                 }
                 .buttonStyle(.glass)
                 .buttonBorderShape(.circle)
-                if model.provider != .spotify {
+                if model.provider == .spotify {
+                    // Spotify's crossfade lives in the Spotify app; this spot picks where music plays.
+                    SpotifyDeviceButton()
+                } else {
                 Button {
                     model.crossfade.toggle()
                 } label: {

@@ -96,6 +96,8 @@ final class AppModel {
     private(set) var guestURL: URL?
     private(set) var friendlyURL: URL?
     var errorMessage: String?
+    /// Shows "Where should music play?" (host Music section or the party screen's device button).
+    var isPickingSpotifyDevice = false
 
     var hostPIN: String { didSet { defaults.set(hostPIN, forKey: "hostPIN") } }
     var crossfade: Bool {
@@ -262,6 +264,9 @@ final class AppModel {
         guard spotifyAuth.isSignedIn,
               let reply = try? await spotifyAPI.get("/me/player/devices", as: Reply.self) else { return }
         spotifyDevices = reply.devices.filter { $0.id != nil }
+        #if DEBUG
+        print("[spotify-devices] " + reply.devices.map { "\($0.name) type=\($0.type) active=\($0.is_active) volume=\($0.supports_volume.map(String.init) ?? "?")" }.joined(separator: " | "))
+        #endif
         spotifyDevicesLoaded = true
         if let id = spotifyDeviceID, let device = spotifyDevices.first(where: { $0.id == id }) {
             spotifyDeviceName = device.name
@@ -270,9 +275,14 @@ final class AppModel {
     }
 
     func selectSpotifyDevice(_ device: SpotifyDevice) {
+        let changed = device.id != spotifyDeviceID
         spotifyDeviceID = device.id
         spotifyDeviceName = device.name
         spotifyDeviceType = device.type
+        // Mid-party, move playback to the new device (resuming targets it by id).
+        if changed, session.state.current != nil, session.isPlaying || isLocked {
+            Task { await play() }
+        }
     }
 
     private func applyCrossfade() {
@@ -319,9 +329,10 @@ final class AppModel {
         do {
             try await session.play()
         } catch SpotifyError.noDevice {
-            // The chosen device went away (usually Spotify asleep on it). No alert: the host
-            // Music section shows it as not available until it's back.
+            // The chosen device went away (usually Spotify asleep on it): show where music can
+            // play instead of an error.
             spotifyDevices.removeAll { $0.id == spotifyDeviceID }
+            isPickingSpotifyDevice = true
             await refreshSpotifyDevices()
         } catch {
             errorMessage = "Couldn't start playback. \(error.localizedDescription)"

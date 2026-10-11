@@ -212,7 +212,7 @@ private struct AppleMusicStatusRow: View {
         switch model.authorization {
         case .authorized:
             if !model.canPlayAppleMusic {
-                StatusDot(color: .orange, text: "Needs a subscription to play songs")
+                StatusDot(color: .orange, text: "No subscription")
             } else if !model.appleMusicLibrarySynced {
                 StatusDot(color: .orange, text: "Your library isn't synced, so your playlists won't show. Turn on Sync Library in Settings › Apps › Music.")
             } else {

@@ -60,6 +60,29 @@ final class AppModel {
     var spotifyDeviceName: String? {
         didSet { UserDefaults.standard.set(spotifyDeviceName, forKey: "spotifyDeviceName") }
     }
+    /// Spotify's device type ("Tablet", "TV", "Speaker"…) for the chosen device.
+    var spotifyDeviceType: String? {
+        didSet { UserDefaults.standard.set(spotifyDeviceType, forKey: "spotifyDeviceType") }
+    }
+    /// Devices Spotify currently lists (only ones with Spotify open and awake).
+    private(set) var spotifyDevices: [SpotifyDevice] = []
+    /// False until the first device check finishes, so status can say "Checking…".
+    private(set) var spotifyDevicesLoaded = false
+    private(set) var spotifyDisplayName: String? {
+        didSet { UserDefaults.standard.set(spotifyDisplayName, forKey: "spotifyDisplayName") }
+    }
+
+    var spotifyDeviceAvailable: Bool {
+        guard let id = spotifyDeviceID else { return false }
+        return spotifyDevices.contains { $0.id == id }
+    }
+
+    /// Music plays from this iPad (so its AirPlay speaker choice matters). Spotify reports the
+    /// iPad's own app as a "Tablet"; unknown counts as this iPad.
+    var spotifyPlaysOnThisIPad: Bool {
+        guard let type = spotifyDeviceType else { return true }
+        return type.lowercased() == "tablet"
+    }
 
     private(set) var provider: Provider
     private(set) var session: PartySession
@@ -126,6 +149,8 @@ final class AppModel {
         self.spotifyAPI = spotifyAPI
         self.spotifyDeviceID = UserDefaults.standard.string(forKey: SpotifyEngine.deviceDefaultsKey)
         self.spotifyDeviceName = UserDefaults.standard.string(forKey: "spotifyDeviceName")
+        self.spotifyDeviceType = UserDefaults.standard.string(forKey: "spotifyDeviceType")
+        self.spotifyDisplayName = UserDefaults.standard.string(forKey: "spotifyDisplayName")
         self.session = Self.makeSession(provider ?? .none, spotify: spotifyAPI)
         hostPIN = defaults.string(forKey: "hostPIN") ?? ""
         crossfade = defaults.bool(forKey: "crossfade")
@@ -210,25 +235,44 @@ final class AppModel {
         spotifyAuth.signOut()
         spotifyDeviceID = nil
         spotifyDeviceName = nil
+        spotifyDeviceType = nil
+        spotifyDisplayName = nil
     }
 
     func signInToSpotify() async {
         do {
             try await spotifyAuth.signIn()
+            await refreshSpotifyProfile()
         } catch SpotifyError.signInCancelled {
         } catch {
             errorMessage = error.localizedDescription
         }
     }
 
-    func spotifyDevices() async -> [SpotifyDevice] {
+    func refreshSpotifyProfile() async {
+        struct Me: Decodable { var display_name: String? }
+        guard spotifyAuth.isSignedIn,
+              let me = try? await spotifyAPI.get("/me", as: Me.self) else { return }
+        spotifyDisplayName = me.display_name
+    }
+
+    /// Quietly refreshes the device list; failures keep the last list rather than alerting.
+    func refreshSpotifyDevices() async {
         struct Reply: Decodable { var devices: [SpotifyDevice] }
-        do {
-            return try await spotifyAPI.get("/me/player/devices", as: Reply.self)?.devices ?? []
-        } catch {
-            errorMessage = error.localizedDescription
-            return []
+        guard spotifyAuth.isSignedIn,
+              let reply = try? await spotifyAPI.get("/me/player/devices", as: Reply.self) else { return }
+        spotifyDevices = reply.devices.filter { $0.id != nil }
+        spotifyDevicesLoaded = true
+        if let id = spotifyDeviceID, let device = spotifyDevices.first(where: { $0.id == id }) {
+            spotifyDeviceName = device.name
+            spotifyDeviceType = device.type
         }
+    }
+
+    func selectSpotifyDevice(_ device: SpotifyDevice) {
+        spotifyDeviceID = device.id
+        spotifyDeviceName = device.name
+        spotifyDeviceType = device.type
     }
 
     private func applyCrossfade() {
@@ -239,7 +283,7 @@ final class AppModel {
         switch provider {
         case .none: false
         case .appleMusic: authorization == .authorized && canPlayAppleMusic
-        case .spotify: spotifyAuth.isSignedIn && spotifyDeviceID != nil
+        case .spotify: spotifyAuth.isSignedIn && spotifyDeviceAvailable
         #if DEBUG
         case .demo: true
         #endif

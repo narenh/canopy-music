@@ -102,10 +102,14 @@ struct HostView: View {
                 }
                 .listRowBackground(Color.white.opacity(0.08))
 
-                Section("Speakers") {
-                    SpeakersRow()
+                // When Spotify plays on another device (a TV, a speaker), the iPad's AirPlay choice
+                // doesn't apply.
+                if model.provider != .spotify || model.spotifyPlaysOnThisIPad {
+                    Section("Speakers") {
+                        SpeakersRow()
+                    }
+                    .listRowBackground(Color.white.opacity(0.08))
                 }
-                .listRowBackground(Color.white.opacity(0.08))
 
                 Section("Guests") {
                     if !model.phoneQueueEnabled {
@@ -235,65 +239,6 @@ private struct SpeakersRow: View {
 
 // MARK: - Spotify
 
-/// Sign-in and Spotify Connect device choice for the host Music section.
-private struct SpotifyStatusRows: View {
-    @Environment(AppModel.self) private var model
-    @State private var devices: [SpotifyDevice] = []
-    @State private var loading = false
-
-    var body: some View {
-        if model.spotifyClientID.isEmpty {
-            Label("Add your Spotify Client ID in Settings (gear)", systemImage: "key")
-                .foregroundStyle(.secondary)
-        } else if !model.spotifyAuth.isSignedIn {
-            Button {
-                Task { await model.signInToSpotify() }
-            } label: {
-                Label("Sign in to Spotify", systemImage: "person.crop.circle.badge.plus")
-            }
-        } else {
-            Menu {
-                ForEach(devices.filter { $0.id != nil }) { device in
-                    Button {
-                        model.spotifyDeviceID = device.id
-                        model.spotifyDeviceName = device.name
-                    } label: {
-                        Label(device.name, systemImage: device.id == model.spotifyDeviceID ? "checkmark" : Self.icon(for: device.type))
-                    }
-                }
-                Divider()
-                Button("Refresh devices", systemImage: "arrow.clockwise") { Task { await reload() } }
-            } label: {
-                LabeledContent {
-                    Text(model.spotifyDeviceName ?? "Choose…")
-                } label: {
-                    Label("Spotify device", systemImage: "hifispeaker")
-                }
-            }
-            .task { await reload() }
-            if devices.isEmpty, !loading {
-                Text("No devices. Open Spotify on this iPad (or an Apple TV), then refresh.")
-                    .font(.footnote)
-                    .foregroundStyle(.secondary)
-            }
-        }
-    }
-
-    private func reload() async {
-        loading = true
-        devices = await model.spotifyDevices()
-        loading = false
-    }
-
-    static func icon(for type: String) -> String {
-        switch type.lowercased() {
-        case "tablet", "smartphone": "ipad"
-        case "tv": "appletv"
-        case "computer": "laptopcomputer"
-        default: "hifispeaker"
-        }
-    }
-}
 
 // MARK: - Settings sheet
 

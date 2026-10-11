@@ -395,10 +395,13 @@ private struct TransportControls: View {
         GlassEffectContainer(spacing: 20) {
             HStack(spacing: 20) {
                 // Open AirPlay picker: AirPlay sessions sometimes drop and need re-picking.
-                RoutePicker(tint: .white)
-                    .frame(width: 44, height: 44)
-                    .glassEffect(.regular.interactive(), in: Circle())
-                    .accessibilityLabel("Choose speakers")
+                // Hidden when Spotify plays on another device.
+                if model.provider != .spotify || model.spotifyPlaysOnThisIPad {
+                    RoutePicker(tint: .white)
+                        .frame(width: 44, height: 44)
+                        .glassEffect(.regular.interactive(), in: Circle())
+                        .accessibilityLabel("Choose speakers")
+                }
                 Group {
                     Button {
                         Task { await session.previous() }

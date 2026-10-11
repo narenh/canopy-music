@@ -104,7 +104,6 @@ struct PartyView: View {
                 }
             }
             .animation(.spring(duration: 0.35), value: searchActive)
-            .overlay(alignment: .bottom) { toastView }
         }
     }
 
@@ -169,9 +168,13 @@ struct PartyView: View {
                 Text("Up next")
                     .font(.system(size: 26, weight: .bold))
                 Spacer()
-                Text("Drag to reorder")
-                    .font(.system(size: 14))
-                    .foregroundStyle(.white.opacity(0.45))
+                // Announcements briefly take over the hint, then it fades back.
+                Text(toast ?? "Drag to reorder")
+                    .font(.system(size: 14, weight: toast == nil ? .regular : .semibold))
+                    .foregroundStyle(.white.opacity(toast == nil ? 0.45 : 0.85))
+                    .lineLimit(1)
+                    .id(toast ?? "hint")
+                    .transition(.opacity)
             }
             .foregroundStyle(.white)
             .padding(.horizontal, 20)
@@ -237,7 +240,6 @@ struct PartyView: View {
         }
         switch result {
         case .added(let item, let index):
-            showToast("Added · #\(index + 1) in line")
             scrollTarget = item.id
             guard frame != .zero else { flash(item.id); return }
             arriving.insert(item.id)
@@ -328,27 +330,14 @@ struct PartyView: View {
 
     // MARK: Chrome
 
+    /// Shows `text` in place of the Up next hint for a moment.
     private func showToast(_ text: String) {
         toastTask?.cancel()
-        withAnimation(.spring(duration: 0.3)) { toast = text }
+        withAnimation(.easeInOut(duration: 0.15)) { toast = text }
         toastTask = Task {
             try? await Task.sleep(for: .seconds(2.4))
             guard !Task.isCancelled else { return }
-            withAnimation(.easeOut(duration: 0.3)) { toast = nil }
-        }
-    }
-
-    @ViewBuilder private var toastView: some View {
-        if let toast {
-            Text(toast)
-                .font(.system(size: 17, weight: .semibold))
-                .foregroundStyle(.white)
-                .padding(.horizontal, 22)
-                .padding(.vertical, 14)
-                .glassEffect(.regular, in: Capsule())
-                .padding(.bottom, 28)
-                .transition(.move(edge: .bottom).combined(with: .opacity))
-                .id(toast)
+            withAnimation(.easeInOut(duration: 0.15)) { toast = nil }
         }
     }
 }

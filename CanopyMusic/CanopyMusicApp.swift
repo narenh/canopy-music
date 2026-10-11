@@ -11,7 +11,38 @@ final class AppDelegate: UIResponder, UIApplicationDelegate {
     @MainActor let model = AppModel()
 
     func application(_ application: UIApplication, supportedInterfaceOrientationsFor window: UIWindow?) -> UIInterfaceOrientationMask {
-        .landscape
+        Capture.isOn ? .portrait : .landscape
+    }
+}
+
+/// Lays `content` out at the landscape size and turns it 90° to fill a portrait screen.
+struct CaptureRotated<Content: View>: View {
+    @ViewBuilder let content: Content
+
+    var body: some View {
+        GeometryReader { geo in
+            content
+                .frame(width: geo.size.height, height: geo.size.width)
+                .rotationEffect(.degrees(90))
+                .position(x: geo.size.width / 2, y: geo.size.height / 2)
+        }
+        .ignoresSafeArea()
+        // The portrait status bar and home indicator would end up on the side once turned.
+        .statusBarHidden()
+        .persistentSystemOverlays(.hidden)
+    }
+}
+
+/// `-capture` (debug builds): runs in portrait and draws the landscape UI turned 90°, so the
+/// simulator (which this Mac can't rotate) produces full-resolution landscape screenshots once
+/// the image is turned back.
+enum Capture {
+    static var isOn: Bool {
+        #if DEBUG
+        ProcessInfo.processInfo.arguments.contains("-capture")
+        #else
+        false
+        #endif
     }
 }
 
@@ -24,13 +55,14 @@ final class SceneDelegate: UIResponder, UIWindowSceneDelegate {
     func scene(_ scene: UIScene, willConnectTo session: UISceneSession, options connectionOptions: UIScene.ConnectionOptions) {
         guard let windowScene = scene as? UIWindowScene else { return }
         let window = UIWindow(windowScene: windowScene)
-        window.rootViewController = LandscapeHostingController(rootView: RootView(model: model))
+        let root = RootView(model: model)
+        window.rootViewController = LandscapeHostingController(rootView: Capture.isOn ? AnyView(CaptureRotated { root }) : AnyView(root))
         window.makeKeyAndVisible()
         self.window = window
     }
 
     func sceneDidBecomeActive(_ scene: UIScene) {
-        if let windowScene = scene as? UIWindowScene {
+        if let windowScene = scene as? UIWindowScene, !Capture.isOn {
             windowScene.requestGeometryUpdate(.iOS(interfaceOrientations: .landscape))
         }
         // iOS tears down listening sockets while suspended; bring the phone server back.
@@ -49,7 +81,7 @@ final class SceneDelegate: UIResponder, UIWindowSceneDelegate {
 
 /// Landscape only, and asks iPadOS to lock rotation once it's in landscape.
 final class LandscapeHostingController<Content: View>: UIHostingController<Content> {
-    override var supportedInterfaceOrientations: UIInterfaceOrientationMask { .landscape }
+    override var supportedInterfaceOrientations: UIInterfaceOrientationMask { Capture.isOn ? .portrait : .landscape }
 
     override var prefersInterfaceOrientationLocked: Bool {
         view.window?.windowScene?.effectiveGeometry.interfaceOrientation.isLandscape ?? false
@@ -86,7 +118,7 @@ struct RootView: View {
     var body: some View {
         let current = model.session.state.current
         let takeover = current.flatMap { item -> (QueueItem, [LyricsEasterEgg.Line])? in
-            guard easterEgg.matches(item.track), easterEgg.dismissedItemID != item.id,
+            guard !Capture.isOn, easterEgg.matches(item.track), easterEgg.dismissedItemID != item.id,
                   let lines = easterEgg.lines else { return nil }
             return (item, lines)
         }
@@ -130,6 +162,14 @@ struct RootView: View {
                 await AppleMusicCatalog.benchmark()
             }
             print("[debug] guest URL \(model.guestURL?.absoluteString ?? "none")")
+            let args = ProcessInfo.processInfo.arguments
+            if let i = args.firstIndex(of: "-screenshotParty"), i + 1 < args.count, let scene = ScreenshotScene.all[args[i + 1]] {
+                let tracks = await scene.resolve(with: AppleMusicCatalog(cache: SongCache()))
+                let session = PartySession(catalog: FixedCatalog(tracks: tracks), engine: PosedEngine(time: scene.time))
+                try? await session.load(playlist: PlaylistSummary(id: "screenshot", name: "Party", kind: .library))
+                try? await session.play()
+                model.installScreenshotSession(session)
+            }
             // `-autoLoad` loads the first demo playlist without playing, for host-screen screenshots.
             if ProcessInfo.processInfo.arguments.contains("-autoLoad"), model.isDemo,
                let first = try? await model.session.catalog.libraryPlaylists().first {

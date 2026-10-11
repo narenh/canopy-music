@@ -120,7 +120,15 @@ struct UpNextList: View {
                     scheduleReturn(proxy)
                 }
             }
-            .onAppear { scrollHome(proxy, animated: false) }
+            .onAppear {
+                scrollHome(proxy, animated: false)
+                // Again once the rows have laid out; the first scroll can land before they exist.
+                Task {
+                    try? await Task.sleep(for: .milliseconds(150))
+                    guard !isScrolling else { return }
+                    scrollHome(proxy, animated: false)
+                }
+            }
             .onChange(of: homeSignal) {
                 returnTask?.cancel()
                 returnTask = nil

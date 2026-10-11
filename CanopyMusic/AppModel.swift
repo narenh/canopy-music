@@ -138,6 +138,7 @@ final class AppModel {
     /// lose port 80 and land on 8080).
     @ObservationIgnored private var serverOperation: Task<Void, Never>?
     @ObservationIgnored private var hostname = FriendlyHostname(name: "music")
+    @ObservationIgnored private var localNetworkRequested = false
 
     init() {
         // Nothing saved (or a choice this build doesn't have, e.g. "demo" in a release build):
@@ -413,6 +414,21 @@ final class AppModel {
         self.server = server
         serverTask = task
         refreshAddresses()
+        requestLocalNetworkPermission()
+    }
+
+    /// The `.local` name only works once Local Network access is allowed, and registering it
+    /// doesn't show the prompt. Ask once per launch, then re-announce the name.
+    private func requestLocalNetworkPermission() {
+        guard !localNetworkRequested else { return }
+        localNetworkRequested = true
+        Task {
+            let allowed = await LocalNetworkPermission.request()
+            #if DEBUG
+            print("[local-network] allowed=\(allowed)")
+            #endif
+            if allowed { refreshAddresses() }
+        }
     }
 
     /// Changes the `.local` name and re-announces it.
@@ -456,7 +472,7 @@ final class AppModel {
             return
         }
         guestURL = server.url(host: ip)
-        friendlyURL = hostname.register(address: ip) ? server.url(host: hostname.hostname) : nil
+        friendlyURL = hostname.register(address: ip, port: server.port) ? server.url(host: hostname.hostname) : nil
     }
 
     #if DEBUG

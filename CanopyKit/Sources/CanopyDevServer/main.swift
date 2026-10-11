@@ -15,7 +15,7 @@ session.add(DemoCatalog.track(16), by: Requester(name: nil, clientID: nil, origi
 guard let (server, task) = await PartyServer.start(session: session) else { fatalError("No port available") }
 let hostname = FriendlyHostname(name: "music-dev")
 let ip = LocalNetwork.lanAddress() ?? "127.0.0.1"
-let registered = hostname.register(address: ip)
+let registered = hostname.register(address: ip, port: server.port)
 print("Canopy dev server: \(server.url(host: "localhost")!) · LAN \(server.url(host: ip)!)")
 print(registered ? "Also at \(server.url(host: hostname.hostname)!)" : "mDNS hostname registration failed")
 try await task.value

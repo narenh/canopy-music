@@ -8,6 +8,7 @@ public final class FriendlyHostname: @unchecked Sendable {
     public let hostname: String
     private var connection: DNSServiceRef?
     private var record: DNSRecordRef?
+    private var service: DNSServiceRef?
     private let queue = DispatchQueue(label: "canopy.mdns")
 
     /// `name` without the `.local` suffix, e.g. "music".
@@ -15,9 +16,11 @@ public final class FriendlyHostname: @unchecked Sendable {
         hostname = "\(name).local"
     }
 
-    /// Registers the A record. Returns false if mDNS refused (name conflict, no permission, etc.).
+    /// Registers the A record, plus an `_http._tcp` service ("Canopy Music") on it. Advertising a
+    /// Bonjour service is what makes iPadOS ask for Local Network permission; without it the
+    /// bare A record is silently blocked. Returns false if mDNS refused the record.
     @discardableResult
-    public func register(address: String) -> Bool {
+    public func register(address: String, port: UInt16) -> Bool {
         unregister()
         var addr = in_addr()
         guard inet_pton(AF_INET, address, &addr) == 1 else { return false }
@@ -50,10 +53,28 @@ public final class FriendlyHostname: @unchecked Sendable {
         DNSServiceSetDispatchQueue(connection, queue)
         self.connection = connection
         self.record = record
+
+        var service: DNSServiceRef?
+        let serviceStatus = DNSServiceRegister(
+            &service, 0, 0, "Canopy Music", "_http._tcp", nil, hostname + ".", port.bigEndian, 0, nil,
+            { _, _, error, name, _, _, _ in
+                #if DEBUG
+                print("[mdns] service callback error=\(error) name=\(name.map { String(cString: $0) } ?? "?")")
+                #endif
+            }, nil
+        )
+        if serviceStatus == kDNSServiceErr_NoError, let service {
+            DNSServiceSetDispatchQueue(service, queue)
+            self.service = service
+        }
         return true
     }
 
     public func unregister() {
+        if let service {
+            DNSServiceRefDeallocate(service)
+        }
+        service = nil
         if let connection {
             DNSServiceRefDeallocate(connection)
         }

@@ -184,6 +184,7 @@ struct SpotifySetupStep: View {
             HStack(spacing: 16) {
                 Button("Back", action: back)
                     .buttonStyle(.glass)
+                    .tint(.primary)
                     .controlSize(.large)
                 Button {
                     working = true
@@ -240,6 +241,7 @@ private struct NetworkStep: View {
             HStack(spacing: 16) {
                 Button("Back", action: back)
                     .buttonStyle(.glass)
+                    .tint(.primary)
                     .controlSize(.large)
                 Button {
                     model.phoneQueueEnabled = true

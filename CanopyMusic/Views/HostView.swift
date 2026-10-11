@@ -66,6 +66,7 @@ struct HostView: View {
                         .frame(width: 32, height: 32)
                 }
                 .buttonStyle(.glass)
+                .tint(.primary)
                 .buttonBorderShape(.circle)
                 .accessibilityLabel("Settings")
             }
@@ -169,6 +170,7 @@ struct HostView: View {
                 if session.state.upNext.contains(where: \.isRequest) {
                     Button("Clear requests", role: .destructive) { session.clearRequests() }
                         .buttonStyle(.glass)
+                        .tint(.primary)
                         .controlSize(.small)
                 }
             }
@@ -342,7 +344,7 @@ private struct SettingsSheet: View {
             .navigationTitle("Settings")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
-                ToolbarItem(placement: .confirmationAction) { Button("Done") { dismiss() } }
+                ToolbarItem(placement: .confirmationAction) { Button("Done") { dismiss() }.tint(.primary) }
             }
         }
     }
@@ -380,11 +382,13 @@ private extension HostView {
                         .frame(width: 22, height: 22)
                 }
                 .buttonStyle(.glass)
+                .tint(.primary)
                 .buttonBorderShape(.circle)
                 .accessibilityLabel("Shuffle playlist")
             }
             Button(session.state.playlistName == nil ? "Choose playlist" : "Change") { showPicker = true }
                 .buttonStyle(.glass)
+                .tint(.primary)
                 .disabled(!model.isReady)
         }
         .padding(.horizontal, 20)
@@ -476,7 +480,7 @@ struct PlaylistPickerView: View {
                         Text("Your playlists").font(.headline)
                     }
                 }
-                ToolbarItem(placement: .cancellationAction) { Button("Cancel") { dismiss() } }
+                ToolbarItem(placement: .cancellationAction) { Button("Cancel") { dismiss() }.tint(.primary) }
             }
             .task { await loadLibrary() }
             .task(id: "\(source)-\(query)") { await searchCatalog() }

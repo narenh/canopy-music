@@ -161,7 +161,7 @@ struct SpotifyDevicePicker: View {
             .navigationTitle("Where should music play?")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
-                ToolbarItem(placement: .confirmationAction) { Button("Done") { dismiss() } }
+                ToolbarItem(placement: .confirmationAction) { Button("Done") { dismiss() }.tint(.primary) }
             }
         }
         .tint(AppModel.Provider.spotify.accent)
@@ -263,7 +263,7 @@ private struct OpenSpotifyButton: View {
         if prominent {
             button.buttonStyle(.glassProminent)
         } else {
-            button.buttonStyle(.glass)
+            button.buttonStyle(.glass).tint(.primary)
         }
     }
 }

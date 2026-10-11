@@ -124,6 +124,7 @@ struct PartyView: View {
                 Button("Done", action: closeSearch)
                 .font(.system(size: 18, weight: .semibold))
                 .buttonStyle(.glass)
+                .tint(.primary)
             }
         }
         .padding(.leading, 22)
@@ -451,6 +452,7 @@ private struct TransportControls: View {
                     .accessibilityLabel("Skip")
                 }
                 .buttonStyle(.glass)
+                .tint(.primary)
                 .buttonBorderShape(.circle)
                 .disabled(model.spotifyDisconnected)
                 .opacity(model.spotifyDisconnected ? 0.35 : 1)

@@ -203,11 +203,14 @@ struct SpotifyDevicePicker: View {
                     .buttonStyle(.plain)
                 }
             } header: {
-                Text(Self.intro)
-                    .textCase(nil)
-                    .font(.subheadline)
-                    .foregroundStyle(.secondary)
-                    .padding(.bottom, 6)
+                VStack(alignment: .leading, spacing: 10) {
+                    if model.spotifyDisconnected, model.spotifyDeviceID != nil { disconnected }
+                    Text(Self.intro)
+                        .font(.subheadline)
+                        .foregroundStyle(.secondary)
+                }
+                .textCase(nil)
+                .padding(.bottom, 6)
             } footer: {
                 Searching(text: "Looking for more devices…")
             }
@@ -222,8 +225,15 @@ struct SpotifyDevicePicker: View {
         .scrollContentBackground(.hidden)
     }
 
+    private var disconnected: some View {
+        Label("Playback device disconnected", systemImage: "exclamationmark.triangle.fill")
+            .font(.headline)
+            .foregroundStyle(.orange)
+    }
+
     private var empty: some View {
         VStack(spacing: 20) {
+            if model.spotifyDisconnected, model.spotifyDeviceID != nil { disconnected }
             Image(systemName: "dot.radiowaves.left.and.right")
                 .font(.system(size: 44))
                 .foregroundStyle(.secondary)

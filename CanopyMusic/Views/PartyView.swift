@@ -331,6 +331,7 @@ struct PartyView: View {
 struct NowPlayingView: View {
     let item: QueueItem?
     let session: PartySession
+    @Environment(AppModel.self) private var model
 
     var body: some View {
         GeometryReader { geo in
@@ -369,8 +370,18 @@ struct NowPlayingView: View {
                 .multilineTextAlignment(.center)
                 .frame(maxWidth: side + 120)
                 if let item {
+                    // While disconnected the bar means nothing; say why the controls are off instead.
                     ProgressBar(duration: item.track.duration, session: session)
                         .frame(width: side)
+                        .opacity(model.spotifyDisconnected ? 0 : 1)
+                        .allowsHitTesting(!model.spotifyDisconnected)
+                        .overlay {
+                            if model.spotifyDisconnected {
+                                Label("Playback device disconnected", systemImage: "exclamationmark.triangle.fill")
+                                    .font(.subheadline.weight(.medium))
+                                    .foregroundStyle(.orange)
+                            }
+                        }
                     TransportControls(session: session)
                 }
             }
@@ -431,7 +442,8 @@ private struct TransportControls: View {
                 }
                 .buttonStyle(.glass)
                 .buttonBorderShape(.circle)
-                .disabled(spotifyUnavailable)
+                .disabled(model.spotifyDisconnected)
+                .opacity(model.spotifyDisconnected ? 0.35 : 1)
                 if model.provider == .spotify {
                     // Spotify's crossfade lives in the Spotify app; this spot picks where music plays.
                     SpotifyDeviceButton()
@@ -460,12 +472,6 @@ private struct TransportControls: View {
     }
 
     private var airPlayApplies: Bool { model.provider != .spotify || model.spotifyPlaysOnThisIPad }
-
-    /// Spotify lost the device (usually asleep): commands would fail, so the device button is the
-    /// way forward.
-    private var spotifyUnavailable: Bool {
-        model.provider == .spotify && model.spotifyDevicesLoaded && !model.spotifyDeviceAvailable
-    }
 }
 
 /// Four bars bouncing at different rates; they settle low when paused.

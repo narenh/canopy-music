@@ -77,6 +77,11 @@ final class AppModel {
         return spotifyDevices.contains { $0.id == id }
     }
 
+    /// Spotify lost the chosen device (usually asleep), so playback commands would fail.
+    var spotifyDisconnected: Bool {
+        provider == .spotify && spotifyDevicesLoaded && !spotifyDeviceAvailable
+    }
+
     /// Music plays from this iPad (so its AirPlay speaker choice matters). Spotify reports the
     /// iPad's own app as a "Tablet"; unknown counts as this iPad.
     var spotifyPlaysOnThisIPad: Bool {

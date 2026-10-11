@@ -108,31 +108,57 @@ struct PartyView: View {
         }
     }
 
+    /// While searching, the field shrinks and Done sits beside it, leaving room for a clear button.
     private var searchField: some View {
-        HStack(spacing: 12) {
-            Image(systemName: "magnifyingglass")
-                .font(.system(size: 22, weight: .semibold))
-                .foregroundStyle(.white.opacity(0.6))
-            TextField("", text: $query, prompt: Text("Search \(model.isDemo ? "demo songs" : model.provider.title) to add a song").foregroundStyle(.white.opacity(0.5)))
-                .font(.system(size: 22))
-                .foregroundStyle(.white)
-                .focused($searchFocused)
-                .submitLabel(.search)
-                .autocorrectionDisabled()
-                .textInputAutocapitalization(.never)
-            if searchActive {
-                Button("Done", action: closeSearch)
-                .font(.system(size: 18, weight: .semibold))
-                .buttonStyle(.glass)
-                .tint(.primary)
+        GlassEffectContainer(spacing: 12) {
+            HStack(spacing: 12) {
+                HStack(spacing: 12) {
+                    Image(systemName: "magnifyingglass")
+                        .font(.system(size: 22, weight: .semibold))
+                        .foregroundStyle(.white.opacity(0.6))
+                    TextField("", text: $query, prompt: Text("Search \(model.isDemo ? "demo songs" : model.provider.title) to add a song").foregroundStyle(.white.opacity(0.5)))
+                        .font(.system(size: 22))
+                        .foregroundStyle(.white)
+                        .focused($searchFocused)
+                        .submitLabel(.search)
+                        .autocorrectionDisabled()
+                        .textInputAutocapitalization(.never)
+                    if !query.isEmpty {
+                        Button {
+                            query = ""
+                            searchFocused = true
+                        } label: {
+                            Image(systemName: "xmark.circle.fill")
+                                .font(.system(size: 22))
+                                .foregroundStyle(.white.opacity(0.6))
+                        }
+                        .buttonStyle(.plain)
+                        .accessibilityLabel("Clear search")
+                        .transition(.opacity)
+                    }
+                }
+                .padding(.leading, 22)
+                .padding(.trailing, 18)
+                .frame(height: 64)
+                .glassEffect(.regular.interactive(), in: Capsule())
+                .contentShape(Rectangle())
+                .onTapGesture { searchFocused = true }
+
+                if searchActive {
+                    Button(action: closeSearch) {
+                        Text("Done")
+                            .font(.system(size: 18, weight: .semibold))
+                            .padding(.horizontal, 10)
+                            .frame(height: 50)
+                    }
+                    .buttonStyle(.glass)
+                    .tint(.primary)
+                    .transition(.move(edge: .trailing).combined(with: .opacity))
+                }
             }
         }
-        .padding(.leading, 22)
-        .padding(.trailing, 10)
-        .frame(height: 64)
-        .glassEffect(.regular.interactive(), in: Capsule())
-        .contentShape(Rectangle())
-        .onTapGesture { searchFocused = true }
+        .animation(.spring(duration: 0.35), value: searchActive)
+        .animation(.easeOut(duration: 0.15), value: query.isEmpty)
     }
 
     // MARK: Right pane

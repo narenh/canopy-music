@@ -11,6 +11,8 @@ iPad party jukebox for Apple Music or Spotify. Pick a base playlist, lock the iP
   <img src="docs/screenshots/4-phone.jpg" width="24%" alt="Guest queue page on a phone at music.local">
 </p>
 
+Privacy: Canopy has no servers, accounts or tracking. See the [privacy policy](PRIVACY.md).
+
 ## Building it for your iPad
 
 Requires Xcode 26+ and an iPad on iPadOS 26+.

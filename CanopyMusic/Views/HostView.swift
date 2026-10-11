@@ -38,7 +38,10 @@ struct HostView: View {
                 .preferredColorScheme(.dark)
         }
         #if DEBUG
-        .onAppear { if ProcessInfo.processInfo.arguments.contains("-showSettings") { showSettings = true } }
+        .onAppear {
+            if ProcessInfo.processInfo.arguments.contains("-showSettings") { showSettings = true }
+            if ProcessInfo.processInfo.arguments.contains("-showPicker") { showPicker = true }
+        }
         #endif
         .alert("Something went wrong", isPresented: Binding(get: { model.errorMessage != nil }, set: { if !$0 { model.errorMessage = nil } })) {
             Button("OK", role: .cancel) {}
@@ -423,9 +426,6 @@ struct PlaylistPickerView: View {
     var body: some View {
         NavigationStack {
             List {
-                TextField(source == .library ? "Filter your playlists" : "Search \(title(.catalog)) playlists", text: $query)
-                    .textInputAutocapitalization(.never)
-                    .autocorrectionDisabled()
                 ForEach(source == .library ? filteredLibrary : catalogResults) { playlist in
                     Button {
                         choose(playlist)
@@ -443,10 +443,21 @@ struct PlaylistPickerView: View {
                             Spacer()
                             if starting == playlist { ProgressView() }
                         }
+                        .contentShape(Rectangle())
                     }
+                    // Plain, so names and subtitles aren't tinted like buttons.
+                    .buttonStyle(.plain)
                     .disabled(starting != nil)
                 }
             }
+            // Our own field rather than `.searchable`, whose spacing can't be adjusted.
+            .safeAreaInset(edge: .top, spacing: 0) {
+                SearchField(prompt: source == .library ? "Filter your playlists" : "Search \(title(.catalog)) playlists", text: $query)
+                    .padding(.horizontal, 20)
+                    .padding(.top, 16)
+                    .padding(.bottom, 4)
+            }
+            .contentMargins(.top, 8, for: .scrollContent)
             .overlay {
                 if loading { ProgressView() }
                 else if let errorText { ContentUnavailableView("Couldn't load playlists", systemImage: "exclamationmark.triangle", description: Text(errorText)) }
@@ -507,6 +518,36 @@ struct PlaylistPickerView: View {
             starting = nil
             dismiss()
         }
+    }
+}
+
+/// A capsule search field: magnifying glass, text, and a clear button while there's text.
+private struct SearchField: View {
+    let prompt: String
+    @Binding var text: String
+
+    var body: some View {
+        HStack(spacing: 8) {
+            Image(systemName: "magnifyingglass")
+                .foregroundStyle(.secondary)
+            TextField(prompt, text: $text)
+                .textInputAutocapitalization(.never)
+                .autocorrectionDisabled()
+                .submitLabel(.search)
+            if !text.isEmpty {
+                Button {
+                    text = ""
+                } label: {
+                    Image(systemName: "xmark.circle.fill")
+                        .foregroundStyle(.secondary)
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel("Clear")
+            }
+        }
+        .padding(.horizontal, 14)
+        .frame(height: 44)
+        .background(Color(.tertiarySystemFill), in: Capsule())
     }
 }
 

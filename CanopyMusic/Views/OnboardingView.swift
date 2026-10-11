@@ -31,6 +31,8 @@ struct OnboardingView: View {
                         }
                     }
                 )
+                // Spotify green regardless of the current service (a fresh install defaults to Apple Music).
+                .tint(AppModel.Provider.spotify.accent)
                 .transition(.move(edge: .trailing).combined(with: .opacity))
             case .network:
                 NetworkStep(back: { go(networkBack) })

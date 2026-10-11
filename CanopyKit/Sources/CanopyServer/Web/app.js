@@ -147,6 +147,7 @@
     x: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6l12 12M18 6 6 18"/></svg>',
     lock: '<svg viewBox="0 0 24 24" aria-hidden="true"><rect x="5" y="11" width="14" height="10" rx="2"/><path d="M8 11V7a4 4 0 0 1 8 0v4"/></svg>',
     check: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="m5 12 5 5 9-10"/></svg>',
+    person: '<svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="8" r="4"/><path d="M4 21c1.5-4 4.5-6 8-6s6.5 2 8 6"/></svg>',
     play: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M8 5v14l11-7z"/></svg>',
     pause: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M7 5h4v14H7zM13 5h4v14h-4z"/></svg>',
   };
@@ -555,11 +556,18 @@
   // MARK: Name
 
   function updateNameChip() {
-    $("name-chip").textContent = myName ? myName : "Add your name";
+    // The person icon sits on the Host/Guest switch for paired phones, otherwise on the name.
+    const name = $("name-chip");
+    name.innerHTML = hostPaired ? "" : icons.person;
+    const label = document.createElement("span");
+    label.className = "name-text";
+    label.textContent = myName ? myName : "Add your name";
+    name.append(label);
     const mode = $("mode-chip");
     mode.hidden = !hostPaired;
     mode.classList.toggle("on", hostMode);
-    mode.textContent = hostMode ? "Host" : "Guest";
+    mode.innerHTML = icons.person;
+    mode.append(document.createTextNode(hostMode ? "Host" : "Guest"));
     mode.setAttribute("aria-label", hostMode ? "Host control on. Switch to guest view" : "Guest view. Switch to host control");
   }
   $("mode-chip").addEventListener("click", () => {

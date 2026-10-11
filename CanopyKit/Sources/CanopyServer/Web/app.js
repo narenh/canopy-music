@@ -556,9 +556,9 @@
   // MARK: Name
 
   function updateNameChip() {
-    // The person icon sits on the Host/Guest switch for paired phones, otherwise on the name.
+    // Name first (with the person icon), then the Host/Guest switch on paired phones.
     const name = $("name-chip");
-    name.innerHTML = hostPaired ? "" : icons.person;
+    name.innerHTML = icons.person;
     const label = document.createElement("span");
     label.className = "name-text";
     label.textContent = myName ? myName : "Add your name";
@@ -566,8 +566,7 @@
     const mode = $("mode-chip");
     mode.hidden = !hostPaired;
     mode.classList.toggle("on", hostMode);
-    mode.innerHTML = icons.person;
-    mode.append(document.createTextNode(hostMode ? "Host" : "Guest"));
+    mode.textContent = hostMode ? "Host" : "Guest";
     mode.setAttribute("aria-label", hostMode ? "Host control on. Switch to guest view" : "Guest view. Switch to host control");
   }
   $("mode-chip").addEventListener("click", () => {

@@ -47,9 +47,9 @@ main, .sheet {
 .mode-chip svg, .name-chip svg { width: 14px; height: 14px; stroke-width: 2.2; }
 .name-chip { display: flex; align-items: center; gap: 5px; }
 .name-text { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.mode-chip { display: flex; align-items: center; gap: 5px; font-size: 13px; padding: 6px 11px 6px 10px; color: var(--text-2); border-right: 1px solid var(--line); flex: none; }
+.mode-chip { display: flex; align-items: center; font-size: 13px; padding: 6px 12px 6px 11px; color: var(--text-2); border-left: 1px solid var(--line); flex: none; }
 .mode-chip[hidden] { display: none; }
-.mode-chip.on { background: var(--text); color: var(--base); font-weight: 600; border-right-color: transparent; }
+.mode-chip.on { background: var(--text); color: var(--base); font-weight: 600; border-left-color: transparent; }
 .name-chip { font-size: 13px; padding: 6px 12px; border-radius: 999px; background: var(--surface); color: var(--text-2); max-width: 45%; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 
 .search-trigger, .search-field {

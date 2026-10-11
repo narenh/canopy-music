@@ -91,6 +91,7 @@ public final class PartyServer: Sendable {
 
         await server.appendRoute("POST /api/move") { request in
             let body = try JSONDecoder.api.decode(MoveBody.self, from: await request.bodyData)
+            guard await session.phonesCanReorder else { return HTTPResponse(statusCode: .forbidden) }
             let ok = await session.move(body.id, after: body.after)
             return HTTPResponse(statusCode: ok ? .ok : .conflict)
         }

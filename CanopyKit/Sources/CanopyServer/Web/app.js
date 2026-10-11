@@ -96,6 +96,8 @@
     const current = snap.current;
     applyTheme(current && current.track);
 
+    // The host can turn off reordering from phones.
+    document.querySelector(".list-head .hint").hidden = snap.canReorder === false;
     $("playlist-name").textContent = snap.playlistName ? `Playing from ${snap.playlistName}` : "";
     $("now-status").textContent = !current ? "Waiting for music" : snap.playback.isPlaying ? "Now playing" : "Paused";
     $("now-title").textContent = current ? current.track.title : "Nothing yet";
@@ -166,7 +168,7 @@
       lock.title = "Up next. Locked in.";
       lock.innerHTML = icons.lock;
       li.append(lock);
-    } else {
+    } else if (snap.canReorder !== false) {
       const handle = document.createElement("button");
       handle.type = "button";
       handle.className = "icon-btn handle";
@@ -284,7 +286,7 @@
 
   $("queue").addEventListener("pointerdown", (event) => {
     const handle = event.target.closest(".handle");
-    if (!handle || !snap) return;
+    if (!handle || !snap || snap.canReorder === false) return;
     event.preventDefault();
     const list = $("queue");
     const li = handle.closest(".row");

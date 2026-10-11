@@ -43,6 +43,13 @@ let base = PlaylistSummary(id: "p", name: "Base", kind: .library)
 
 @MainActor
 @Suite struct PartySessionTests {
+    @Test func reorderSettingReachesPhones() async throws {
+        let session = PartySession(catalog: StubCatalog(ids: ["a", "b"]), engine: FakeEngine())
+        #expect(session.snapshot().canReorder)
+        session.phonesCanReorder = false
+        #expect(!session.snapshot().canReorder)
+    }
+
     @Test func loadingAPlaylistDoesNotPlay() async throws {
         let engine = FakeEngine()
         let session = PartySession(catalog: StubCatalog(ids: ["a", "b", "c"]), engine: engine)

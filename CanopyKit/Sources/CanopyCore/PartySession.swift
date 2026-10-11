@@ -15,6 +15,8 @@ public struct PartySnapshot: Codable, Equatable, Sendable {
     public var upNext: [QueueItem]
     public var lockedNextID: UUID?
     public var playback: PlaybackSnapshot
+    /// False when the host has turned off reordering from phones.
+    public var canReorder: Bool
 }
 
 /// Owns the queue and keeps the player in step with it. Both the iPad UI and the phone server
@@ -189,6 +191,11 @@ public final class PartySession {
         return mutate { $0.remove(id) } != nil
     }
 
+    /// Whether phones may drag songs around. The iPad can always reorder.
+    public var phonesCanReorder = true {
+        didSet { if phonesCanReorder != oldValue { broadcast() } }
+    }
+
     // MARK: Snapshots
 
     public func snapshot() -> PartySnapshot {
@@ -198,7 +205,8 @@ public final class PartySession {
             current: state.current,
             upNext: state.upNext,
             lockedNextID: state.lockedNextID,
-            playback: PlaybackSnapshot(isPlaying: engine.isPlaying, position: engine.currentTime, capturedAt: Date())
+            playback: PlaybackSnapshot(isPlaying: engine.isPlaying, position: engine.currentTime, capturedAt: Date()),
+            canReorder: phonesCanReorder
         )
     }
 

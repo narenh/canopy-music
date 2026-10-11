@@ -129,6 +129,14 @@ final class AppModel {
     /// The `<name>.local` address guests can type. Set through `setLocalName(_:)`.
     private(set) var localName: String
     /// Runs the LAN web server guests use to queue from their phones.
+    /// Guests can drag songs around from their phones. Off: phones can still add and remove their own.
+    var phoneReorderEnabled: Bool {
+        didSet {
+            defaults.set(phoneReorderEnabled, forKey: "phoneReorderEnabled")
+            session.phonesCanReorder = phoneReorderEnabled
+        }
+    }
+
     var phoneQueueEnabled: Bool {
         didSet {
             guard phoneQueueEnabled != oldValue else { return }
@@ -172,11 +180,13 @@ final class AppModel {
         wifiPassword = defaults.string(forKey: "wifiPassword") ?? ""
         wifiSimpleQR = defaults.bool(forKey: "wifiSimpleQR")
         phoneQueueEnabled = defaults.object(forKey: "phoneQueueEnabled") as? Bool ?? true
+        phoneReorderEnabled = defaults.object(forKey: "phoneReorderEnabled") as? Bool ?? true
         let savedName = Self.sanitizedLocalName(defaults.string(forKey: "localName") ?? "")
         localName = savedName
         hostname = FriendlyHostname(name: savedName)
         applyCrossfade()
         watchAppleMusicSubscription()
+        session.phonesCanReorder = phoneReorderEnabled // didSet doesn't run during init
         #if DEBUG
         // `-appleMusicState ready|unsynced|nosub|denied`: fakes the host Music row for screenshots.
         let args = ProcessInfo.processInfo.arguments
@@ -259,6 +269,7 @@ final class AppModel {
         provider = next
         defaults.set(next.rawValue, forKey: "provider")
         session = Self.makeSession(next, spotify: spotifyAPI)
+        session.phonesCanReorder = phoneReorderEnabled
         libraryPlaylistsCache = []
         applyCrossfade()
         Task { await restartServer() }

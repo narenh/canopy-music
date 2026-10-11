@@ -82,12 +82,6 @@ struct HostView: View {
                     } else {
                         AppleMusicStatusRow(showOffer: $showSubscriptionOffer)
                     }
-                    if model.provider != .spotify, model.isDemo || model.authorization == .authorized {
-                        Toggle(isOn: $model.crossfade) {
-                            Text("Crossfade")
-                            Text(model.crossfadeSeconds > 0 ? "\(Int(model.crossfadeSeconds)) seconds" : "Automatic length")
-                        }
-                    }
                 }
                 .listRowBackground(Color.white.opacity(0.08))
 
@@ -337,6 +331,7 @@ private struct SettingsSheet: View {
                 Section {
                     Toggle("Queue from phones", isOn: $model.phoneQueueEnabled)
                     if model.phoneQueueEnabled {
+                        Toggle("Reorder from phones", isOn: $model.phoneReorderEnabled)
                         HStack(spacing: 0) {
                             Text("Address")
                             Spacer(minLength: 16)

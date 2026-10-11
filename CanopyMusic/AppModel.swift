@@ -400,7 +400,8 @@ final class AppModel {
 
     // MARK: Host control
 
-    /// The Host Control QR code: the guest page plus the key. Uses the IP so every phone resolves it.
+    /// The Host Control QR code: the guest page plus the key. Uses the IP so every phone resolves it;
+    /// the page moves to the `.local` address itself when the phone can reach it.
     var hostControlURL: URL? {
         guard let guestURL else { return nil }
         return URL(string: "\(guestURL.absoluteString)/?host=\(hostKey)")
@@ -542,6 +543,7 @@ final class AppModel {
         }
         guestURL = server.url(host: ip)
         friendlyURL = hostname.register(address: ip) ? server.url(host: hostname.hostname) : nil
+        session.guestAddress = friendlyURL.flatMap { url in url.host().map { $0 + (url.port.map { ":\($0)" } ?? "") } }
     }
 
     #if DEBUG

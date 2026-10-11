@@ -1,4 +1,4 @@
-(() => {
+(async () => {
   "use strict";
 
   const $ = (id) => document.getElementById(id);
@@ -16,21 +16,53 @@
     });
   }
 
+  const params = new URLSearchParams(location.search);
+
+  // Saved data (name, phone ID, host key) is per address. QR codes use the IP, which every phone
+  // can open; if this phone can also reach the friendly address (music.local), continue there
+  // before saving anything, so everything lives under that one address.
+  await (async () => {
+    let address = null;
+    try { address = (await (await fetch("/api/state")).json()).address; } catch {}
+    if (!address || address === location.host) return;
+    if (!(await reachable(address))) return;
+    const next = new URLSearchParams(params);
+    const existing = store.get("canopy.clientId");
+    if (existing) next.set("cid", existing);
+    if (store.get("canopy.name")) next.set("name", store.get("canopy.name"));
+    location.replace(`http://${address}/${next.toString() ? `?${next}` : ""}`);
+    await new Promise(() => {}); // stop here while the browser navigates
+  })();
+
+  function reachable(host) {
+    return new Promise((resolve) => {
+      const image = new Image();
+      const timer = setTimeout(() => resolve(false), 1500);
+      image.onload = () => { clearTimeout(timer); resolve(true); };
+      image.onerror = () => { clearTimeout(timer); resolve(false); };
+      image.src = `http://${host}/icon.png?${Date.now()}`;
+    });
+  }
+
+  // Coming from the IP address, the link carries this phone's existing ID (`cid`), so it's still
+  // the same phone here.
+  if (params.get("cid") && !store.get("canopy.clientId")) store.set("canopy.clientId", params.get("cid").slice(0, 64));
   const clientId = store.get("canopy.clientId") || (() => { const id = uuid(); store.set("canopy.clientId", id); return id; })();
   // A link can carry a name (`?name=Sam`), which skips the name prompt.
-  const linkName = new URLSearchParams(location.search).get("name");
+  const linkName = params.get("name");
   if (linkName) { store.set("canopy.name", linkName.slice(0, 30)); store.set("canopy.nameAsked", "1"); }
   let myName = store.get("canopy.name") || null;
 
   // Host control: a phone that scanned the iPad's Host Control QR code. The key arrives in the
   // link once, is kept on the phone, and is checked with the iPad on every load. Host mode is
   // remembered per phone; the switch next to the name flips between it and the guest view.
-  const params = new URLSearchParams(location.search);
   if (params.get("host")) {
     store.set("canopy.hostKey", params.get("host"));
     store.set("canopy.hostMode", "host");
     store.set("canopy.hostWelcome", "1");
-    params.delete("host");
+  }
+  if (params.get("host") || params.get("cid")) {
+    ["host", "cid"].forEach((key) => params.delete(key));
     history.replaceState(null, "", location.pathname + (params.toString() ? `?${params}` : ""));
   }
   let hostKey = store.get("canopy.hostKey");

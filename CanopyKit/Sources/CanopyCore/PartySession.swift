@@ -17,6 +17,8 @@ public struct PartySnapshot: Codable, Equatable, Sendable {
     public var playback: PlaybackSnapshot
     /// False when the host has turned off reordering from phones.
     public var canReorder: Bool
+    /// The friendly address (e.g. `music.local`), which the page moves to when the phone can reach it.
+    public var address: String?
 }
 
 /// Owns the queue and keeps the player in step with it. Both the iPad UI and the phone server
@@ -203,6 +205,9 @@ public final class PartySession {
         return true
     }
 
+    /// The guest page's friendly address (`music.local`, plus `:port` if not 80).
+    public var guestAddress: String?
+
     /// Whether phones may drag songs around. The iPad can always reorder.
     public var phonesCanReorder = true {
         didSet { if phonesCanReorder != oldValue { broadcast() } }
@@ -218,7 +223,8 @@ public final class PartySession {
             upNext: state.upNext,
             lockedNextID: state.lockedNextID,
             playback: PlaybackSnapshot(isPlaying: engine.isPlaying, position: engine.currentTime, capturedAt: Date()),
-            canReorder: phonesCanReorder
+            canReorder: phonesCanReorder,
+            address: guestAddress
         )
     }
 

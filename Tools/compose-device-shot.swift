@@ -1,6 +1,6 @@
 // Composes an iPad (landscape) and iPhone screenshot in drawn device frames on a background.
 // Usage: swift Tools/compose-device-shot.swift background.png ipad.png iphone.png out.png
-// Env: SQUARE=<side> for a square canvas, LOGO=<png> centered above, OVERLAP=<0..1> phone over the iPad, NO_ISLAND=1 for simulator phone shots.
+// Env: SQUARE=<side> for a square canvas, LOGO=<png> centered above (ICON=<png> beside it), OVERLAP=<0..1> phone over the iPad, NO_ISLAND=1 for simulator phone shots.
 import AppKit
 import CoreGraphics
 import ImageIO
@@ -100,7 +100,20 @@ let groupH = ipadScreenH + 2 * ipadOuterExtra + phoneDrop
 let logoGap = logo == nil ? 0 : margin * 1.1
 let stackH = logoH + logoGap + groupH
 let stackTop = (CGFloat(H) - stackH) / 2
-if let logo { drawImage(logo, in: CGRect(x: (CGFloat(W) - logoW) / 2, y: stackTop, width: logoW, height: logoH)) }
+if let logo {
+    // With an icon: [icon] [wordmark], centered as one lockup, icon as tall as the wordmark.
+    let icon = env["ICON"].map(load)
+    let iconSide = logoH * 1.0, iconGap = logoH * 0.28
+    let lockupW = logoW + (icon == nil ? 0 : iconSide + iconGap)
+    let lockupX = (CGFloat(W) - lockupW) / 2
+    if let icon {
+        ctx.saveGState()
+        ctx.setShadow(offset: CGSize(width: 0, height: iconSide * 0.03), blur: iconSide * 0.12, color: CGColor(gray: 0, alpha: 0.45))
+        drawImage(icon, in: CGRect(x: lockupX, y: stackTop, width: iconSide, height: iconSide))
+        ctx.restoreGState()
+    }
+    drawImage(logo, in: CGRect(x: lockupX + (icon == nil ? 0 : iconSide + iconGap), y: stackTop, width: logoW, height: logoH))
+}
 let groupTop = stackTop + logoH + logoGap
 let ipadScreen = CGRect(x: margin + ipadOuterExtra, y: groupTop + ipadOuterExtra, width: ipadScreenW, height: ipadScreenH)
 device(screen: ipadScreen, image: ipadShot, bezel: 5.6 * pxPerMM, screenRadius: 18 * pxPerMM / 2.2, rim: 0.9 * pxPerMM)

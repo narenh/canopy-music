@@ -1,6 +1,15 @@
-# Canopy
+# Canopy Music
 
 iPad party jukebox for Apple Music or Spotify. Pick a base playlist, lock the iPad into a now-playing screen, and guests queue songs on the iPad or from their phones (QR code; guests don't need a music account). Requests and playlist songs live in one list that anyone can drag to reorder.
+
+<p align="center">
+  <img src="docs/screenshots/1-choose-service.jpg" width="49%" alt="Choosing Apple Music or Spotify">
+  <img src="docs/screenshots/2-party-big-stick.jpg" width="49%" alt="Party screen playing Big Stick by MUNA">
+</p>
+<p align="center">
+  <img src="docs/screenshots/3-party-venus.jpg" width="74%" alt="Party screen playing Venus by Lady Gaga">
+  <img src="docs/screenshots/4-phone.jpg" width="24%" alt="Guest queue page on a phone at music.local">
+</p>
 
 ## Building it for your iPad
 

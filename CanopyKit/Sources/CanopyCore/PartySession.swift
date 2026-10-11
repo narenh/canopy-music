@@ -191,6 +191,18 @@ public final class PartySession {
         return mutate { $0.remove(id) } != nil
     }
 
+    /// Random key that gives a phone host control (scanned from the iPad's Settings). Phones with it
+    /// can play, pause, skip, reorder and remove anything. nil turns host control off.
+    public var hostKey: String?
+    /// Called with a phone's client ID each time it shows a valid host key.
+    public var onHostPhone: (@MainActor (String) -> Void)?
+
+    public func isHost(key: String?, clientID: String? = nil) -> Bool {
+        guard let hostKey, let key, !key.isEmpty, key == hostKey else { return false }
+        if let clientID { onHostPhone?(clientID) }
+        return true
+    }
+
     /// Whether phones may drag songs around. The iPad can always reorder.
     public var phonesCanReorder = true {
         didSet { if phonesCanReorder != oldValue { broadcast() } }

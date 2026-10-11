@@ -23,6 +23,7 @@ When "Queue from phones" is on, Canopy runs a small web server on your local Wiâ
 - Asks for an **optional name**, shown next to the songs that guest adds. It's visible to everyone at the party.
 - Creates a **random identifier** in the guest's browser, so the guest can remove their own requests. It isn't linked to anything else.
 - Sends the guest's **searches and song choices** to the iPad, which looks them up with your music service.
+- On a phone given **Host Control** (by scanning a code in the iPad's Settings), keeps a random access key so it can control playback. "Forget All" on the iPad cancels it.
 
 This information travels only over your local network to the iPad. Guests' browsers load album artwork directly from Apple's or Spotify's image servers.
 

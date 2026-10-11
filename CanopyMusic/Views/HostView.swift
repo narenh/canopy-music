@@ -350,6 +350,27 @@ private struct SettingsSheet: View {
                     Text("Runs a small local web server at \(model.localName).local so guests can search and queue from their phones. Turning it off stops the server and hides the QR code.")
                 }
                 .listRowBackground(Color.white.opacity(0.08))
+                if model.phoneQueueEnabled, let hostURL = model.hostControlURL {
+                    Section("Host Control") {
+                        HStack(spacing: 16) {
+                            QRCodeView(payload: hostURL.absoluteString)
+                                .padding(8)
+                                .frame(width: 120, height: 120)
+                                .background(.white, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+                            Text("Play/pause, skip, reorder, and delete from your phone. Everyone who scans this gets host control.")
+                                .font(.subheadline)
+                                .foregroundStyle(.secondary)
+                        }
+                        .padding(.vertical, 6)
+                        HStack {
+                            Text(model.hostPhones.count == 1 ? "1 phone" : "\(model.hostPhones.count) phones")
+                            Spacer()
+                            Button("Forget All", role: .destructive) { model.forgetHostPhones() }
+                                .disabled(model.hostPhones.isEmpty)
+                        }
+                    }
+                    .listRowBackground(Color.white.opacity(0.08))
+                }
                 Section {
                     TextField("Network name", text: $model.wifiSSID)
                         .textInputAutocapitalization(.never)

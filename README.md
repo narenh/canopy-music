@@ -44,7 +44,9 @@ The iPad runs a small web server on your Wi-Fi so guests can search and queue fr
 - The iPad also announces `music.local` over Bonjour (change the name in Settings). Some Android phones don't resolve `.local` names; the QR code covers them.
 - It listens on port 80 when it can, so the URL has no `:port` (falls back to 8080).
 
-Guests can add songs, drag to reorder, and remove their own requests. Names are optional.
+Guests can add songs, drag to reorder, and remove their own requests. Names are optional. **Settings → Reorder from phones** turns off dragging for guests.
+
+**Host Control:** scan the QR code in **Settings → Host Control** with your own phone to get play/pause, previous, next, reordering and deleting from it. The phone keeps that access (a switch next to your name flips between host and guest view) until you tap **Forget All**.
 
 ## Spotify
 

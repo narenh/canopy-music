@@ -20,7 +20,10 @@
       <img class="brand-logo" src="/logo.png" alt="Canopy">
       <span class="brand-sub" id="playlist-name"></span>
     </div>
-    <button class="name-chip" id="name-chip" type="button"></button>
+    <div class="chips">
+      <button class="mode-chip" id="mode-chip" type="button" hidden></button>
+      <button class="name-chip" id="name-chip" type="button"></button>
+    </div>
   </header>
 
   <button class="search-trigger" id="search-trigger" type="button">
@@ -35,6 +38,11 @@
       <p class="now-title" id="now-title">Nothing yet</p>
       <p class="now-artist" id="now-artist"></p>
       <div class="progress"><div class="progress-fill" id="progress"></div></div>
+    </div>
+    <div class="transport" id="transport" hidden>
+      <button class="t-btn" type="button" data-action="previous" aria-label="Previous"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 5h2.5v14H6zM20 5v14L9.5 12z"/></svg></button>
+      <button class="t-btn big" id="t-play" type="button" data-action="toggle" aria-label="Play"></button>
+      <button class="t-btn" type="button" data-action="next" aria-label="Skip"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M15.5 5H18v14h-2.5zM4 5v14l10.5-7z"/></svg></button>
     </div>
   </section>
 

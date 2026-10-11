@@ -91,15 +91,39 @@ public final class PartyServer: Sendable {
 
         await server.appendRoute("POST /api/move") { request in
             let body = try JSONDecoder.api.decode(MoveBody.self, from: await request.bodyData)
-            guard await session.phonesCanReorder else { return HTTPResponse(statusCode: .forbidden) }
+            let allowed = await session.phonesCanReorder
+            let isHost = await session.isHost(key: body.key)
+            guard allowed || isHost else { return HTTPResponse(statusCode: .forbidden) }
             let ok = await session.move(body.id, after: body.after)
             return HTTPResponse(statusCode: ok ? .ok : .conflict)
         }
 
         await server.appendRoute("POST /api/remove") { request in
             let body = try JSONDecoder.api.decode(RemoveBody.self, from: await request.bodyData)
-            let ok = await session.remove(body.id, asClient: body.clientId)
+            // Host control can remove anything; guests only their own requests.
+            let isHost = await session.isHost(key: body.key)
+            let ok = await session.remove(body.id, asClient: isHost ? nil : body.clientId)
             return HTTPResponse(statusCode: ok ? .ok : .forbidden)
+        }
+
+        // Host control: a phone that scanned the iPad's Host Control QR code.
+        await server.appendRoute("POST /api/host/check") { request in
+            let body = try JSONDecoder.api.decode(HostBody.self, from: await request.bodyData)
+            return HTTPResponse(statusCode: await session.isHost(key: body.key, clientID: body.clientId) ? .ok : .forbidden)
+        }
+
+        await server.appendRoute("POST /api/host/playback") { request in
+            let body = try JSONDecoder.api.decode(HostBody.self, from: await request.bodyData)
+            guard await session.isHost(key: body.key) else { return HTTPResponse(statusCode: .forbidden) }
+            switch body.action {
+            case "play":
+                do { try await session.play() } catch { return HTTPResponse(statusCode: .badGateway) }
+            case "pause": await session.pause()
+            case "next": await session.skip()
+            case "previous": await session.previous()
+            default: return HTTPResponse(statusCode: .badRequest)
+            }
+            return HTTPResponse(statusCode: .ok)
         }
 
         await server.appendRoute("GET /ws", to: .webSocket(SnapshotSocket(session: session)))
@@ -134,11 +158,19 @@ struct AddReply: Encodable {
 struct MoveBody: Decodable {
     var id: UUID
     var after: UUID?
+    var key: String?
 }
 
 struct RemoveBody: Decodable {
     var id: UUID
     var clientId: String
+    var key: String?
+}
+
+struct HostBody: Decodable {
+    var key: String
+    var clientId: String?
+    var action: String?
 }
 
 // MARK: - Helpers

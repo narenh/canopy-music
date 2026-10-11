@@ -42,6 +42,10 @@ main, .sheet {
 .brand { min-width: 0; }
 .brand-logo { display: block; height: 30px; width: auto; margin-bottom: 2px; }
 .brand-sub { display: block; font-size: 12px; color: var(--text-2); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.chips { display: flex; flex: none; max-width: 60%; border-radius: 999px; background: var(--surface); overflow: hidden; }
+.chips .name-chip { background: none; max-width: none; min-width: 0; }
+.mode-chip { display: flex; align-items: center; font-size: 13px; padding: 6px 11px; color: var(--text-2); border-right: 1px solid var(--line); flex: none; }
+.mode-chip.on { background: var(--text); color: var(--base); font-weight: 600; border-right-color: transparent; }
 .name-chip { font-size: 13px; padding: 6px 12px; border-radius: 999px; background: var(--surface); color: var(--text-2); max-width: 45%; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 
 .search-trigger, .search-field {
@@ -59,6 +63,13 @@ svg { width: 18px; height: 18px; fill: none; stroke: currentColor; stroke-width:
 .eyebrow { font-size: 12px; color: var(--accent); font-weight: 600; margin-bottom: 2px; }
 .now-title { font-size: 18px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .now-artist { font-size: 14px; color: var(--text-2); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.now { flex-wrap: wrap; }
+.transport { flex-basis: 100%; display: flex; justify-content: center; align-items: center; gap: 30px; padding-top: 12px; border-top: 1px solid var(--line); }
+.transport[hidden] { display: none; }
+.t-btn { width: 44px; height: 44px; border-radius: 50%; background: var(--surface-2); display: grid; place-items: center; }
+.t-btn.big { width: 54px; height: 54px; background: var(--text); color: var(--base); }
+.t-btn svg { fill: currentColor; stroke: none; width: 20px; height: 20px; }
+.t-btn:active { transform: scale(0.94); }
 .progress { height: 3px; border-radius: 2px; background: var(--surface-2); margin-top: 10px; overflow: hidden; }
 .progress-fill { height: 100%; width: 0; background: var(--text); border-radius: 2px; }
 
@@ -106,8 +117,9 @@ svg { width: 18px; height: 18px; fill: none; stroke: currentColor; stroke-width:
 
 .toast {
   position: fixed; left: 50%; bottom: calc(env(safe-area-inset-bottom) + 20px); transform: translate(-50%, 20px);
-  background: var(--text); color: #111; font-size: 14px; font-weight: 600; padding: 10px 16px; border-radius: 999px;
-  opacity: 0; pointer-events: none; transition: opacity .25s, transform .25s var(--ease); z-index: 30; white-space: nowrap;
+  background: var(--text); color: #111; font-size: 14px; font-weight: 600; padding: 10px 16px; border-radius: 22px;
+  opacity: 0; pointer-events: none; transition: opacity .25s, transform .25s var(--ease); z-index: 30;
+  width: max-content; max-width: calc(100vw - 40px); text-align: center;
 }
 .toast.shown { opacity: 1; transform: translate(-50%, 0); }
 .offline { position: fixed; top: calc(env(safe-area-inset-top) + 8px); left: 50%; transform: translateX(-50%); background: #b3261e; color: #fff; font-size: 13px; padding: 6px 12px; border-radius: 999px; z-index: 40; }

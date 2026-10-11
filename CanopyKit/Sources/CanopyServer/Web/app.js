@@ -5,6 +5,7 @@
   const store = {
     get(key) { try { return localStorage.getItem(key); } catch { return null; } },
     set(key, value) { try { localStorage.setItem(key, value); } catch {} },
+    remove(key) { try { localStorage.removeItem(key); } catch {} },
   };
 
   // crypto.randomUUID needs a secure context, and this page is plain http on the LAN.
@@ -20,6 +21,22 @@
   const linkName = new URLSearchParams(location.search).get("name");
   if (linkName) { store.set("canopy.name", linkName.slice(0, 30)); store.set("canopy.nameAsked", "1"); }
   let myName = store.get("canopy.name") || null;
+
+  // Host control: a phone that scanned the iPad's Host Control QR code. The key arrives in the
+  // link once, is kept on the phone, and is checked with the iPad on every load. Host mode is
+  // remembered per phone; the switch next to the name flips between it and the guest view.
+  const params = new URLSearchParams(location.search);
+  if (params.get("host")) {
+    store.set("canopy.hostKey", params.get("host"));
+    store.set("canopy.hostMode", "host");
+    store.set("canopy.hostWelcome", "1");
+    params.delete("host");
+    history.replaceState(null, "", location.pathname + (params.toString() ? `?${params}` : ""));
+  }
+  let hostKey = store.get("canopy.hostKey");
+  let hostPaired = false;
+  let hostMode = store.get("canopy.hostMode") !== "guest";
+  const hosting = () => hostPaired && hostMode;
 
   let snap = null;
   let firstRender = true;
@@ -99,8 +116,12 @@
     const current = snap.current;
     applyTheme(current && current.track);
 
-    // The host can turn off reordering from phones.
-    document.querySelector(".list-head .hint").hidden = snap.canReorder === false;
+    // The host can turn off reordering from phones (host control can always reorder).
+    document.querySelector(".list-head .hint").hidden = snap.canReorder === false && !hosting();
+    $("transport").hidden = !hosting();
+    const playing = !!(current && snap.playback.isPlaying);
+    $("t-play").innerHTML = playing ? icons.pause : icons.play;
+    $("t-play").setAttribute("aria-label", playing ? "Pause" : "Play");
     $("playlist-name").textContent = snap.playlistName ? `Playing from ${snap.playlistName}` : "";
     $("now-status").textContent = !current ? "Waiting for music" : snap.playback.isPlaying ? "Now playing" : "Paused";
     $("now-title").textContent = current ? current.track.title : "Nothing yet";
@@ -126,6 +147,8 @@
     x: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6l12 12M18 6 6 18"/></svg>',
     lock: '<svg viewBox="0 0 24 24" aria-hidden="true"><rect x="5" y="11" width="14" height="10" rx="2"/><path d="M8 11V7a4 4 0 0 1 8 0v4"/></svg>',
     check: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="m5 12 5 5 9-10"/></svg>',
+    play: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M8 5v14l11-7z"/></svg>',
+    pause: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M7 5h4v14H7zM13 5h4v14h-4z"/></svg>',
   };
 
   function fillRow(li, item) {
@@ -157,7 +180,7 @@
       pill.textContent = label.text;
       li.append(pill);
     }
-    if (label && label.mine && !locked) {
+    if (!locked && ((label && label.mine) || hosting())) {
       const remove = document.createElement("button");
       remove.type = "button";
       remove.className = "icon-btn remove";
@@ -171,7 +194,7 @@
       lock.title = "Up next. Locked in.";
       lock.innerHTML = icons.lock;
       li.append(lock);
-    } else if (snap.canReorder !== false) {
+    } else if (snap.canReorder !== false || hosting()) {
       const handle = document.createElement("button");
       handle.type = "button";
       handle.className = "icon-btn handle";
@@ -280,7 +303,7 @@
     const id = li.dataset.id;
     li.animate([{ opacity: 1 }, { opacity: 0, transform: "translateX(24px)" }], { duration: 200, fill: "forwards" });
     try {
-      await api("/api/remove", { id, clientId });
+      await api("/api/remove", { id, clientId, key: hosting() ? hostKey : undefined });
     } catch {
       toast("Couldn't remove that one");
       if (snap) render();
@@ -289,7 +312,7 @@
 
   $("queue").addEventListener("pointerdown", (event) => {
     const handle = event.target.closest(".handle");
-    if (!handle || !snap || snap.canReorder === false) return;
+    if (!handle || !snap || (snap.canReorder === false && !hosting())) return;
     event.preventDefault();
     const list = $("queue");
     const li = handle.closest(".row");
@@ -373,7 +396,7 @@
       const [moved] = items.splice(items.findIndex((i) => i.id === id), 1);
       items.splice(d.to, 0, moved);
       snap = { ...snap, upNext: items };
-      api("/api/move", { id, after }).catch(() => toast("Couldn't move that one"));
+      api("/api/move", { id, after, key: hosting() ? hostKey : undefined }).catch(() => toast("Couldn't move that one"));
     }
     if (pendingSnap) { const next = pendingSnap; pendingSnap = null; applySnapshot(next); }
   }
@@ -521,19 +544,38 @@
   // MARK: Toast
 
   let toastTimer = null;
-  function toast(text) {
+  function toast(text, duration = 2200) {
     const el = $("toast");
     el.textContent = text;
     el.classList.add("shown");
     clearTimeout(toastTimer);
-    toastTimer = setTimeout(() => el.classList.remove("shown"), 2200);
+    toastTimer = setTimeout(() => el.classList.remove("shown"), duration);
   }
 
   // MARK: Name
 
   function updateNameChip() {
     $("name-chip").textContent = myName ? myName : "Add your name";
+    const mode = $("mode-chip");
+    mode.hidden = !hostPaired;
+    mode.classList.toggle("on", hostMode);
+    mode.textContent = hostMode ? "Host" : "Guest";
+    mode.setAttribute("aria-label", hostMode ? "Host control on. Switch to guest view" : "Guest view. Switch to host control");
   }
+  $("mode-chip").addEventListener("click", () => {
+    hostMode = !hostMode;
+    store.set("canopy.hostMode", hostMode ? "host" : "guest");
+    updateNameChip();
+    if (snap) render();
+  });
+
+  $("transport").addEventListener("click", (event) => {
+    const button = event.target.closest("[data-action]");
+    if (!button || !hosting()) return;
+    let action = button.dataset.action;
+    if (action === "toggle") action = snap && snap.playback.isPlaying ? "pause" : "play";
+    api("/api/host/playback", { key: hostKey, action }).catch(() => toast("Couldn't reach the iPad"));
+  });
   function askName() {
     $("name-input").value = myName || "";
     $("name-modal").hidden = false;
@@ -558,6 +600,22 @@
 
   updateNameChip();
   if (!store.get("canopy.nameAsked")) askName();
+  if (hostKey) {
+    api("/api/host/check", { key: hostKey, clientId })
+      .then(() => {
+        hostPaired = true;
+        if (store.get("canopy.hostWelcome")) {
+          store.remove("canopy.hostWelcome");
+          toast("This phone has host control. Tap Host next to your name to switch to guest view.", 5000);
+        }
+        updateNameChip();
+        if (snap) render();
+      })
+      .catch((error) => {
+        // Only a refusal means the key was revoked; a network hiccup keeps it.
+        if (error.message === "403") { store.remove("canopy.hostKey"); hostKey = null; }
+      });
+  }
   api("/api/state").then(applySnapshot).catch(() => {});
   connect();
 })();

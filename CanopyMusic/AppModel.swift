@@ -3,6 +3,7 @@ import CanopyCore
 import CanopyServer
 import Foundation
 import MusicKit
+import Security
 import SwiftUI
 import UIKit
 
@@ -103,6 +104,10 @@ final class AppModel {
     private(set) var appleMusicLibrarySynced = true
     @ObservationIgnored private var subscriptionTask: Task<Void, Never>?
     private(set) var guestURL: URL?
+    /// Key in the Host Control QR code. Forgetting phones replaces it.
+    @ObservationIgnored private var hostKey = UserDefaults.standard.string(forKey: "hostControlKey") ?? AppModel.newHostKey()
+    /// Client IDs of phones that have used the host key, for the "N phones" count.
+    private(set) var hostPhones: [String] = UserDefaults.standard.stringArray(forKey: "hostControlPhones") ?? []
     private(set) var friendlyURL: URL?
     var errorMessage: String?
     /// Shows "Where should music play?" (host Music section or the party screen's device button).
@@ -134,6 +139,7 @@ final class AppModel {
         didSet {
             defaults.set(phoneReorderEnabled, forKey: "phoneReorderEnabled")
             session.phonesCanReorder = phoneReorderEnabled
+        connectHostControl()
         }
     }
 
@@ -187,6 +193,8 @@ final class AppModel {
         applyCrossfade()
         watchAppleMusicSubscription()
         session.phonesCanReorder = phoneReorderEnabled // didSet doesn't run during init
+        defaults.set(hostKey, forKey: "hostControlKey")
+        connectHostControl()
         #if DEBUG
         // `-appleMusicState ready|unsynced|nosub|denied`: fakes the host Music row for screenshots.
         let args = ProcessInfo.processInfo.arguments
@@ -390,11 +398,45 @@ final class AppModel {
         }
     }
 
+    // MARK: Host control
+
+    /// The Host Control QR code: the guest page plus the key. Uses the IP so every phone resolves it.
+    var hostControlURL: URL? {
+        guard let guestURL else { return nil }
+        return URL(string: "\(guestURL.absoluteString)/?host=\(hostKey)")
+    }
+
+    /// Revokes every phone with host control by replacing the key.
+    func forgetHostPhones() {
+        hostKey = Self.newHostKey()
+        defaults.set(hostKey, forKey: "hostControlKey")
+        hostPhones = []
+        defaults.set(hostPhones, forKey: "hostControlPhones")
+        session.hostKey = hostKey
+    }
+
+    private func connectHostControl() {
+        session.hostKey = hostKey
+        session.onHostPhone = { [weak self] clientID in
+            guard let self, !self.hostPhones.contains(clientID) else { return }
+            self.hostPhones.append(clientID)
+            self.defaults.set(self.hostPhones, forKey: "hostControlPhones")
+        }
+    }
+
+    private static func newHostKey() -> String {
+        var bytes = [UInt8](repeating: 0, count: 24)
+        _ = SecRandomCopyBytes(kSecRandomDefault, bytes.count, &bytes)
+        return Data(bytes).base64EncodedString()
+            .replacingOccurrences(of: "+", with: "-").replacingOccurrences(of: "/", with: "_").replacingOccurrences(of: "=", with: "")
+    }
+
     #if DEBUG
     /// `-screenshotParty`: swaps in a posed session and goes straight to the party screen.
     func installScreenshotSession(_ session: PartySession) {
         provider = .appleMusic
         self.session = session
+        connectHostControl()
         needsOnboarding = false
         lock()
         // The phone server was started with the old session.

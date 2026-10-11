@@ -395,16 +395,13 @@ private struct TransportControls: View {
         GlassEffectContainer(spacing: 20) {
             HStack(spacing: 20) {
                 // Open AirPlay picker: AirPlay sessions sometimes drop and need re-picking.
-                // Hidden when Spotify plays on another device.
-                if model.provider != .spotify || model.spotifyPlaysOnThisIPad {
-                    RoutePicker(tint: .white)
-                        .frame(width: 44, height: 44)
-                        .glassEffect(.regular.interactive(), in: Circle())
-                        .accessibilityLabel("Choose speakers")
-                } else {
-                    // Keeps play/pause centered.
-                    Color.clear.frame(width: 44, height: 44)
-                }
+                // Disabled (but kept for balance) when Spotify plays on another device.
+                RoutePicker(tint: .white)
+                    .frame(width: 44, height: 44)
+                    .glassEffect(.regular.interactive(), in: Circle())
+                    .opacity(airPlayApplies ? 1 : 0.35)
+                    .allowsHitTesting(airPlayApplies)
+                    .accessibilityLabel("Choose speakers")
                 Group {
                     Button {
                         Task { await session.previous() }
@@ -434,6 +431,7 @@ private struct TransportControls: View {
                 }
                 .buttonStyle(.glass)
                 .buttonBorderShape(.circle)
+                .disabled(spotifyUnavailable)
                 if model.provider == .spotify {
                     // Spotify's crossfade lives in the Spotify app; this spot picks where music plays.
                     SpotifyDeviceButton()
@@ -459,6 +457,14 @@ private struct TransportControls: View {
             }
             .foregroundStyle(.white)
         }
+    }
+
+    private var airPlayApplies: Bool { model.provider != .spotify || model.spotifyPlaysOnThisIPad }
+
+    /// Spotify lost the device (usually asleep): commands would fail, so the device button is the
+    /// way forward.
+    private var spotifyUnavailable: Bool {
+        model.provider == .spotify && model.spotifyDevicesLoaded && !model.spotifyDeviceAvailable
     }
 }
 

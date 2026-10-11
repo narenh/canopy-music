@@ -1,5 +1,6 @@
 // Composes an iPad (landscape) and iPhone screenshot in drawn device frames on a background.
-// Usage: swift compose.swift background.png ipad.png iphone.png out.png
+// Usage: swift Tools/compose-device-shot.swift background.png ipad.png iphone.png out.png
+// Env: SQUARE=<side> for a square canvas, LOGO=<png> centered above, OVERLAP=<0..1> phone over the iPad, NO_ISLAND=1 for simulator phone shots.
 import AppKit
 import CoreGraphics
 import ImageIO
@@ -11,7 +12,9 @@ func load(_ path: String) -> CGImage {
     return CGImageSourceCreateImageAtIndex(src, 0, nil)!
 }
 let background = load(args[1]), ipadShot = load(args[2]), phoneShot = load(args[3])
-let W = background.width, H = background.height
+let env = ProcessInfo.processInfo.environment
+let square = env["SQUARE"].flatMap(Int.init)
+let W = square ?? background.width, H = square ?? background.height
 let ctx = CGContext(data: nil, width: W, height: H, bitsPerComponent: 8, bytesPerRow: 0,
                     space: CGColorSpace(name: CGColorSpace.sRGB)!, bitmapInfo: CGImageAlphaInfo.premultipliedFirst.rawValue)!
 // Work top-down like a screen.
@@ -24,7 +27,10 @@ func drawImage(_ image: CGImage, in rect: CGRect) {
     ctx.restoreGState()
 }
 
-drawImage(background, in: CGRect(x: 0, y: 0, width: W, height: H))
+// Aspect-fill the background (it's blurred, so scaling up is fine).
+let fill = max(CGFloat(W) / CGFloat(background.width), CGFloat(H) / CGFloat(background.height))
+let bgSize = CGSize(width: CGFloat(background.width) * fill, height: CGFloat(background.height) * fill)
+drawImage(background, in: CGRect(x: (CGFloat(W) - bgSize.width) / 2, y: (CGFloat(H) - bgSize.height) / 2, width: bgSize.width, height: bgSize.height))
 
 /// A device: aluminum rim, black bezel, rounded screen with the screenshot.
 func device(screen: CGRect, image: CGImage, bezel: CGFloat, screenRadius: CGFloat, rim: CGFloat, island: CGSize? = nil) {
@@ -65,27 +71,47 @@ func device(screen: CGRect, image: CGImage, bezel: CGFloat, screenRadius: CGFloa
     }
 }
 
-// Real proportions: iPad Pro 11" (M4) is ~249.7 × 177.5 mm, iPhone 17 Pro ~150 × 71.9 mm.
-let ipadScreenW: CGFloat = 1880
-let pxPerMM = ipadScreenW / 236.0           // the 11" screen is ~236 mm wide
-let ipadScreenH = ipadScreenW * CGFloat(ipadShot.height) / CGFloat(ipadShot.width)
-let phoneScreenH = 146.0 * pxPerMM          // iPhone screen height
-let phoneScreenW = phoneScreenH * CGFloat(phoneShot.width) / CGFloat(phoneShot.height)
-
-let gap: CGFloat = 70
-let ipadOuterExtra: CGFloat = 6.5 * pxPerMM
-let total = ipadScreenW + 2 * ipadOuterExtra + gap + phoneScreenW + 2 * 2.6 * pxPerMM
-let left = (CGFloat(W) - total) / 2
-let ipadScreen = CGRect(x: left + ipadOuterExtra, y: (CGFloat(H) - ipadScreenH) / 2 - 40, width: ipadScreenW, height: ipadScreenH)
+// Real proportions: iPad Pro 11" (M4) is ~249.7 × 177.5 mm (screen ~236 mm wide), iPhone 17 Pro ~150 × 71.9 mm.
+let ipadAspect = CGFloat(ipadShot.height) / CGFloat(ipadShot.width)
+let phoneAspect = CGFloat(phoneShot.width) / CGFloat(phoneShot.height)
+let margin = CGFloat(W) * 0.05, gap = CGFloat(W) * 0.025
+// Optional overlap: the phone stands in front of the iPad's right edge (fraction of the phone's width).
+let overlap = CGFloat(env["OVERLAP"].flatMap(Double.init) ?? 0)
+var logo: CGImage?, logoW: CGFloat = 0, logoH: CGFloat = 0
+if let logoPath = env["LOGO"] {
+    logo = load(logoPath)
+    logoW = CGFloat(W) * 0.32
+    logoH = logoW * CGFloat(logo!.height) / CGFloat(logo!.width)
+}
+// Widest iPad screen such that iPad + gap + phone (minus overlap) fill the width between margins.
+// Outer widths in screen-width units: iPad 249.7/236, phone 71.9/236.
+let phoneUnit = 71.9 / 236.0
+let unitWidth = 249.7 / 236.0 + phoneUnit * (1 - overlap)
+let ipadScreenW = (CGFloat(W) - 2 * margin - (overlap > 0 ? 0 : gap)) / unitWidth
+let pxPerMM = ipadScreenW / 236.0
+let ipadScreenH = ipadScreenW * ipadAspect
+let phoneScreenH = 146.0 * pxPerMM
+let phoneScreenW = phoneScreenH * phoneAspect
+let ipadOuterExtra = 6.5 * pxPerMM, phoneOuterExtra = 2.6 * pxPerMM
+// The phone sits a little lower than the iPad when overlapping, so the stack is taller.
+let phoneDrop = overlap > 0 ? 9 * pxPerMM : 0
+let groupH = ipadScreenH + 2 * ipadOuterExtra + phoneDrop
+// Center logo + devices together.
+let logoGap = logo == nil ? 0 : margin * 1.1
+let stackH = logoH + logoGap + groupH
+let stackTop = (CGFloat(H) - stackH) / 2
+if let logo { drawImage(logo, in: CGRect(x: (CGFloat(W) - logoW) / 2, y: stackTop, width: logoW, height: logoH)) }
+let groupTop = stackTop + logoH + logoGap
+let ipadScreen = CGRect(x: margin + ipadOuterExtra, y: groupTop + ipadOuterExtra, width: ipadScreenW, height: ipadScreenH)
 device(screen: ipadScreen, image: ipadShot, bezel: 5.6 * pxPerMM, screenRadius: 18 * pxPerMM / 2.2, rim: 0.9 * pxPerMM)
-
-// The phone stands slightly forward and lower, its bottom just below the iPad's.
-let phoneScreen = CGRect(x: ipadScreen.maxX + ipadOuterExtra + gap + 2.6 * pxPerMM,
-                         y: ipadScreen.maxY + ipadOuterExtra - phoneScreenH + 60,
+// The phone stands beside it, bottoms aligned.
+let phoneOuterW = phoneScreenW + 2 * phoneOuterExtra
+let phoneScreen = CGRect(x: ipadScreen.maxX + ipadOuterExtra + (overlap > 0 ? -phoneOuterW * overlap : gap) + phoneOuterExtra,
+                         y: ipadScreen.maxY + ipadOuterExtra + phoneDrop - phoneOuterExtra - phoneScreenH,
                          width: phoneScreenW, height: phoneScreenH)
 device(screen: phoneScreen, image: phoneShot, bezel: 1.7 * pxPerMM, screenRadius: 10.5 * pxPerMM, rim: 0.9 * pxPerMM,
        // Simulator screenshots already include the island; real device screenshots don't.
-       island: ProcessInfo.processInfo.environment["NO_ISLAND"] == nil ? CGSize(width: 21 * pxPerMM, height: 6.2 * pxPerMM) : nil)
+       island: env["NO_ISLAND"] == nil ? CGSize(width: 21 * pxPerMM, height: 6.2 * pxPerMM) : nil)
 
 let out = ctx.makeImage()!
 let dest = CGImageDestinationCreateWithURL(URL(fileURLWithPath: args[4]) as CFURL, UTType.png.identifier as CFString, 1, nil)!

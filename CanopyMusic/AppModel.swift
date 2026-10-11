@@ -318,6 +318,11 @@ final class AppModel {
     func play() async {
         do {
             try await session.play()
+        } catch SpotifyError.noDevice {
+            // The chosen device went away (usually Spotify asleep on it). No alert: the host
+            // Music section shows it as not available until it's back.
+            spotifyDevices.removeAll { $0.id == spotifyDeviceID }
+            await refreshSpotifyDevices()
         } catch {
             errorMessage = "Couldn't start playback. \(error.localizedDescription)"
         }

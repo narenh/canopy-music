@@ -82,7 +82,12 @@ final class SpotifyEngine: PlaybackEngine {
     func resume() async throws {
         pausedByUs = false
         settleUntil = Date().addingTimeInterval(1.5)
-        try await api.send("PUT", "/me/player/play", query: deviceQuery)
+        do {
+            try await api.send("PUT", "/me/player/play", query: deviceQuery)
+        } catch SpotifyError.noDevice {
+            try await transferToDevice()
+            try await api.send("PUT", "/me/player/play", query: deviceQuery)
+        }
         cache(playing: true, time: cachedTime)
     }
 

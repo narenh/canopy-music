@@ -52,13 +52,23 @@ final class SpotifyAPI {
                 rateLimitedCount += 1
                 let retry = Int((response as? HTTPURLResponse)?.value(forHTTPHeaderField: "Retry-After") ?? "") ?? 5
                 throw SpotifyError.rateLimited(retryAfter: retry)
-            case 404 where String(decoding: data, as: UTF8.self).contains("NO_ACTIVE_DEVICE"):
+            // "NO_ACTIVE_DEVICE" (nothing active) or "Device not found" (the chosen device went to sleep).
+            case 404 where String(decoding: data, as: UTF8.self).localizedCaseInsensitiveContains("device"):
                 throw SpotifyError.noDevice
             default:
-                throw SpotifyError.badResponse(status, String(decoding: data.prefix(300), as: UTF8.self))
+                throw SpotifyError.badResponse(status, Self.message(in: data))
             }
         }
         throw SpotifyError.notSignedIn
+    }
+
+    /// Spotify's own error text (`{"error": {"message": …}}`), not the raw JSON.
+    private static func message(in data: Data) -> String {
+        struct Reply: Decodable { struct Body: Decodable { var message: String? }; var error: Body? }
+        if let message = (try? JSONDecoder().decode(Reply.self, from: data))?.error?.message, !message.isEmpty {
+            return message
+        }
+        return ""
     }
 
     func get<T: Decodable>(_ path: String, query: [String: String] = [:], as type: T.Type) async throws -> T? {

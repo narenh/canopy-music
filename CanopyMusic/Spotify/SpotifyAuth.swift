@@ -39,9 +39,9 @@ enum SpotifyError: LocalizedError {
         case .notConfigured: "Add your Spotify Client ID in Settings first."
         case .notSignedIn: "Sign in to Spotify in host mode."
         case .signInCancelled: "Spotify sign-in was cancelled."
-        case .badResponse(let code, let message): "Spotify returned \(code). \(message)"
+        case .badResponse(let code, let message): message.isEmpty ? "Spotify returned error \(code)." : "Spotify: \(message)."
         case .rateLimited(let seconds): "Spotify is rate limiting Canopy. Try again in \(seconds) s."
-        case .noDevice: "Pick a Spotify device in Settings, and make sure Spotify is open on it."
+        case .noDevice: "Open Spotify on the device music plays from."
         }
     }
 }

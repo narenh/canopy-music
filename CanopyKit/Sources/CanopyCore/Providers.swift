@@ -2,10 +2,10 @@ import Foundation
 
 /// Search and playlists for one music service.
 public protocol MusicCatalog: Sendable {
-    func searchSongs(_ term: String) async throws -> [Track]
+    func searchSongs(_ term: String) async throws -> [QueueTrack]
     func libraryPlaylists() async throws -> [PlaylistSummary]
     func searchPlaylists(_ term: String) async throws -> [PlaylistSummary]
-    func tracks(in playlist: PlaylistSummary) async throws -> [Track]
+    func tracks(in playlist: PlaylistSummary) async throws -> [QueueTrack]
 }
 
 public enum PlaybackEvent: Sendable, Equatable {
@@ -28,9 +28,9 @@ public protocol PlaybackEngine: AnyObject {
     var onEvent: (@MainActor (PlaybackEvent) -> Void)? { get set }
 
     /// Replaces everything and starts playing `track` immediately.
-    func play(_ track: Track) async throws
+    func play(_ track: QueueTrack) async throws
     /// Sets the single item after the current one. `nil` clears it.
-    func stage(_ track: Track?) async throws
+    func stage(_ track: QueueTrack?) async throws
     func resume() async throws
     func pause()
     /// Jumps to the staged item.

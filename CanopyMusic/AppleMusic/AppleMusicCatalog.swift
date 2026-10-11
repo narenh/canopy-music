@@ -36,7 +36,7 @@ struct AppleMusicCatalog: MusicCatalog {
     let cache: SongCache
 
     /// Matches from your library first, then Apple Music, without duplicates.
-    func searchSongs(_ term: String) async throws -> [CanopyCore.Track] {
+    func searchSongs(_ term: String) async throws -> [QueueTrack] {
         async let librarySongs = try? searchLibrarySongs(term)
         var request = MusicCatalogSearchRequest(term: term, types: [Song.self])
         request.limit = 25
@@ -49,7 +49,7 @@ struct AppleMusicCatalog: MusicCatalog {
         var seen = Set<MusicItemID>()
         let unique = (library + catalogSongs).filter { seen.insert($0.id).inserted }
         await cache.store(unique)
-        return unique.map(CanopyCore.Track.init)
+        return unique.map(QueueTrack.init)
     }
 
     /// Library search via the Apple Music API, mapped to catalog songs (https artwork, playable by id).
@@ -98,13 +98,13 @@ struct AppleMusicCatalog: MusicCatalog {
         return "Updated " + date.formatted(.relative(presentation: .named))
     }
 
-    func tracks(in playlist: PlaylistSummary) async throws -> [CanopyCore.Track] {
+    func tracks(in playlist: PlaylistSummary) async throws -> [QueueTrack] {
         let songs = switch playlist.kind {
         case .catalog: try await catalogPlaylistSongs(id: playlist.id)
         case .library: try await libraryPlaylistSongs(id: playlist.id)
         }
         await cache.store(songs)
-        return songs.map(CanopyCore.Track.init)
+        return songs.map(QueueTrack.init)
     }
 
     // MARK: Playlist loading
@@ -220,7 +220,7 @@ private extension MusicKit.Track {
     }
 }
 
-extension CanopyCore.Track {
+extension QueueTrack {
     init(_ song: Song) {
         self.init(
             id: song.id.rawValue,

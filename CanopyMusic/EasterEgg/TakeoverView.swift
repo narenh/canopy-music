@@ -5,7 +5,7 @@ import SwiftUI
 /// in one at a time, spread across the line's duration.
 struct TakeoverView: View {
     let lines: [LyricsEasterEgg.Line]
-    let track: Track
+    let track: QueueTrack
     let session: PartySession
     let onDismiss: () -> Void
 
@@ -55,7 +55,7 @@ struct TakeoverView: View {
     }
 
     /// The album's background color, darkened just enough for white text to read on it.
-    static func floodColor(for track: Track) -> RGB {
+    static func floodColor(for track: QueueTrack) -> RGB {
         let base = track.colors.flatMap { RGB(hex: $0.background) } ?? RGB(127, 79, 176)
         var color = base
         var t = 0.0

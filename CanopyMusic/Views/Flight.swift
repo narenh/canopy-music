@@ -4,7 +4,7 @@ import SwiftUI
 /// A copy of a song's artwork flying from a search result into its new slot in Up Next.
 struct Flight: Identifiable {
     let id: UUID
-    let track: Track
+    let track: QueueTrack
     let from: CGRect
     var progress: CGFloat = 0
 }

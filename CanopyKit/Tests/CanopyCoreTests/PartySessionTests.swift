@@ -8,13 +8,13 @@ final class FakeEngine: PlaybackEngine {
     var isPlaying = false
     var currentTime: TimeInterval = 0
     var onEvent: (@MainActor (PlaybackEvent) -> Void)?
-    var playing: Track?
-    var staged: Track?
+    var playing: QueueTrack?
+    var staged: QueueTrack?
 
     init(canReplaceStaged: Bool = true) { self.canReplaceStaged = canReplaceStaged }
 
-    func play(_ track: Track) async throws { playing = track; staged = nil; isPlaying = true }
-    func stage(_ track: Track?) async throws { staged = track }
+    func play(_ track: QueueTrack) async throws { playing = track; staged = nil; isPlaying = true }
+    func stage(_ track: QueueTrack?) async throws { staged = track }
     func resume() async throws { isPlaying = true }
     func pause() { isPlaying = false }
     func skipToStaged() async throws { finishTrack() }
@@ -30,10 +30,10 @@ final class FakeEngine: PlaybackEngine {
 
 struct StubCatalog: MusicCatalog {
     var ids: [String]
-    func searchSongs(_ term: String) async throws -> [Track] { [] }
+    func searchSongs(_ term: String) async throws -> [QueueTrack] { [] }
     func libraryPlaylists() async throws -> [PlaylistSummary] { [] }
     func searchPlaylists(_ term: String) async throws -> [PlaylistSummary] { [] }
-    func tracks(in playlist: PlaylistSummary) async throws -> [Track] { ids.map(track) }
+    func tracks(in playlist: PlaylistSummary) async throws -> [QueueTrack] { ids.map(track) }
 }
 
 let base = PlaylistSummary(id: "p", name: "Base", kind: .library)

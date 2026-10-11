@@ -66,7 +66,7 @@ final class AppleMusicEngine: PlaybackEngine {
         cachedAt = Date()
     }
 
-    func play(_ track: CanopyCore.Track) async throws {
+    func play(_ track: QueueTrack) async throws {
         let song = try await cache.song(for: track.id)
         stagedTrackID = nil
         reportedEnd = false
@@ -88,7 +88,7 @@ final class AppleMusicEngine: PlaybackEngine {
     /// staged entry: editing `queue.entries` makes the player rebuild its queue, which causes an
     /// audible dropout. Stale entries sit behind the new one and are never reached, because a new
     /// track is always staged first. If the player does land on one, `poll` reports it.
-    func stage(_ track: CanopyCore.Track?) async throws {
+    func stage(_ track: QueueTrack?) async throws {
         log("stage \(track?.title ?? "nil") status=\(player.state.playbackStatus) entries=\(player.queue.entries.count)")
         defer { log("staged; status=\(player.state.playbackStatus) entries=\(player.queue.entries.count)") }
         stagedTrackID = nil

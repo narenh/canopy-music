@@ -442,10 +442,10 @@ final class AppModel {
 
 /// Session parts for before a service is chosen: nothing to search, nothing to play.
 private struct NoServiceCatalog: MusicCatalog {
-    func searchSongs(_ term: String) async throws -> [CanopyCore.Track] { [] }
+    func searchSongs(_ term: String) async throws -> [QueueTrack] { [] }
     func libraryPlaylists() async throws -> [PlaylistSummary] { [] }
     func searchPlaylists(_ term: String) async throws -> [PlaylistSummary] { [] }
-    func tracks(in playlist: PlaylistSummary) async throws -> [CanopyCore.Track] { [] }
+    func tracks(in playlist: PlaylistSummary) async throws -> [QueueTrack] { [] }
 }
 
 @MainActor
@@ -454,8 +454,8 @@ private final class NoServiceEngine: PlaybackEngine {
     let isPlaying = false
     let currentTime: TimeInterval = 0
     var onEvent: (@MainActor (PlaybackEvent) -> Void)?
-    func play(_ track: CanopyCore.Track) async throws {}
-    func stage(_ track: CanopyCore.Track?) async throws {}
+    func play(_ track: QueueTrack) async throws {}
+    func stage(_ track: QueueTrack?) async throws {}
     func resume() async throws {}
     func pause() {}
     func skipToStaged() async throws {}

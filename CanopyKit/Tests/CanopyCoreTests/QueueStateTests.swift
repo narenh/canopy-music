@@ -2,7 +2,7 @@ import Foundation
 import Testing
 @testable import CanopyCore
 
-func track(_ id: String) -> Track { Track(id: id, title: id, artist: "Artist") }
+func track(_ id: String) -> QueueTrack { QueueTrack(id: id, title: id, artist: "Artist") }
 let guest = Requester(name: "Sam", clientID: "phone-1", origin: .phone)
 
 func titles(_ items: [QueueItem]) -> [String] { items.map(\.track.id) }

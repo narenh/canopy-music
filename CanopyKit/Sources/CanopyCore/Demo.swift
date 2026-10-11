@@ -50,17 +50,17 @@ public struct DemoCatalog: MusicCatalog {
         ("Coffee", "Sylvan Esso", "Sylvan Esso"),
     ]
 
-    public static func track(_ index: Int) -> Track {
+    public static func track(_ index: Int) -> QueueTrack {
         let (title, artist, album) = songs[index % songs.count]
-        return Track(
+        return QueueTrack(
             id: "demo-\(index)", title: title, artist: artist, album: album,
             duration: 30, colors: palette[index % palette.count]
         )
     }
 
-    public static let allTracks: [Track] = songs.indices.map(track)
+    public static let allTracks: [QueueTrack] = songs.indices.map(track)
 
-    public func searchSongs(_ term: String) async throws -> [Track] {
+    public func searchSongs(_ term: String) async throws -> [QueueTrack] {
         try await Task.sleep(for: .milliseconds(250))
         let needle = term.lowercased()
         return Self.allTracks.filter {
@@ -79,7 +79,7 @@ public struct DemoCatalog: MusicCatalog {
         [PlaylistSummary(id: "demo-party", name: "\(term) mix", subtitle: "Apple Music", kind: .catalog)]
     }
 
-    public func tracks(in playlist: PlaylistSummary) async throws -> [Track] {
+    public func tracks(in playlist: PlaylistSummary) async throws -> [QueueTrack] {
         playlist.id == "demo-chill" ? Array(Self.allTracks.suffix(12)) : Self.allTracks
     }
 }
@@ -92,15 +92,15 @@ public final class DemoPlaybackEngine: PlaybackEngine {
     public private(set) var currentTime: TimeInterval = 0
     public var onEvent: (@MainActor (PlaybackEvent) -> Void)?
 
-    private var current: Track?
-    private var staged: Track?
+    private var current: QueueTrack?
+    private var staged: QueueTrack?
     private var ticker: Task<Void, Never>?
 
     public init(canReplaceStaged: Bool = true) {
         self.canReplaceStaged = canReplaceStaged
     }
 
-    public func play(_ track: Track) async throws {
+    public func play(_ track: QueueTrack) async throws {
         current = track
         staged = nil
         currentTime = 0
@@ -109,7 +109,7 @@ public final class DemoPlaybackEngine: PlaybackEngine {
         onEvent?(.statusChanged)
     }
 
-    public func stage(_ track: Track?) async throws {
+    public func stage(_ track: QueueTrack?) async throws {
         staged = track
     }
 

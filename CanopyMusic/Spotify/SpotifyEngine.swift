@@ -53,7 +53,7 @@ final class SpotifyEngine: PlaybackEngine {
         cachedAt = Date()
     }
 
-    func play(_ track: Track) async throws {
+    func play(_ track: QueueTrack) async throws {
         struct Body: Encodable { var uris: [String] }
         settleUntil = Date().addingTimeInterval(2)
         stagedURI = nil
@@ -72,7 +72,7 @@ final class SpotifyEngine: PlaybackEngine {
         cache(playing: true, time: 0)
     }
 
-    func stage(_ track: Track?) async throws {
+    func stage(_ track: QueueTrack?) async throws {
         // Spotify can't remove queued items; a nil stage just means nothing new is queued.
         guard let track else { return }
         try await api.send("POST", "/me/player/queue", query: deviceQuery.merging(["uri": track.id]) { $1 })

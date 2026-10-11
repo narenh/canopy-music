@@ -22,7 +22,7 @@ final class LyricsEasterEgg {
     /// LRCLIB record for "Big Stick" by MUNA.
     private static let lrclibID = 33573170
 
-    func matches(_ track: Track) -> Bool {
+    func matches(_ track: QueueTrack) -> Bool {
         #if DEBUG
         if ProcessInfo.processInfo.arguments.contains("-easterEggPreview") { return true }
         #endif

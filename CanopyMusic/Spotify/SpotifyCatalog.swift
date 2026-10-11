@@ -6,13 +6,13 @@ struct SpotifyCatalog: MusicCatalog {
     let api: SpotifyAPI
 
     /// Development Mode caps search at 10 per request, so fetch two pages.
-    func searchSongs(_ term: String) async throws -> [Track] {
+    func searchSongs(_ term: String) async throws -> [QueueTrack] {
         struct Reply: Decodable { var tracks: SpotifyPage<SpotifyTrackObject>? }
-        var tracks: [Track] = []
+        var tracks: [QueueTrack] = []
         for offset in [0, 10] {
             let reply = try await api.get("/search", query: ["q": term, "type": "track", "limit": "10", "offset": "\(offset)"], as: Reply.self)
             let page = reply?.tracks?.items ?? []
-            tracks += page.compactMap(Track.init(spotify:))
+            tracks += page.compactMap(QueueTrack.init(spotify:))
             if page.count < 10 { break }
         }
         return tracks
@@ -36,11 +36,11 @@ struct SpotifyCatalog: MusicCatalog {
         return (reply?.playlists?.items ?? []).compactMap { $0?.summary(subtitle: $0?.owner?.display_name) }
     }
 
-    func tracks(in playlist: PlaylistSummary) async throws -> [Track] {
-        var tracks: [Track] = []
+    func tracks(in playlist: PlaylistSummary) async throws -> [QueueTrack] {
+        var tracks: [QueueTrack] = []
         var page = try await api.get("/playlists/\(playlist.id)/items", query: ["limit": "50"], as: SpotifyPage<PlaylistEntry>.self)
         while let current = page {
-            tracks += current.items.compactMap { ($0.item ?? $0.track).flatMap(Track.init(spotify:)) }
+            tracks += current.items.compactMap { ($0.item ?? $0.track).flatMap(QueueTrack.init(spotify:)) }
             guard let next = current.next else { break }
             page = try await api.getNext(next, as: SpotifyPage<PlaylistEntry>.self)
         }
@@ -67,7 +67,7 @@ struct SpotifyCatalog: MusicCatalog {
     }
 }
 
-extension Track {
+extension QueueTrack {
     init?(spotify object: SpotifyTrackObject) {
         guard object.is_local != true, object.type == nil || object.type == "track" else { return nil }
         let images = (object.album?.images ?? []).sorted { ($0.width ?? 0) > ($1.width ?? 0) }

@@ -4,7 +4,7 @@ import CoreImage.CIFilterBuiltins
 import SwiftUI
 
 struct ArtworkView: View {
-    let track: Track?
+    let track: QueueTrack?
     var large = false
     var cornerRadius: CGFloat = 8
 
@@ -37,7 +37,7 @@ struct ArtworkView: View {
 
 /// Full-bleed blurred artwork over the theme's base color.
 struct ThemedBackground: View {
-    let track: Track?
+    let track: QueueTrack?
     let theme: ArtworkTheme
 
     var body: some View {

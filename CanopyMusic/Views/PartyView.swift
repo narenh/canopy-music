@@ -6,7 +6,7 @@ struct PartyView: View {
     @Environment(AppModel.self) private var model
 
     @State private var query = ""
-    @State private var results: [Track] = []
+    @State private var results: [QueueTrack] = []
     @State private var isSearching = false
     @State private var searchMessage: String?
     @FocusState private var searchFocused: Bool
@@ -175,7 +175,7 @@ struct PartyView: View {
 
     // MARK: Adding
 
-    private func status(for track: Track) -> AddStatus {
+    private func status(for track: QueueTrack) -> AddStatus {
         if current?.track.id == track.id { return .playing }
         if session.state.upNext.contains(where: { $0.isRequest && $0.track.id == track.id }) { return .queued }
         return .add
@@ -203,7 +203,7 @@ struct PartyView: View {
         searchFocused = false
     }
 
-    private func add(_ track: Track, from frame: CGRect) {
+    private func add(_ track: QueueTrack, from frame: CGRect) {
         noteSearchActivity()
         let result = withAnimation(.spring(duration: 0.45, bounce: 0.12)) {
             session.add(track, by: Requester(origin: .ipad))

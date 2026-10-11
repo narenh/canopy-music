@@ -74,7 +74,7 @@ public final class PartyServer: Sendable {
 
         await server.appendRoute("GET /api/search") { request in
             let term = request.query["q"]?.trimmingCharacters(in: .whitespaces) ?? ""
-            guard !term.isEmpty else { return try .json([Track]()) }
+            guard !term.isEmpty else { return try .json([QueueTrack]()) }
             do {
                 return try .json(try await session.catalog.searchSongs(term))
             } catch {
@@ -108,7 +108,7 @@ public final class PartyServer: Sendable {
 // MARK: - API bodies
 
 struct AddBody: Decodable {
-    var track: Track
+    var track: QueueTrack
     var name: String?
     var clientId: String
 }

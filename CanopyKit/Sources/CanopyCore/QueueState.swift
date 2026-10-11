@@ -15,7 +15,7 @@ public struct QueueState: Codable, Equatable, Sendable {
     public static let historyLimit = 100
 
     /// Base playlist in play order (already shuffled if shuffle was on).
-    public private(set) var playlist: [Track] = []
+    public private(set) var playlist: [QueueTrack] = []
     public private(set) var playlistName: String?
     /// Next position in `playlist` to materialize into `upNext`.
     public private(set) var cursor = 0
@@ -36,7 +36,7 @@ public struct QueueState: Codable, Equatable, Sendable {
 
     /// Starts over with a new base playlist in its original order: clears now playing, requests,
     /// and everything queued. Nothing is current until playback starts.
-    public mutating func load(playlist tracks: [Track], name: String?) {
+    public mutating func load(playlist tracks: [QueueTrack], name: String?) {
         playlist = tracks
         playlistName = name
         cursor = 0
@@ -95,7 +95,7 @@ public struct QueueState: Codable, Equatable, Sendable {
     }
 
     @discardableResult
-    public mutating func addRequest(_ track: Track, by requester: Requester, at date: Date = Date()) -> AddResult {
+    public mutating func addRequest(_ track: QueueTrack, by requester: Requester, at date: Date = Date()) -> AddResult {
         if current?.track.id == track.id { return .nowPlaying }
         if let index = upNext.firstIndex(where: { $0.isRequest && $0.track.id == track.id }) {
             return .alreadyQueued(upNext[index], index: index)

@@ -6,13 +6,13 @@ enum AddStatus {
 }
 
 struct SearchResultsView: View {
-    let results: [Track]
+    let results: [QueueTrack]
     let isLoading: Bool
     let message: String?
-    let status: (Track) -> AddStatus
+    let status: (QueueTrack) -> AddStatus
     var autoAddTrackID: String?
     /// Called with the track and its artwork's global frame, which the flight animation starts from.
-    let onAdd: (Track, CGRect) -> Void
+    let onAdd: (QueueTrack, CGRect) -> Void
     /// Called whenever someone scrolls the results, to keep search open.
     var onInteraction: () -> Void = {}
 
@@ -43,10 +43,10 @@ struct SearchResultsView: View {
 }
 
 private struct ResultRow: View {
-    let track: Track
+    let track: QueueTrack
     let status: AddStatus
     let autoAdd: Bool
-    let onAdd: (Track, CGRect) -> Void
+    let onAdd: (QueueTrack, CGRect) -> Void
 
     @State private var artworkFrame: CGRect = .zero
     @Environment(\.artworkTheme) private var theme

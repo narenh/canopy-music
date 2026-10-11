@@ -165,7 +165,7 @@ public final class PartySession {
     // MARK: Guest actions
 
     @discardableResult
-    public func add(_ track: Track, by requester: Requester) -> AddResult {
+    public func add(_ track: QueueTrack, by requester: Requester) -> AddResult {
         mutate { $0.addRequest(track, by: requester) }
     }
 

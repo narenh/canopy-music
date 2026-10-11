@@ -14,7 +14,7 @@ public struct ArtworkColors: Codable, Hashable, Sendable {
 }
 
 /// A provider-agnostic song. Nothing outside the provider layer should touch MusicKit types.
-public struct Track: Codable, Hashable, Sendable, Identifiable {
+public struct QueueTrack: Codable, Hashable, Sendable, Identifiable {
     public var id: String
     public var title: String
     public var artist: String
@@ -61,7 +61,7 @@ public struct Requester: Codable, Hashable, Sendable {
 
 public struct QueueItem: Codable, Hashable, Sendable, Identifiable {
     public let id: UUID
-    public var track: Track
+    public var track: QueueTrack
     /// `nil` means the item came from the base playlist.
     public var requester: Requester?
     /// True until someone drags the item. Auto-placed requests anchor where new requests land.
@@ -70,7 +70,7 @@ public struct QueueItem: Codable, Hashable, Sendable, Identifiable {
 
     public var isRequest: Bool { requester != nil }
 
-    public init(id: UUID = UUID(), track: Track, requester: Requester?, autoPlaced: Bool = true, addedAt: Date = Date()) {
+    public init(id: UUID = UUID(), track: QueueTrack, requester: Requester?, autoPlaced: Bool = true, addedAt: Date = Date()) {
         self.id = id
         self.track = track
         self.requester = requester

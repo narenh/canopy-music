@@ -131,7 +131,12 @@ struct UpNextList: View {
                 // keep it in view unless someone is browsing the list. Wait for the list's own
                 // reorder animation to settle first; a scroll issued mid-animation gets dropped.
                 guard !isScrolling, returnTask == nil else { return }
+                // Scroll in the same animation as the reorder, so a song moved to the top lands
+                // in view instead of passing above the fold first.
+                guard let home = homeID else { return }
+                withAnimation(.spring(duration: 0.45, bounce: 0.12)) { proxy.scrollTo(home, anchor: .top) }
                 Task {
+                    // Safety net: a scroll issued mid-animation can get dropped.
                     try? await Task.sleep(for: .milliseconds(500))
                     guard !isScrolling, returnTask == nil else { return }
                     scrollHome(proxy, animated: true)

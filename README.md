@@ -13,6 +13,10 @@ iPad party jukebox for Apple Music or Spotify. Pick a base playlist, lock the iP
 
 Privacy: Canopy has no servers, accounts or tracking. See the [privacy policy](PRIVACY.md).
 
+## License
+
+The code is under the [PolyForm Noncommercial License 1.0.0](LICENSE.md): you can use, change and share it for noncommercial purposes. Commercial use needs permission. The Canopy name, logo and app icon aren't covered by the license, and neither are the Apple Music and Spotify marks, which belong to Apple and Spotify.
+
 ## Building it for your iPad
 
 Requires Xcode 26+ and an iPad on iPadOS 26+.

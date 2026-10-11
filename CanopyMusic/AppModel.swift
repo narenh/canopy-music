@@ -285,10 +285,18 @@ final class AppModel {
         print("[spotify-devices] " + reply.devices.map { "\($0.name) type=\($0.type) active=\($0.is_active) volume=\($0.supports_volume.map(String.init) ?? "?")" }.joined(separator: " | "))
         #endif
         spotifyDevicesLoaded = true
+        // Spotify plays on one device per account. If playback moved (e.g. picked in the Spotify
+        // app), follow it, so commands don't pull it back and the AirPlay button is right.
+        if let active = spotifyDevices.first(where: \.is_active), active.id != spotifyDeviceID {
+            spotifyDeviceID = active.id
+        }
         if let id = spotifyDeviceID, let device = spotifyDevices.first(where: { $0.id == id }) {
             spotifyDeviceName = device.name
             spotifyDeviceType = device.type
         }
+        #if DEBUG
+        print("[spotify-devices] chosen=\(spotifyDeviceName ?? "nil") type=\(spotifyDeviceType ?? "nil")")
+        #endif
         // Lost the device mid-party: ask where music should play (once per loss, so Done sticks).
         if wasAvailable, !spotifyDeviceAvailable, provider == .spotify, session.state.current != nil {
             isPickingSpotifyDevice = true

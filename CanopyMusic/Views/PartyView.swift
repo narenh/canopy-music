@@ -407,12 +407,22 @@ private struct TransportControls: View {
             HStack(spacing: 20) {
                 // Open AirPlay picker: AirPlay sessions sometimes drop and need re-picking.
                 // Disabled (but kept for balance) when Spotify plays on another device.
-                RoutePicker(tint: .white)
-                    .frame(width: 44, height: 44)
-                    .glassEffect(.regular.interactive(), in: Circle())
-                    .opacity(airPlayApplies ? 1 : 0.35)
-                    .allowsHitTesting(airPlayApplies)
-                    .accessibilityLabel("Choose speakers")
+                if airPlayApplies {
+                    RoutePicker(tint: .white)
+                        .frame(width: 44, height: 44)
+                        .glassEffect(.regular.interactive(), in: Circle())
+                        .accessibilityLabel("Choose speakers")
+                } else {
+                    // The AirPlay control ignores SwiftUI's disabled/opacity, so show a plain
+                    // dimmed icon instead (kept for balance).
+                    Image(systemName: "airplay.audio")
+                        .font(.system(size: 17, weight: .semibold))
+                        .foregroundStyle(.white.opacity(0.3))
+                        .frame(width: 44, height: 44)
+                        .glassEffect(.regular, in: Circle())
+                        .accessibilityLabel("Speakers")
+                        .accessibilityValue("Not used: music plays on \(model.spotifyDeviceName ?? "another device")")
+                }
                 Group {
                     Button {
                         Task { await session.previous() }

@@ -31,9 +31,18 @@ public final class FriendlyHostname: @unchecked Sendable {
                 connection, &record, DNSServiceFlags(kDNSServiceFlagsUnique), 0,
                 hostname + ".", UInt16(kDNSServiceType_A), UInt16(kDNSServiceClass_IN),
                 UInt16(bytes.count), bytes.baseAddress, 120,
-                { _, _, _, _, _ in }, nil
+                { _, _, _, error, _ in
+                    // Conflicts and policy denials (Local Network permission) arrive here, after
+                    // the register call itself succeeded.
+                    #if DEBUG
+                    print("[mdns] register callback error=\(error)")
+                    #endif
+                }, nil
             )
         }
+        #if DEBUG
+        print("[mdns] register \(hostname) -> \(address) status=\(status)")
+        #endif
         guard status == kDNSServiceErr_NoError else {
             DNSServiceRefDeallocate(connection)
             return false

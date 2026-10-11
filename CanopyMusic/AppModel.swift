@@ -175,6 +175,16 @@ final class AppModel {
 
         // Long-form audio is what lets the AirPlay picker select several AirPlay 2 speakers at once.
         try? AVAudioSession.sharedInstance().setCategory(.playback, mode: .default, policy: .longFormAudio)
+
+        // When Canopy isn't playing audio itself (Spotify), iPadOS suspends it in the background
+        // (e.g. while you open Spotify), which kills the listening socket and the mDNS name.
+        // Bring both back on return.
+        NotificationCenter.default.addObserver(forName: UIApplication.willEnterForegroundNotification, object: nil, queue: .main) { [weak self] _ in
+            MainActor.assumeIsolated {
+                guard let self, self.server != nil || self.phoneQueueEnabled else { return }
+                Task { await self.restartServer() }
+            }
+        }
     }
 
     private static func makeSession(_ provider: Provider, spotify: SpotifyAPI) -> PartySession {

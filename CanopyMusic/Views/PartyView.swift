@@ -626,7 +626,7 @@ struct GuestQRCard: View {
                 Spacer(minLength: 0)
                 if let wifi = model.wifiJoinPayload {
                     VStack(spacing: 4) {
-                        QRCodeView(payload: wifi, inverted: true)
+                        HalftoneQRCode(payload: wifi, symbol: "wifi", symbolScale: 0.6, dotScale: 0.7)
                             .frame(width: 64, height: 64)
                             .opacity(0.75)
                         Text("Join Wi\u{2011}Fi")

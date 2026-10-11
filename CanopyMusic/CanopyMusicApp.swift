@@ -72,6 +72,13 @@ struct RootView: View {
     let model: AppModel
     @State private var easterEgg = LyricsEasterEgg()
 
+    /// `-qrGallery` covers the app with QR design variants (debug builds only).
+    @ViewBuilder private var debugOverlay: some View {
+        #if DEBUG
+        if ProcessInfo.processInfo.arguments.contains("-qrGallery") { QRGallery() }
+        #endif
+    }
+
     var body: some View {
         let current = model.session.state.current
         let takeover = current.flatMap { item -> (QueueItem, [LyricsEasterEgg.Line])? in
@@ -91,6 +98,7 @@ struct RootView: View {
                     .transition(.opacity)
             }
         }
+        .overlay { debugOverlay }
         .animation(.easeInOut(duration: 0.4), value: model.isLocked)
         .animation(.easeInOut(duration: 0.5), value: model.needsOnboarding)
         .tint(model.provider.accent)

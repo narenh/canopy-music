@@ -264,9 +264,13 @@ struct TVPartyView: View {
                 }
                 TVJoinCard()
             }
-            .padding(32)
+            .padding(.vertical, 8)
+            .padding(.leading, 56)
             .frame(maxHeight: .infinity)
-            .background(.black.opacity(0.22), in: RoundedRectangle(cornerRadius: 40, style: .continuous))
+            // A sidebar running off the top, bottom and right edges.
+            .background {
+                Color.black.opacity(0.22).ignoresSafeArea(edges: [.top, .bottom, .trailing])
+            }
         }
         .foregroundStyle(.white)
     }
@@ -375,8 +379,11 @@ struct TVArtwork: View {
                 ],
                 startPoint: .topLeading, endPoint: .bottomTrailing
             )
-            if let url = track?.artworkURL ?? track?.thumbnailURL {
-                AsyncImage(url: url) { $0.resizable().scaledToFill() } placeholder: { Color.clear }
+            // In an overlay so a filled image can't grow the view past the size it's given.
+            Color.clear.overlay {
+                if let url = track?.artworkURL ?? track?.thumbnailURL {
+                    AsyncImage(url: url) { $0.resizable().scaledToFill() } placeholder: { Color.clear }
+                }
             }
         }
         .clipShape(RoundedRectangle(cornerRadius: cornerRadius, style: .continuous))

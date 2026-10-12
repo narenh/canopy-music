@@ -42,7 +42,12 @@ final class TVModel {
     @ObservationIgnored let deviceID: String
     @ObservationIgnored private var server: PartyServer?
     @ObservationIgnored private var serverTask: Task<Void, Error>?
+    // The simulator shares the Mac's network; keep test zones off the real music.local.
+    #if targetEnvironment(simulator)
+    @ObservationIgnored private var hostname = FriendlyHostname(name: "canopytest")
+    #else
     @ObservationIgnored private var hostname = FriendlyHostname(name: "music")
+    #endif
     @ObservationIgnored private let advertiser = ZoneAdvertiser()
     @ObservationIgnored private var hostKey = TVModel.newKey()
     @ObservationIgnored private let defaults = UserDefaults.standard

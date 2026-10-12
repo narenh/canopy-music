@@ -33,6 +33,31 @@ public enum ZoneCommand: Sendable, Equatable {
 public protocol ZoneRemote: AnyObject, Sendable {
     func send(_ command: ZoneCommand) async throws
     func search(_ term: String) async throws -> [QueueTrack]
+    /// The hub's base playlist past its live Up Next (`GET /api/upcoming`).
+    func upcoming(offset: Int, limit: Int) async throws -> UpcomingPage
+}
+
+/// A page of the base playlist's songs after the live Up Next, to show (read-only) below it.
+/// Not part of snapshots: fetched as people scroll.
+public struct UpcomingPage: Codable, Equatable, Sendable {
+    public struct Row: Codable, Equatable, Sendable, Identifiable {
+        /// Stable while the song waits: its cycle and place in the playlist.
+        public var id: String
+        public var trackID: String
+        public var title: String
+        public var artist: String
+        public var thumbnailURL: URL?
+    }
+
+    public var playlistName: String?
+    /// Songs left in this cycle after the live Up Next (all pages).
+    public var total: Int
+    public var offset: Int
+    public var rows: [Row]
+    /// The queue version this page was taken at.
+    public var version: Int
+
+    public static let empty = UpcomingPage(playlistName: nil, total: 0, offset: 0, rows: [], version: 0)
 }
 
 /// Search for a display goes to the hub, so every result is playable there.

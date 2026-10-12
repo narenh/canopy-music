@@ -145,6 +145,35 @@ struct HostSettingsTests {
         #expect(display == 200)
     }
 
+    /// The playlist past the live Up Next comes a page at a time, to the web page and to displays.
+    @Test func upcomingPages() async throws {
+        let hub = PartySession(catalog: DemoCatalog(), engine: DemoPlaybackEngine())
+        let big = try #require(try await DemoCatalog().libraryPlaylists().first { $0.id == "demo-big" })
+        try await hub.load(playlist: big)
+        try await hub.play()
+        let (server, task) = try #require(await PartyServer.start(session: hub, ports: [18796]))
+        defer { task.cancel(); Task { await server.stop() } }
+
+        let expectedTotal = DemoCatalog.bigTracks.count - 1 - QueueState.playlistWindow
+        let (data, _) = try await URLSession.shared.data(from: URL(string: "http://127.0.0.1:18796/api/upcoming?offset=0&limit=500")!)
+        let page = try JSONDecoder.api.decode(UpcomingPage.self, from: data)
+        #expect(page.total == expectedTotal)
+        #expect(page.rows.count == 100) // capped
+        #expect(page.rows.first?.trackID == DemoCatalog.bigTracks[QueueState.playlistWindow + 1].id)
+        #expect(page.playlistName == "Big party")
+        #expect(!String(decoding: data, as: UTF8.self).contains("colors")) // compact rows
+
+        // Snapshots stay the live window only.
+        #expect(hub.snapshot().upNext.count == QueueState.playlistWindow)
+
+        // A display asks its hub.
+        let connection = ZoneConnection(baseURL: URL(string: "http://127.0.0.1:18796")!, clientID: "kitchen", name: "Kitchen iPad", kind: .ipad)
+        let display = PartySession(remote: connection)
+        let remote = try await display.upcoming(offset: 50, limit: 50)
+        #expect(remote.total == expectedTotal)
+        #expect(remote.rows.map(\.trackID) == page.rows[50..<100].map(\.trackID))
+    }
+
     /// Any hub (iPad or TV) can be stopped from the web page, by hosts only.
     @Test func onlyHostsStopTheZone() async throws {
         let hub = PartySession(catalog: DemoCatalog(), engine: DemoPlaybackEngine())

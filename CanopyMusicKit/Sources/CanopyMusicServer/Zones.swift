@@ -257,6 +257,14 @@ public final class ZoneConnection: ZoneRemote {
         return try JSONDecoder.api.decode([QueueTrack].self, from: data)
     }
 
+    public func upcoming(offset: Int, limit: Int) async throws -> UpcomingPage {
+        var components = URLComponents(url: baseURL.appending(path: "api/upcoming"), resolvingAgainstBaseURL: false)!
+        components.queryItems = [URLQueryItem(name: "offset", value: "\(offset)"), URLQueryItem(name: "limit", value: "\(limit)")]
+        let (data, response) = try await urlSession.data(from: components.url!)
+        try Self.check(response)
+        return try JSONDecoder.api.decode(UpcomingPage.self, from: data)
+    }
+
     private func refresh() async {
         guard let (data, _) = try? await urlSession.data(from: baseURL.appending(path: "api/state")),
               let snapshot = try? JSONDecoder.api.decode(PartySnapshot.self, from: data) else { return }

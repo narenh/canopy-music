@@ -200,6 +200,12 @@ public final class PartySession {
         onSettingsChanged?()
     }
 
+    /// The base playlist past the live Up Next, a page at a time: the hub's own, or (display) its hub's.
+    public func upcoming(offset: Int, limit: Int) async throws -> UpcomingPage {
+        if let remote { return try await remote.upcoming(offset: offset, limit: limit) }
+        return state.upcomingPage(offset: offset, limit: limit)
+    }
+
     /// Revokes Host Control from every phone but the one asking; returns its new key.
     public func forgetOtherHostPhones() -> String? {
         onForgetHostPhones?()

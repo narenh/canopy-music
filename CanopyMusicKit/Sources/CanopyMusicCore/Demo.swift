@@ -60,6 +60,13 @@ public struct DemoCatalog: MusicCatalog {
 
     public static let allTracks: [QueueTrack] = songs.indices.map(track)
 
+    /// A long playlist, for the part of Up Next past the live window. Numbered, so the order shows.
+    public static let bigTracks: [QueueTrack] = (0..<400).map { index in
+        var track = track(index)
+        track.title += " \(index + 1)"
+        return track
+    }
+
     public func searchSongs(_ term: String) async throws -> [QueueTrack] {
         try await Task.sleep(for: .milliseconds(250))
         let needle = term.lowercased()
@@ -72,6 +79,7 @@ public struct DemoCatalog: MusicCatalog {
         [
             PlaylistSummary(id: "demo-party", name: "House party", subtitle: "30 songs", kind: .library),
             PlaylistSummary(id: "demo-chill", name: "Sunday chill", subtitle: "12 songs", kind: .library),
+            PlaylistSummary(id: "demo-big", name: "Big party", subtitle: "400 songs", kind: .library),
         ]
     }
 
@@ -80,7 +88,11 @@ public struct DemoCatalog: MusicCatalog {
     }
 
     public func tracks(in playlist: PlaylistSummary) async throws -> [QueueTrack] {
-        playlist.id == "demo-chill" ? Array(Self.allTracks.suffix(12)) : Self.allTracks
+        switch playlist.id {
+        case "demo-chill": Array(Self.allTracks.suffix(12))
+        case "demo-big": Self.bigTracks
+        default: Self.allTracks
+        }
     }
 }
 

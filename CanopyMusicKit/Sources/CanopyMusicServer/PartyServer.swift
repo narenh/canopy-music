@@ -86,6 +86,13 @@ public final class PartyServer: Sendable {
             try .json(await session.snapshot())
         }
 
+        // The base playlist past the live Up Next, shown read-only below it (not in snapshots).
+        await server.appendRoute("GET /api/upcoming") { request in
+            let offset = max(0, Int(request.query["offset"] ?? "") ?? 0)
+            let limit = min(100, max(0, Int(request.query["limit"] ?? "") ?? 50))
+            return try .json(await session.upcoming(offset: offset, limit: limit))
+        }
+
         await server.appendRoute("GET /api/search") { request in
             let term = request.query["q"]?.trimmingCharacters(in: .whitespaces) ?? ""
             guard !term.isEmpty else { return try .json([QueueTrack]()) }

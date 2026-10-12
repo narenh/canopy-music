@@ -11,7 +11,9 @@ public enum AddResult: Equatable, Sendable {
 /// `upNext` is one list: playlist items and requests are interleaved freely. Playlist items are
 /// materialized a window at a time from `playlist`, looping forever.
 public struct QueueState: Codable, Equatable, Sendable {
-    public static let playlistWindow = 25
+    /// How many playlist songs are live in `upNext` (draggable, removable, in snapshots). The rest
+    /// of the cycle is listed read-only with `upcoming(offset:limit:)`.
+    public static let playlistWindow = 100
     public static let historyLimit = 100
 
     /// Base playlist in play order (already shuffled if shuffle was on).
@@ -89,6 +91,29 @@ public struct QueueState: Codable, Equatable, Sendable {
             upNext.append(QueueItem(track: playlist[cursor], requester: nil))
             have += 1
         }
+    }
+
+    /// The base playlist's songs after the live window, in play order: from `cursor` to the end
+    /// of the current cycle (not into the next), skipping positions a request already played or
+    /// queued, and songs already in Up Next. `position` is the song's place in the playlist.
+    public func upcoming(offset: Int = 0, limit: Int = .max) -> (items: [(position: Int, track: QueueTrack)], total: Int) {
+        guard cursor < playlist.count else { return ([], 0) }
+        var queued = Set(upNext.map(\.track.id))
+        if let current { queued.insert(current.track.id) }
+        let positions = (cursor..<playlist.count).filter { !skipPositions.contains($0) && !queued.contains(playlist[$0].id) }
+        let start = min(max(offset, 0), positions.count)
+        let end = min(start + max(limit, 0), positions.count)
+        return (positions[start..<end].map { ($0, playlist[$0]) }, positions.count)
+    }
+
+    /// `upcoming` as a page for the web page and displays.
+    public func upcomingPage(offset: Int, limit: Int) -> UpcomingPage {
+        let (items, total) = upcoming(offset: offset, limit: limit)
+        let rows = items.map { item in
+            UpcomingPage.Row(id: "\(cycle)-\(item.position)", trackID: item.track.id, title: item.track.title,
+                             artist: item.track.artist, thumbnailURL: item.track.thumbnailURL)
+        }
+        return UpcomingPage(playlistName: playlistName, total: total, offset: offset, rows: rows, version: version)
     }
 
     // MARK: Requests

@@ -32,8 +32,51 @@ func titles(_ items: [QueueItem]) -> [String] { items.map(\.track.id) }
     }
 
     @Test func longPlaylistQueuesAWindow() {
-        let s = started((0..<40).map { "t\($0)" })
+        let s = started((0..<QueueState.playlistWindow + 40).map { "t\($0)" })
         #expect(s.upNext.filter { !$0.isRequest }.count == QueueState.playlistWindow)
+    }
+
+    // MARK: Upcoming (after the live window)
+
+    @Test func upcomingListsTheRestOfTheCycle() {
+        let w = QueueState.playlistWindow
+        let s = started((0..<w + 40).map { "t\($0)" })
+        // t0 is playing, t1…t\(w) are live; then the rest of the cycle, in order.
+        let all = s.upcoming()
+        #expect(all.total == 39)
+        #expect(all.items.first?.track.id == "t\(w + 1)")
+        #expect(all.items.last?.track.id == "t\(w + 39)")
+        let page = s.upcoming(offset: 10, limit: 5)
+        #expect(page.total == 39)
+        #expect(page.items.map(\.track.id) == (w + 11...w + 15).map { "t\($0)" })
+        #expect(page.items.first?.position == w + 11)
+        #expect(s.upcoming(offset: 100, limit: 5).items.isEmpty)
+    }
+
+    @Test func upcomingSkipsRequestedPositions() {
+        let w = QueueState.playlistWindow
+        var s = started((0..<w + 40).map { "t\($0)" })
+        s.addRequest(track("t\(w + 5)"), by: guest)
+        let ids = s.upcoming().items.map(\.track.id)
+        #expect(!ids.contains("t\(w + 5)"))
+        #expect(s.upcoming().total == 38)
+    }
+
+    @Test func upcomingStopsAtTheEndOfTheCycle() {
+        let w = QueueState.playlistWindow
+        var s = started((0..<w + 10).map { "t\($0)" })
+        #expect(s.upcoming().total == 9)
+        // Play into the next cycle: the window wraps; nothing from the next cycle is listed twice.
+        for _ in 0..<15 { s.advance() }
+        let upcoming = s.upcoming().items.map(\.track.id)
+        let live = Set(s.upNext.map(\.track.id))
+        #expect(upcoming.allSatisfy { !live.contains($0) })
+        #expect(s.upcoming().total + s.upNext.count + 1 <= w + 10)
+    }
+
+    @Test func shortPlaylistHasNothingUpcoming() {
+        let s = started(["a", "b", "c"])
+        #expect(s.upcoming().total == 0)
     }
 
     @Test func requestsAreFirstComeFirstServed() {
@@ -78,15 +121,17 @@ func titles(_ items: [QueueItem]) -> [String] { items.map(\.track.id) }
     }
 
     @Test func requestSkipsUnmaterializedPlaylistPosition() {
-        let ids = (0..<40).map { "t\($0)" }
+        let count = QueueState.playlistWindow + 15
+        let ids = (0..<count).map { "t\($0)" }
         var s = started(ids)
-        // t35 hasn't been materialized yet (window is 25).
-        #expect(!s.upNext.contains { $0.track.id == "t35" })
-        s.addRequest(track("t35"), by: guest)
-        // Play through the rest of the first cycle: t35 should appear once (the request).
+        let late = "t\(count - 5)"
+        // It hasn't been materialized yet (it's past the window).
+        #expect(!s.upNext.contains { $0.track.id == late })
+        s.addRequest(track(late), by: guest)
+        // Play through the rest of the first cycle: it should appear once (the request).
         var seen: [String] = []
-        for _ in 0..<40 { if let c = s.advance() { seen.append(c.track.id) } }
-        #expect(seen.filter { $0 == "t35" }.count == 1)
+        for _ in 0..<count { if let c = s.advance() { seen.append(c.track.id) } }
+        #expect(seen.filter { $0 == late }.count == 1)
         #expect(seen.last == "t0") // looped back around
     }
 

@@ -23,6 +23,8 @@ struct UpNextList: View {
 
     @Environment(\.artworkTheme) private var theme
     @State private var returnTask: Task<Void, Never>?
+    /// The rest of the base playlist, read-only below the live queue (docs/multi-device.md).
+    @State private var upcoming = UpcomingList()
     @State private var isScrolling = false
     private static let fadeHeight: CGFloat = 48
     private static let historyLimit = 20
@@ -79,6 +81,10 @@ struct UpNextList: View {
                     .moveDisabled(!upcoming || locked || !canReorder)
                     .deleteDisabled(!upcoming || !canDelete(item) || locked)
                     .id(item.id)
+                    .onAppear {
+                        // The end of the live queue is in view: start on the rest of the playlist.
+                        if item.id == session.state.upNext.last?.id, self.upcoming.total == nil { loadMoreUpcoming() }
+                    }
                 }
                 .onMove { source, destination in
                     guard let from = source.first, rows.indices.contains(from), rows[from].kind == .upcoming else { return }
@@ -92,6 +98,17 @@ struct UpNextList: View {
                         session.remove(rows[index].id)
                     }
                 } : nil)
+                // The rest of the playlist carries on the same list: no handle, no delete, and
+                // nothing can be dropped among them (they're outside the ForEach that moves).
+                ForEach(upcoming.rows) { row in
+                    UpcomingRow(row: row)
+                        .listRowBackground(Color.clear)
+                        .listRowInsets(EdgeInsets(top: 6, leading: 12, bottom: 6, trailing: 12))
+                        .listRowSeparatorTint(.white.opacity(0.08))
+                        .moveDisabled(true)
+                        .deleteDisabled(true)
+                        .onAppear { if row.id == upcoming.rows.last?.id { loadMoreUpcoming() } }
+                }
             }
             .listStyle(.plain)
             .scrollContentBackground(.hidden)
@@ -105,6 +122,8 @@ struct UpNextList: View {
                 }
             }
             .environment(\.editMode, .constant(.active))
+            .onChange(of: session.state.version) { upcoming.queueChanged(in: session) }
+            .onChange(of: ObjectIdentifier(session)) { upcoming = UpcomingList() }
             .animation(.spring(duration: 0.45, bounce: 0.12), value: rows.map(\.id))
             .onChange(of: scrollTarget) { _, target in
                 guard let target else { return }
@@ -153,6 +172,11 @@ struct UpNextList: View {
                 }
             }
         }
+    }
+
+    private func loadMoreUpcoming() {
+        let list = upcoming, session = session
+        Task { await list.loadMore(from: session) }
     }
 
     private func scheduleReturn(_ proxy: ScrollViewProxy) {
@@ -218,6 +242,28 @@ private struct UpNextRow: View {
         }
         .opacity(hidden ? 0 : 1)
         .contentShape(Rectangle())
+    }
+}
+
+/// A song from the base playlist past the live queue: read-only, so no pill, lock or handle.
+private struct UpcomingRow: View {
+    let row: UpcomingPage.Row
+
+    var body: some View {
+        HStack(spacing: 14) {
+            ArtworkView(track: QueueTrack(id: row.trackID, title: row.title, artist: row.artist, thumbnailURL: row.thumbnailURL), cornerRadius: 6)
+                .frame(width: 52, height: 52)
+            VStack(alignment: .leading, spacing: 2) {
+                Text(row.title)
+                    .font(.system(size: 17, weight: .medium))
+                    .foregroundStyle(.white)
+                Text(row.artist)
+                    .font(.system(size: 14))
+                    .foregroundStyle(.white.opacity(0.6))
+            }
+            .lineLimit(1)
+            Spacer(minLength: 8)
+        }
     }
 }
 

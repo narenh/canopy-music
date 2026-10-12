@@ -172,6 +172,18 @@
 
   function setArt(el, track, large) {
     const url = large ? track.artworkURL || track.thumbnailURL : track.thumbnailURL || track.artworkURL;
+    if (!large) {
+      // Row artwork loads lazily: an <img loading="lazy"> (a CSS background loads at once).
+      el.style.backgroundImage = !url && track.colors ? `linear-gradient(135deg, ${track.colors.background}, ${track.colors.secondary})` : "";
+      let img = el.querySelector("img");
+      if (url) {
+        if (!img) { img = document.createElement("img"); img.loading = "lazy"; img.decoding = "async"; img.alt = ""; el.append(img); }
+        if (img.getAttribute("src") !== url) img.src = url;
+      } else if (img) {
+        img.remove();
+      }
+      return;
+    }
     if (url) {
       el.style.backgroundImage = `url("${url}")`;
     } else if (track.colors) {
@@ -328,37 +340,68 @@
     }
   }
 
+  // Live rows (up to 100 per snapshot, and most snapshots change none of them): only rows whose
+  // content changed are rebuilt, only rows out of place are moved, and only rows on screen animate.
+  const onScreen = new Set();
+  const rowObserver = new IntersectionObserver((entries) => {
+    for (const e of entries) { if (e.isIntersecting) onScreen.add(e.target); else onScreen.delete(e.target); }
+  });
+
+  /** Everything fillRow draws from, so a row is rebuilt only when it would look different. */
+  function rowSignature(item) {
+    const t = item.track, label = requesterLabel(item);
+    return [t.title, t.artist, t.thumbnailURL || t.artworkURL || "", t.colors ? t.colors.background + t.colors.secondary : "",
+      snap.lockedNextID === item.id, label ? `${label.text}${label.mine}` : "", hosting(), snap.canReorder !== false].join("|");
+  }
+
   function renderQueue() {
     const list = $("queue");
+    const items = snap.upNext;
+    const rows = list.children;
+    const sameOrder = items.length === rows.length && items.every((item, i) => rows[i].dataset.id === item.id);
+    // FLIP, first: where the rows on screen are, if any row comes, goes or moves.
     const before = new Map();
-    if (!firstRender) for (const [id, el] of rowEls) before.set(id, el.getBoundingClientRect().top);
+    if (!sameOrder && !firstRender) for (const el of onScreen) before.set(el, el.getBoundingClientRect().top);
 
-    const seen = new Set();
-    for (const item of snap.upNext) {
+    const keep = new Set(items.map((item) => item.id));
+    for (const [id, el] of rowEls) {
+      if (keep.has(id)) continue;
+      rowObserver.unobserve(el);
+      onScreen.delete(el);
+      el.remove();
+      rowEls.delete(id);
+    }
+    const added = [];
+    let next = list.firstElementChild;
+    for (const item of items) {
       let el = rowEls.get(item.id);
-      const isNew = !el;
-      if (isNew) { el = document.createElement("li"); rowEls.set(item.id, el); }
-      fillRow(el, item);
-      list.appendChild(el);
-      seen.add(item.id);
-      if (isNew && !firstRender) {
+      if (!el) {
+        el = document.createElement("li");
+        rowEls.set(item.id, el);
+        rowObserver.observe(el);
+        if (!firstRender) { added.push(el); if (item.requester) flashIds.add(item.id); }
+      }
+      const signature = rowSignature(item);
+      if (el.signature !== signature) { fillRow(el, item); el.signature = signature; }
+      if (el === next) next = next.nextElementSibling;
+      else list.insertBefore(el, next);
+    }
+
+    // FLIP, last and play: rows that were on screen slide from where they were.
+    for (const [el, top] of before) {
+      if (!el.isConnected) continue;
+      const dy = top - el.getBoundingClientRect().top;
+      if (Math.abs(dy) > 1) el.animate([{ transform: `translateY(${dy}px)` }, { transform: "none" }], { duration: 380, easing: "cubic-bezier(0.2, 0.8, 0.2, 1)" });
+    }
+    // New rows fade in where they can be seen (not a whole new playlist's worth).
+    if (added.length <= 10) {
+      for (const el of added) {
+        const r = el.getBoundingClientRect();
+        if (r.bottom < 0 || r.top > window.innerHeight) continue;
         el.animate(
           [{ opacity: 0, transform: "translateY(-8px) scale(0.98)" }, { opacity: 1, transform: "none" }],
           { duration: 420, easing: "cubic-bezier(0.2, 0.8, 0.2, 1)" }
         );
-        if (item.requester) flashIds.add(item.id);
-      }
-    }
-    for (const [id, el] of rowEls) {
-      if (!seen.has(id)) { el.remove(); rowEls.delete(id); }
-    }
-
-    for (const [id, top] of before) {
-      const el = rowEls.get(id);
-      if (!el) continue;
-      const dy = top - el.getBoundingClientRect().top;
-      if (Math.abs(dy) > 1) {
-        el.animate([{ transform: `translateY(${dy}px)` }, { transform: "none" }], { duration: 380, easing: "cubic-bezier(0.2, 0.8, 0.2, 1)" });
       }
     }
 
@@ -367,7 +410,116 @@
 
     $("queue-empty").hidden = snap.upNext.length > 0;
     firstRender = false;
+    laterQueueChanged();
   }
+
+  // MARK: Later (the base playlist past the live Up Next)
+
+  // The same list carries on, read-only (no handle or remove), with the rest of the playlist's
+  // cycle, a page at a time as the end comes near. It isn't in snapshots; when the queue moves on,
+  // the rows already shown are fetched again so the list stays in step.
+  const later = { rows: [], total: null, loading: false, generation: 0, version: null, refetchTimer: null };
+  const laterEls = new Map();
+
+  function laterRow(row) {
+    const li = document.createElement("li");
+    li.className = "row later-row";
+    li.dataset.id = row.id;
+    const art = document.createElement("div");
+    art.className = "art";
+    setArt(art, { thumbnailURL: row.thumbnailURL }, false);
+    const meta = document.createElement("div");
+    meta.className = "row-meta";
+    const title = document.createElement("p");
+    title.className = "row-title";
+    title.textContent = row.title;
+    const sub = document.createElement("p");
+    sub.className = "row-sub";
+    sub.textContent = row.artist;
+    meta.append(title, sub);
+    li.append(art, meta);
+    return li;
+  }
+
+  function renderLater() {
+    const list = $("later");
+    const keep = new Set(later.rows.map((r) => r.id));
+    for (const [id, el] of laterEls) if (!keep.has(id)) { el.remove(); laterEls.delete(id); }
+    let next = list.firstElementChild;
+    for (const row of later.rows) {
+      let el = laterEls.get(row.id);
+      if (!el) { el = laterRow(row); laterEls.set(row.id, el); }
+      if (el === next) next = next.nextElementSibling;
+      else list.insertBefore(el, next);
+    }
+    list.hidden = later.rows.length === 0;
+  }
+
+  async function fetchLater(offset, count) {
+    const rows = [];
+    let page = null;
+    while (rows.length < count) {
+      page = await api(`/api/upcoming?offset=${offset + rows.length}&limit=${Math.min(100, count - rows.length)}`);
+      rows.push(...page.rows);
+      if (!page.rows.length) break;
+    }
+    return { rows, total: page ? page.total : 0, version: page ? page.version : null };
+  }
+
+  async function loadMoreLater() {
+    if (later.loading || (later.total !== null && later.rows.length >= later.total) || !snap || !snap.upNext.length) return;
+    later.loading = true;
+    const generation = later.generation;
+    try {
+      const page = await fetchLater(later.rows.length, 50);
+      if (generation !== later.generation) return;
+      later.rows.push(...page.rows.filter((r) => !laterEls.has(r.id)));
+      later.total = page.total;
+      later.version = page.version;
+      renderLater();
+    } catch {} finally {
+      later.loading = false;
+    }
+    // Still near the end (a tall screen, or a short page): keep going.
+    if (generation === later.generation && laterSentinelNear) loadMoreLater();
+  }
+
+  /** Fetches the rows already shown again, so nothing drifts as songs play or get added. */
+  async function refetchLater() {
+    const generation = ++later.generation;
+    const count = Math.max(later.rows.length, 50);
+    try {
+      const page = await fetchLater(0, count);
+      if (generation !== later.generation) return;
+      later.rows = page.rows;
+      later.total = page.total;
+      later.version = page.version;
+      renderLater();
+    } catch {}
+  }
+
+  function laterQueueChanged() {
+    if (!snap.upNext.length) { later.generation++; later.rows = []; later.total = null; renderLater(); return; }
+    if (later.total === null) { if (laterSentinelNear) loadMoreLater(); return; }
+    if (later.version === snap.version) return;
+    // A song that just became live (the next one past the window) leaves here at once; the
+    // refetch below brings the rest in step.
+    const live = new Set(snap.upNext.map((item) => item.track.id));
+    if (snap.current) live.add(snap.current.track.id);
+    if (later.rows.some((r) => live.has(r.trackID))) {
+      later.rows = later.rows.filter((r) => !live.has(r.trackID));
+      renderLater();
+    }
+    // A burst of changes (a song ending, several adds) refetches once.
+    clearTimeout(later.refetchTimer);
+    later.refetchTimer = setTimeout(refetchLater, 250);
+  }
+
+  let laterSentinelNear = false;
+  new IntersectionObserver((entries) => {
+    laterSentinelNear = entries.some((e) => e.isIntersecting);
+    if (laterSentinelNear) loadMoreLater();
+  }, { rootMargin: "800px 0px" }).observe($("later-sentinel"));
 
   function flash(id) {
     const el = rowEls.get(id);
@@ -432,7 +584,7 @@
     if (!remove) return;
     const li = remove.closest(".row");
     const id = li.dataset.id;
-    li.animate([{ opacity: 1 }, { opacity: 0, transform: "translateX(24px)" }], { duration: 200, fill: "forwards" });
+    const fade = li.animate([{ opacity: 1 }, { opacity: 0, transform: "translateX(24px)" }], { duration: 200, fill: "forwards" });
     try {
       // Removing your own song: say it with the ID it was added under.
       const item = snap && snap.upNext.find((i) => i.id === id);
@@ -440,7 +592,7 @@
       await api("/api/remove", { id, clientId: owner, key: hosting() ? hostKey : undefined });
     } catch {
       toast("Couldn't remove that one");
-      if (snap) render();
+      fade.cancel();
     }
   });
 
@@ -755,7 +907,7 @@
       li.className = "playlist-row" + (p.id === selectedId ? " selected" : "");
       const art = document.createElement("div");
       art.className = "art";
-      if (p.artworkURL) art.style.backgroundImage = `url("${p.artworkURL}")`;
+      setArt(art, { thumbnailURL: p.artworkURL }, false);
       const meta = document.createElement("div");
       const title = document.createElement("p");
       title.textContent = p.name;

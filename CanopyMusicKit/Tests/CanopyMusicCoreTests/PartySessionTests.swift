@@ -270,3 +270,32 @@ let base = PlaylistSummary(id: "p", name: "Base", kind: .library)
         #expect(engine.staged?.id == "b")
     }
 }
+
+@MainActor
+@Suite struct UpcomingListTests {
+    /// Pages load as asked, and when a song plays the next one moves from the list to the live
+    /// queue without showing twice.
+    @Test func pagesAndFollowsTheQueue() async throws {
+        let count = QueueState.playlistWindow + 120
+        let session = PartySession(catalog: StubCatalog(ids: (0..<count).map { "t\($0)" }), engine: FakeEngine())
+        try await session.load(playlist: base)
+        try await session.play()
+        let list = UpcomingList()
+        await list.loadMore(from: session)
+        #expect(list.rows.count == UpcomingList.pageSize)
+        #expect(list.total == count - 1 - QueueState.playlistWindow)
+        await list.loadMore(from: session)
+        await list.loadMore(from: session)
+        #expect(list.rows.count == list.total)
+        #expect(!list.hasMore)
+
+        let next = try #require(list.rows.first?.trackID)
+        await session.skip()
+        #expect(session.state.upNext.last?.track.id == next)
+        list.queueChanged(in: session, settle: .zero)
+        #expect(list.rows.first?.trackID != next) // gone at once
+        try await Task.sleep(for: .milliseconds(200))
+        #expect(list.rows.count == list.total)
+        #expect(Set(list.rows.map(\.trackID)).isDisjoint(with: session.state.upNext.map(\.track.id)))
+    }
+}

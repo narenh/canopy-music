@@ -78,6 +78,7 @@ Status: built on the `tvos-spike` branch (see "Build status" at the end). Screen
 - **Displays** use the same JSON API and WebSocket snapshots as the guest page, plus a few display endpoints:
   - `POST /api/display/hello`: a heartbeat, so the hub can list connected displays.
   - `POST /api/display/playback`: allowed while *Playback controls on displays* is on.
+- **Up next** has 100 live songs (in snapshots: draggable, removable). Below them the same list carries on, read-only (no handle or remove, nothing can be dropped there), with the rest of the base playlist's current cycle, from `GET /api/upcoming?offset=&limit=` (compact rows, 100 at most per page). The web page and iPads (hub or display) load 50 more as the end comes into view, and fetch the rows shown again when the queue moves on, so a song simply gains its handle when it becomes live. The Apple TV shows only the rows that fit. The web page only rebuilds rows that changed, animates only rows on screen, and loads row artwork lazily.
 - **Hosts on the web** get new endpoints, all requiring the host key:
   - `GET /api/host/playlists`: the hub's library.
   - `POST /api/host/playlist`: load a base playlist.

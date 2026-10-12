@@ -17,9 +17,9 @@ struct TVRootView: View {
                     .transition(.opacity)
             case .hub:
                 if model.hostJoined {
-                    TVPartyView().remoteTarget().transition(.opacity)
+                    TVPartyView().transition(.opacity)
                 } else {
-                    TVStartView().remoteTarget().transition(.opacity)
+                    TVStartView().transition(.opacity)
                 }
             case .display:
                 TVPartyView()
@@ -27,7 +27,6 @@ struct TVRootView: View {
                     .blur(radius: model.isWaitingForHub ? 28 : 0)
                     .overlay { TVConnectionOverlay() }
                     .animation(.easeInOut(duration: 0.4), value: model.isWaitingForHub)
-                    .remoteTarget()
                     .transition(.opacity)
             }
         }
@@ -58,9 +57,10 @@ struct TVRootView: View {
 }
 
 private extension View {
-    /// The remote's Menu and Play/Pause only reach a view that has focus. The party and start
-    /// screens have nothing else to focus; without this, Menu leaves the app.
-    func remoteTarget() -> some View {
+    /// The remote's Menu and Play/Pause only reach the app while something has focus, and the
+    /// party and start screens have nothing to focus; without this, Menu leaves the app. Put it on
+    /// one piece of text per screen: it looks the same, it just holds focus.
+    func holdsRemoteFocus() -> some View {
         focusable().focusEffectDisabled()
     }
 }
@@ -224,6 +224,7 @@ struct TVStartView: View {
                     .frame(height: 70)
                 Text("Scan to host")
                     .font(.system(size: 76, weight: .bold))
+                    .holdsRemoteFocus()
                 Text("Your phone becomes the remote: pick a playlist, play, pause, skip and reorder. iPads with Canopy Music on this Wi\u{2011}Fi can show this zone too.")
                     .font(.system(size: 34))
                     .foregroundStyle(.white.opacity(0.7))
@@ -298,6 +299,7 @@ struct TVPartyView: View {
                 VStack(alignment: .leading, spacing: 18) {
                     Text("Up next")
                         .font(.system(size: 44, weight: .bold))
+                        .holdsRemoteFocus()
                     // Takes whatever height is left above the join card and fades out at the bottom.
                     GeometryReader { geo in
                         VStack(spacing: 0) {

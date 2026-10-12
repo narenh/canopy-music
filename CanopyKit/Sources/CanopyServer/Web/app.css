@@ -41,7 +41,12 @@ main, .sheet {
 .top { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 14px; }
 .brand { min-width: 0; }
 .brand-logo { display: block; height: 30px; width: auto; margin-bottom: 2px; }
-.brand-sub { display: block; font-size: 12px; color: var(--text-2); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.brand-line { display: flex; align-items: center; gap: 6px; margin-top: 3px; font-size: 12px; color: var(--text-2); min-width: 0; }
+.brand-line[hidden] { display: none; }
+.brand-line > span:last-child { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.brand-icon, .brand-icon svg { flex: none; width: 14px; height: 14px; display: grid; place-items: center; }
+.brand-icon svg { stroke-width: 1.8; }
+.brand-icon.note { fill: currentColor; stroke: none; }
 .chips { display: flex; flex: none; max-width: 60%; border-radius: 999px; background: var(--surface); overflow: hidden; }
 .chips .name-chip { background: none; max-width: none; min-width: 0; }
 .mode-chip svg, .name-chip svg { width: 14px; height: 14px; stroke-width: 2.2; }

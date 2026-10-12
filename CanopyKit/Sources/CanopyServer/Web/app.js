@@ -22,10 +22,11 @@
   // can open; if this phone can also reach the friendly address (music.local), continue there
   // before saving anything, so everything lives under that one address.
   await (async () => {
-    let address = null;
-    try { address = (await (await fetch("/api/state")).json()).address; } catch {}
-    if (!address || address === location.host) return;
-    if (!(await reachable(address))) return;
+    let address = null, lan = null;
+    try { ({ address, lanAddress: lan } = await (await fetch("/api/state")).json()); } catch {}
+    if (!address || !lan || address === location.host) return;
+    // Only if that name reaches this same hub: another zone can answer at music.local too.
+    if (!(await reachable(address, lan))) return;
     const next = new URLSearchParams(params);
     const existing = store.get("canopy.clientId");
     if (existing) next.set("cid", existing);
@@ -34,13 +35,15 @@
     await new Promise(() => {}); // stop here while the browser navigates
   })();
 
-  function reachable(host) {
+  // An image loads across addresses where fetch can't; the hub only serves this one if it's the
+  // hub at `lan`.
+  function reachable(host, lan) {
     return new Promise((resolve) => {
       const image = new Image();
       const timer = setTimeout(() => resolve(false), 1500);
       image.onload = () => { clearTimeout(timer); resolve(true); };
       image.onerror = () => { clearTimeout(timer); resolve(false); };
-      image.src = `http://${host}/icon.png?${Date.now()}`;
+      image.src = `http://${host}/api/same.png?lan=${encodeURIComponent(lan)}&t=${Date.now()}`;
     });
   }
 
@@ -165,7 +168,11 @@
     const playing = !!(current && snap.playback.isPlaying);
     $("t-play").innerHTML = playing ? icons.pause : icons.play;
     $("t-play").setAttribute("aria-label", playing ? "Pause" : "Play");
-    $("playlist-name").textContent = snap.playlistName ? `Playing from ${snap.playlistName}` : "";
+    $("zone-device").innerHTML = snap.hubKind === "tv" ? icons.tv : icons.ipad;
+    $("zone-name").textContent = snap.zoneName || "";
+    $("zone-line").hidden = !snap.zoneName;
+    $("playlist-name").textContent = snap.playlistName || "";
+    $("playlist-line").hidden = !snap.playlistName;
     $("now-status").textContent = !current ? "Waiting for music" : snap.playback.isPlaying ? "Now playing" : "Paused";
     $("now-title").textContent = current ? current.track.title : "Nothing yet";
     $("now-artist").textContent = current ? current.track.artist : "";
@@ -185,7 +192,12 @@
     return { text: r.origin === "ipad" ? "iPad" : "Guest", mine: false };
   }
 
+  /// "the Apple TV" or "the iPad": whichever this zone plays from.
+  function hubName() { return snap && snap.hubKind === "tv" ? "the Apple TV" : "the iPad"; }
+
   const icons = {
+    ipad: '<svg viewBox="0 0 24 24" aria-hidden="true"><rect x="2.5" y="5" width="19" height="14" rx="2.5"/></svg>',
+    tv: '<svg viewBox="0 0 24 24" aria-hidden="true"><rect x="2.5" y="4" width="19" height="13" rx="2"/><path d="M8 20.5h8"/></svg>',
     grip: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9 6h.01M15 6h.01M9 12h.01M15 12h.01M9 18h.01M15 18h.01" stroke-width="3"/></svg>',
     x: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6l12 12M18 6 6 18"/></svg>',
     lock: '<svg viewBox="0 0 24 24" aria-hidden="true"><rect x="5" y="11" width="14" height="10" rx="2"/><path d="M8 11V7a4 4 0 0 1 8 0v4"/></svg>',
@@ -786,7 +798,7 @@
     if (!button || !hosting()) return;
     let action = button.dataset.action;
     if (action === "toggle") action = snap && snap.playback.isPlaying ? "pause" : "play";
-    api("/api/host/playback", { key: hostKey, action }).catch(() => toast("Couldn't reach the iPad"));
+    api("/api/host/playback", { key: hostKey, action }).catch(() => toast(`Couldn't reach ${hubName()}`));
   });
   function askName() {
     $("name-input").value = myName || "";

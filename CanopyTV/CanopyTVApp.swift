@@ -149,16 +149,14 @@ final class TVModel {
         serverTask = task
         guard let ip = LocalNetwork.lanAddress() else { return }
         guestURL = server.url(host: ip)
-        // Another zone may already be music.local; follow the name we end up with.
-        hostname.onRename = { [weak self] name in
+        // Hand out the .local name only once it's confirmed ours: another zone may already be
+        // music.local, and this follows the name we end up with.
+        hostname.onConfirmed = { [weak self] name in
             guard let self, let server = self.server else { return }
             self.friendlyURL = server.url(host: name)
             self.session.guestAddress = name + (server.port == 80 ? "" : ":\(server.port)")
         }
-        if hostname.register(address: ip) {
-            friendlyURL = server.url(host: hostname.hostname)
-            session.guestAddress = hostname.hostname + (server.port == 80 ? "" : ":\(server.port)")
-        }
+        hostname.register(address: ip)
         session.lanAddress = ip + (server.port == 80 ? "" : ":\(server.port)")
         hostURL = guestURL.flatMap { URL(string: "\($0.absoluteString)/?host=\(hostKey)") }
         #if DEBUG

@@ -75,6 +75,12 @@ public final class PartyServer: Sendable {
         await server.appendRoute("GET /icon.png", to: StaticFile("icon.png", type: "image/png"))
         await server.appendRoute("GET /favicon.png", to: StaticFile("favicon.png", type: "image/png"))
         await server.appendRoute("GET /favicon.ico", to: StaticFile("favicon.png", type: "image/png"))
+        // The page's redirect check: an image only if this is the hub at `lan`, so a friendly name
+        // that reaches a different zone (both answer as Canopy Music) doesn't count.
+        await server.appendRoute("GET /api/same.png") { request in
+            guard let lan = request.query["lan"], await session.lanAddress == lan else { return HTTPResponse(statusCode: .notFound) }
+            return HTTPResponse(statusCode: .ok, headers: [.contentType: "image/png"], body: Self.pixelPNG)
+        }
 
         await server.appendRoute("GET /api/state") { _ in
             try .json(await session.snapshot())
@@ -286,6 +292,9 @@ extension PartyServer {
     }
 
     /// A QR code as a crisp PNG (each module scaled up without smoothing).
+    /// A 1×1 transparent PNG.
+    static let pixelPNG = Data(base64Encoded: "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNkYAAAAAYAAjCB0C8AAAAASUVORK5CYII=")!
+
     static func qrPNG(_ payload: String) -> Data? {
         let filter = CIFilter.qrCodeGenerator()
         filter.message = Data(payload.utf8)

@@ -6,12 +6,15 @@ import Foundation
 /// why the QR code always uses the raw IP.
 ///
 /// Several zones can share a network, so if the name is taken this tries once more (a just-closed
-/// copy of the app can hold it for a few seconds), then moves on to `name-2`, `name-3`… and calls
-/// `onRename` so the app can update what it shows.
+/// copy of the app can hold it for a few seconds), then moves on to `name-2`, `name-3`….
+///
+/// Only hand the name out once `onConfirmed` reports it: until mDNS has checked, another device
+/// may own it, and guests sent there reach the wrong zone.
 public final class FriendlyHostname: @unchecked Sendable {
     public private(set) var hostname: String
-    /// Called on the main queue with the new hostname after a clash moved it.
-    public var onRename: (@MainActor @Sendable (String) -> Void)?
+    /// Called on the main queue with the hostname once it's confirmed ours (again after a clash
+    /// moves it to `name-2` and so on).
+    public var onConfirmed: (@MainActor @Sendable (String) -> Void)?
 
     private let baseName: String
     private var suffix = 1
@@ -45,9 +48,13 @@ public final class FriendlyHostname: @unchecked Sendable {
                 hostname + ".", UInt16(kDNSServiceType_A), UInt16(kDNSServiceClass_IN),
                 UInt16(bytes.count), bytes.baseAddress, 120,
                 { _, _, _, error, context in
-                    guard error == kDNSServiceErr_NameConflict, let context else { return }
+                    guard let context else { return }
                     let owner = Unmanaged<FriendlyHostname>.fromOpaque(context).takeUnretainedValue()
-                    DispatchQueue.main.async { owner.nameTaken() }
+                    if error == kDNSServiceErr_NoError {
+                        DispatchQueue.main.async { owner.nameConfirmed() }
+                    } else if error == kDNSServiceErr_NameConflict {
+                        DispatchQueue.main.async { owner.nameTaken() }
+                    }
                 },
                 Unmanaged.passUnretained(self).toOpaque()
             )
@@ -60,6 +67,14 @@ public final class FriendlyHostname: @unchecked Sendable {
         self.connection = connection
         self.record = record
         return true
+    }
+
+    private func nameConfirmed() {
+        guard connection != nil else { return }
+        let name = hostname
+        if let onConfirmed {
+            MainActor.assumeIsolated { onConfirmed(name) }
+        }
     }
 
     private func nameTaken() {
@@ -76,10 +91,6 @@ public final class FriendlyHostname: @unchecked Sendable {
         suffix += 1
         hostname = "\(baseName)-\(suffix).local"
         register(address: address)
-        let name = hostname
-        if let onRename {
-            MainActor.assumeIsolated { onRename(name) }
-        }
     }
 
     public func unregister() {

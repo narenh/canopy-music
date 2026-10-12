@@ -678,9 +678,10 @@ final class AppModel {
         refreshAddresses()
     }
 
-    /// Another zone already had our `.local` name, so we moved to `name-2.local` etc.
+    /// The `.local` name is handed out only once mDNS confirms it's ours (it may have moved to
+    /// `name-2.local` if another zone has it).
     private func watchHostnameRenames() {
-        hostname.onRename = { [weak self] name in
+        hostname.onConfirmed = { [weak self] name in
             guard let self, let server = self.server else { return }
             self.localFriendlyURL = server.url(host: name)
             self.session.guestAddress = name + (server.port == 80 ? "" : ":\(server.port)")
@@ -718,8 +719,10 @@ final class AppModel {
             return
         }
         localGuestURL = server.url(host: ip)
-        localFriendlyURL = hostname.register(address: ip) ? server.url(host: hostname.hostname) : nil
-        session.guestAddress = localFriendlyURL.flatMap { url in url.host().map { $0 + (url.port.map { ":\($0)" } ?? "") } }
+        // Set again by `onConfirmed` once the name is checked.
+        localFriendlyURL = nil
+        session.guestAddress = nil
+        hostname.register(address: ip)
         session.lanAddress = ip + (server.port == 80 ? "" : ":\(server.port)")
         advertiseZone()
     }

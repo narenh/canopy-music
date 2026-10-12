@@ -146,6 +146,11 @@
     <p class="settings-head">Displays</p>
     <ul class="settings-displays" id="settings-display-list"></ul>
     <label class="setting-row"><span>Playback controls on displays</span><input type="checkbox" class="switch" id="settings-displays"></label>
+    <!-- Apple TV hubs only. -->
+    <div id="settings-screen" hidden>
+      <p class="settings-head">Screen</p>
+      <label class="setting-row"><span>Allow screensaver while playing</span><input type="checkbox" class="switch" id="settings-screensaver"></label>
+    </div>
     <p class="settings-head">Host Control</p>
     <div class="setting-row"><span class="setting-label" id="settings-hosts"></span><button type="button" class="pill-btn" id="settings-invite">Add another host</button></div>
     <button type="button" class="danger-btn" id="settings-forget">Forget other hosts</button>

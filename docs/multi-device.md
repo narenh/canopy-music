@@ -61,7 +61,7 @@ Status: built on the `tvos-spike` branch (see "Build status" at the end). Screen
 | List of connected displays | iPad host mode, web | web |
 | **Other** | | |
 | Lock the party screen | press and hold the logo (+ Guided Access) | — |
-| Keeps the screen awake | ✓ | ✓ |
+| Keeps the screen awake | ✓ (always) | while music plays (hub and TV displays); the screensaver may come on when paused, and with *Allow screensaver while playing* (web, off by default) during music too, for OLED screens |
 
 ## Launch flow
 

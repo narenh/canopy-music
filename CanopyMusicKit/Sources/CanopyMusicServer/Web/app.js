@@ -1170,6 +1170,9 @@
     $("settings-queue").checked = snap.canQueue !== false;
     $("settings-reorder").checked = snap.canReorder !== false;
     $("settings-displays").checked = snap.displaysCanControl !== false;
+    // Apple TV hubs only (an iPad never sleeps).
+    $("settings-screen").hidden = snap.hubKind !== "tv";
+    $("settings-screensaver").checked = snap.screensaverWhilePlaying === true;
     const hosts = snap.hostPhones || 0;
     $("settings-hosts").textContent = hosts === 1 ? "1 phone" : `${hosts} phones`;
     $("settings-forget").hidden = hosts < 2;
@@ -1241,7 +1244,8 @@
   }
 
   // Switches apply as they're flipped, and flip back if the hub didn't take it.
-  for (const [id, field] of [["settings-queue", "phonesCanQueue"], ["settings-reorder", "phonesCanReorder"], ["settings-displays", "displaysCanControl"]]) {
+  for (const [id, field] of [["settings-queue", "phonesCanQueue"], ["settings-reorder", "phonesCanReorder"], ["settings-displays", "displaysCanControl"],
+    ["settings-screensaver", "screensaverWhilePlaying"]]) {
     $(id).addEventListener("change", async (event) => {
       const on = event.target.checked;
       if (!(await saveSetting({ [field]: on }))) event.target.checked = !on;

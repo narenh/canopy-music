@@ -57,6 +57,9 @@ public struct PartySnapshot: Codable, Equatable, Sendable {
     public var skippedOnLoad: Int?
     /// The first few of those songs' titles.
     public var skippedTitles: [String]?
+    /// Apple TV hubs: whether the screensaver may come on while music plays too (it always may
+    /// while it's paused), for the hub and TV displays. nil from iPads.
+    public var screensaverWhilePlaying: Bool?
 }
 
 /// Owns the queue and keeps the player in step with it. Both the iPad UI and the phone server
@@ -84,6 +87,22 @@ public final class PartySession {
     public var displaysCanControl = true {
         didSet { if displaysCanControl != oldValue, remote == nil { broadcast() } }
     }
+    /// Apple TV hubs: whether the screensaver may come on while music plays too, to protect OLED
+    /// screens (a hub setting, off by default). It always may while the music is paused.
+    public var screensaverWhilePlaying = false {
+        didSet { if screensaverWhilePlaying != oldValue, remote == nil { broadcast() } }
+    }
+
+    /// Whether an Apple TV (hub or display) keeps its screen awake: only while music plays, and
+    /// not then either if the hub allows the screensaver during music. iPads always stay awake.
+    public nonisolated static func tvKeepsScreenAwake(isPlaying: Bool, screensaverWhilePlaying: Bool) -> Bool {
+        isPlaying && !screensaverWhilePlaying
+    }
+
+    public var tvKeepsScreenAwake: Bool {
+        Self.tvKeepsScreenAwake(isPlaying: isPlaying, screensaverWhilePlaying: screensaverWhilePlaying)
+    }
+
     /// Whether guests can add songs from their phones (a hub setting, on by default). Hosts and
     /// displays always can.
     public var phonesCanQueue = true {
@@ -178,6 +197,7 @@ public final class PartySession {
         phonesCanReorder = snapshot.canReorder
         displaysCanControl = snapshot.displaysCanControl ?? true
         phonesCanQueue = snapshot.canQueue ?? true
+        screensaverWhilePlaying = snapshot.screensaverWhilePlaying ?? false
         guestAddress = snapshot.address
         lanAddress = snapshot.lanAddress
     }
@@ -201,8 +221,10 @@ public final class PartySession {
     /// Applies settings sent by a host from the web page. (The iPad's unlock PIN isn't one: it's
     /// set only on the iPad.)
     public func applyHostSettings(zoneName: String?, phonesCanQueue: Bool? = nil, phonesCanReorder: Bool?,
-                                  displaysCanControl: Bool?, wifi: WifiDetails? = nil) {
+                                  displaysCanControl: Bool?, wifi: WifiDetails? = nil,
+                                  screensaverWhilePlaying: Bool? = nil) {
         if let wifi { self.wifi = wifi }
+        if let screensaverWhilePlaying, hubKind == .tv { self.screensaverWhilePlaying = screensaverWhilePlaying }
         if let zoneName, !zoneName.isEmpty { self.zoneName = zoneName }
         if let phonesCanQueue { self.phonesCanQueue = phonesCanQueue }
         if let phonesCanReorder { self.phonesCanReorder = phonesCanReorder }
@@ -514,7 +536,8 @@ public final class PartySession {
             hostPhones: hostPhoneCount,
             hubID: hubID,
             skippedOnLoad: skippedOnLoad.isEmpty ? nil : skippedOnLoad.count,
-            skippedTitles: skippedOnLoad.isEmpty ? nil : skippedOnLoad.prefix(Self.skippedTitlesInSnapshots).map(\.title)
+            skippedTitles: skippedOnLoad.isEmpty ? nil : skippedOnLoad.prefix(Self.skippedTitlesInSnapshots).map(\.title),
+            screensaverWhilePlaying: hubKind == .tv ? screensaverWhilePlaying : nil
         )
     }
 

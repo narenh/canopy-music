@@ -21,6 +21,11 @@ struct TVRootView: View {
         #endif
     }
 
+    /// At a zone (hub, or display following its hub's setting): see `PartySession.tvKeepsScreenAwake`.
+    private var keepsScreenAwake: Bool {
+        model.role != .choosing && model.session.tvKeepsScreenAwake
+    }
+
     var body: some View {
         let current = model.session.state.current
         // The same takeover as the iPad's, as a hub or a display (a display's time comes from
@@ -50,8 +55,12 @@ struct TVRootView: View {
         }
         .animation(.easeInOut(duration: 1.2), value: current?.id)
         .animation(.easeInOut(duration: 0.5), value: model.role)
-        // A zone (hub or display) keeps the screen awake; the zone list doesn't.
-        .onChange(of: model.role, initial: true) { UIApplication.shared.isIdleTimerDisabled = model.role != .choosing }
+        // A zone (hub or display) keeps the screen awake while music plays, unless its hub allows
+        // the screensaver then too; paused, and at the zone list, tvOS's screensaver takes over.
+        .onChange(of: keepsScreenAwake, initial: true) { _, awake in
+            UIApplication.shared.isIdleTimerDisabled = awake
+            model.debugLog("idle timer \(awake ? "off: stays awake" : "on: screensaver allowed")")
+        }
         .onChange(of: current?.id) { model.advertise() }
         // A hub's zone is announced once a host has picked the music.
         .onChange(of: model.session.isWaitingForSetup) { model.advertise() }

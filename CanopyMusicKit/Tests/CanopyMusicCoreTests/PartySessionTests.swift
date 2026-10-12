@@ -56,6 +56,31 @@ let base = PlaylistSummary(id: "p", name: "Base", kind: .library)
         #expect(!session.snapshot().canReorder)
     }
 
+    /// An Apple TV stays awake only while music plays, and not then either with the setting on.
+    @Test func aTVKeepsItsScreenAwakeOnlyWhilePlaying() {
+        #expect(PartySession.tvKeepsScreenAwake(isPlaying: true, screensaverWhilePlaying: false))
+        #expect(!PartySession.tvKeepsScreenAwake(isPlaying: false, screensaverWhilePlaying: false))
+        #expect(!PartySession.tvKeepsScreenAwake(isPlaying: true, screensaverWhilePlaying: true))
+        #expect(!PartySession.tvKeepsScreenAwake(isPlaying: false, screensaverWhilePlaying: true))
+    }
+
+    /// "Screensaver while playing" is an Apple TV hub setting, off by default, sent to displays.
+    @Test func screensaverWhilePlayingIsATVSetting() async throws {
+        let tv = PartySession(catalog: StubCatalog(ids: ["a"]), engine: FakeEngine())
+        tv.configureHub(kind: .tv, zoneName: "Den", serviceName: "Demo")
+        #expect(tv.snapshot().screensaverWhilePlaying == false)
+        tv.applyHostSettings(zoneName: nil, phonesCanReorder: nil, displaysCanControl: nil, screensaverWhilePlaying: true)
+        #expect(tv.screensaverWhilePlaying)
+        let sent = try JSONDecoder().decode(PartySnapshot.self, from: JSONEncoder().encode(tv.snapshot()))
+        #expect(sent.screensaverWhilePlaying == true)
+
+        let ipad = PartySession(catalog: StubCatalog(ids: ["a"]), engine: FakeEngine())
+        ipad.configureHub(kind: .ipad, zoneName: "Kitchen", serviceName: "Demo")
+        ipad.applyHostSettings(zoneName: nil, phonesCanReorder: nil, displaysCanControl: nil, screensaverWhilePlaying: true)
+        #expect(!ipad.screensaverWhilePlaying)
+        #expect(ipad.snapshot().screensaverWhilePlaying == nil)
+    }
+
     @Test func loadingAPlaylistDoesNotPlay() async throws {
         let engine = FakeEngine()
         let session = PartySession(catalog: StubCatalog(ids: ["a", "b", "c"]), engine: engine)

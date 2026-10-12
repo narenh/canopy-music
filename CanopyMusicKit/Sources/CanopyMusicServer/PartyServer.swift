@@ -194,7 +194,8 @@ public final class PartyServer: Sendable {
                 phonesCanQueue: body.phonesCanQueue,
                 phonesCanReorder: body.phonesCanReorder,
                 displaysCanControl: body.displaysCanControl,
-                wifi: body.wifi.map { WifiDetails(ssid: String($0.ssid.prefix(32)), password: String($0.password.prefix(63)), simpleQR: $0.simpleQR) }
+                wifi: body.wifi.map { WifiDetails(ssid: String($0.ssid.prefix(32)), password: String($0.password.prefix(63)), simpleQR: $0.simpleQR) },
+                screensaverWhilePlaying: body.screensaverWhilePlaying
             )
             return HTTPResponse(statusCode: .ok)
         }
@@ -318,6 +319,8 @@ struct SettingsBody: Decodable {
     var phonesCanQueue: Bool?
     var phonesCanReorder: Bool?
     var displaysCanControl: Bool?
+    /// Apple TV hubs only.
+    var screensaverWhilePlaying: Bool?
 }
 
 struct AddReply: Encodable {

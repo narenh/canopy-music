@@ -177,6 +177,7 @@ final class TVModel {
         session.phonesCanQueue = defaults.object(forKey: "phoneQueueEnabled") as? Bool ?? true
         session.phonesCanReorder = defaults.object(forKey: "phoneReorderEnabled") as? Bool ?? true
         session.displaysCanControl = defaults.object(forKey: "displaysCanControl") as? Bool ?? true
+        session.screensaverWhilePlaying = defaults.bool(forKey: "screensaverWhilePlaying")
         session.wifi = WifiDetails(ssid: defaults.string(forKey: "wifiSSID") ?? "", password: defaults.string(forKey: "wifiPassword") ?? "",
                                    simpleQR: defaults.bool(forKey: "wifiSimpleQR"))
         hostControl.attach(to: session) { [weak self] _ in
@@ -189,6 +190,7 @@ final class TVModel {
             self.defaults.set(self.session.phonesCanQueue, forKey: "phoneQueueEnabled")
             self.defaults.set(self.session.phonesCanReorder, forKey: "phoneReorderEnabled")
             self.defaults.set(self.session.displaysCanControl, forKey: "displaysCanControl")
+            self.defaults.set(self.session.screensaverWhilePlaying, forKey: "screensaverWhilePlaying")
             self.defaults.set(self.session.wifi.ssid, forKey: "wifiSSID")
             self.defaults.set(self.session.wifi.password, forKey: "wifiPassword")
             self.defaults.set(self.session.wifi.simpleQR, forKey: "wifiSimpleQR")

@@ -40,7 +40,7 @@ Status: built on the `tvos-spike` branch (see "Build status" at the end). Screen
 | Base playlist | iPad, web | web |
 | Unlock PIN | iPad settings (only on the iPad, not the web) | — |
 | `.local` address | follows the zone name | follows the zone name |
-| Stop the zone | iPad settings, web (both ask first) | Menu on the remote, web (web asks first) |
+| End the zone | iPad host mode (top, and in settings), web (both ask first) | Menu on the remote, web (web asks first) |
 | Resume after relaunch | Resume row | create again (the queue is restored) |
 | **Guests** | | |
 | Guest QR code on the party screen | ✓ | ✓ |
@@ -68,7 +68,7 @@ Status: built on the `tvos-spike` branch (see "Build status" at the end). Screen
 2. **Choosing a zone** opens it as a display, straight to the party screen. No PIN: a display can't do anything a guest's phone can't.
 3. **Create a new zone** makes this device the hub:
    - **iPad:** name the zone (defaults to the device name), set an optional host PIN ("Skip" allowed), then choose the service if one isn't set up yet, then host mode as today.
-   - **Apple TV:** straight to **Scan to host**. The first phone to scan gets Host Control and sets the zone up on the web page: name and base playlist. A TV hub has no settings screens; Menu only offers **Stop <zone>**. Apple Music only.
+   - **Apple TV:** straight to **Scan to host**. The first phone to scan gets Host Control and sets the zone up on the web page: name and base playlist. A TV hub has no settings screens; Menu only offers **End <zone>**. Apple Music only.
 
 ## Network
 
@@ -84,7 +84,7 @@ Status: built on the `tvos-spike` branch (see "Build status" at the end). Screen
   - `POST /api/host/playlist`: load a base playlist. Answers with how many of its songs were left out (not on the music service, e.g. iTunes Match uploads with no catalog match) and the first few titles. Snapshots carry the same (`skippedOnLoad`, `skippedTitles`) until another playlist loads: the iPad shows "3 songs aren't on Apple Music" under the base playlist (tap for the list), the web settings sheet shows it under Base playlist, and an Apple TV's host also gets it once as a toast. Debug builds' demo library has "Road trip", which leaves 4 out.
   - `POST /api/host/settings`: zone name, queue and reorder from phones, display controls, Wi‑Fi; any subset (the web sheet saves each change as it's made). Not the iPad's unlock PIN, which is set only on the iPad.
   - `GET /api/host/details`: the Wi‑Fi details and the connected displays. The Wi‑Fi password is never in the snapshots guests get.
-  - `POST /api/host/stop`: stops the zone (any hub). The page asks first.
+  - `POST /api/host/stop`: ends the zone (any hub). The page asks first.
   - `GET /api/host/invite.png`: the "Add another host" QR, rendered by the hub.
 - **Host keys are kept per hub:** snapshots carry the hub's device ID (`hubID`), and the page keeps one key per hub. A hub that refuses a key only drops its own, so a phone that's a host of two zones (or of a zone whose address another hub later takes) stays a host of both. Keys move along with the phone's ID and name when the page moves to the friendly address.
 - **If a hub disappears,** displays show "Lost connection to <zone>" and keep retrying. The queue is saved on the hub.

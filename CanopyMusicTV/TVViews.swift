@@ -50,7 +50,7 @@ struct TVRootView: View {
             if let current, easterEgg.matches(current.track) { await easterEgg.loadIfNeeded() }
         }
         // Menu: closes the takeover while it's showing (for this play, as press and hold does on
-        // the iPad); otherwise a hub can only stop its zone and a display can only leave.
+        // the iPad); otherwise a hub can only end its zone and a display can only leave.
         .onExitCommand(perform: model.role == .choosing ? nil : {
             if let (item, lines) = takeover, TakeoverView.isShowing(lines, at: model.session.engine.currentTime) {
                 easterEgg.dismissedItemID = item.id
@@ -61,7 +61,7 @@ struct TVRootView: View {
         .onPlayPauseCommand(perform: model.role == .choosing ? nil : { model.playPause() })
         .confirmationDialog("", isPresented: $confirming, titleVisibility: .hidden) {
             if model.role == .hub {
-                Button("Stop \(model.zoneName)", role: .destructive) { model.stopZone() }
+                Button("End \(model.zoneName)", role: .destructive) { model.stopZone() }
             } else {
                 Button("Leave \(model.shownZone?.name ?? "zone")", role: .destructive) { model.leave() }
             }

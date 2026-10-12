@@ -10,6 +10,7 @@ struct HostView: View {
     @State private var showSettings = false
     @State private var showSubscriptionOffer = false
     @State private var showSkipped = false
+    @State private var confirmingEnd = false
     @State private var scrollTarget: UUID?
 
     private var session: PartySession { model.session }
@@ -42,6 +43,7 @@ struct HostView: View {
         .onAppear {
             if ProcessInfo.processInfo.arguments.contains("-showSettings") { showSettings = true }
             if ProcessInfo.processInfo.arguments.contains("-showPicker") { showPicker = true }
+            if ProcessInfo.processInfo.arguments.contains("-confirmEnd") { confirmingEnd = true }
             if ProcessInfo.processInfo.arguments.contains("-showSkipped") {
                 Task { try? await Task.sleep(for: .seconds(2)); showSkipped = true }
             }
@@ -59,9 +61,19 @@ struct HostView: View {
     private var settings: some View {
         @Bindable var model = model
         return VStack(spacing: 0) {
-            HStack {
+            HStack(spacing: 12) {
                 LogoView(height: 36)
                 Spacer()
+                Button(role: .destructive) {
+                    confirmingEnd = true
+                } label: {
+                    Text("End \(model.zoneName)")
+                        .lineLimit(1)
+                }
+                .buttonStyle(.glass)
+                .tint(.red)
+                .foregroundStyle(.red)
+                .endZoneConfirmation(isPresented: $confirmingEnd)
                 Button {
                     showSettings = true
                 } label: {
@@ -344,7 +356,7 @@ private struct SettingsSheet: View {
     /// Edited locally and applied on return or when the sheet closes, so the zone (and its
     /// `.local` address) isn't re-announced on every keystroke.
     @State private var zoneNameDraft = ""
-    @State private var confirmingStop = false
+    @State private var confirmingEnd = false
 
     private func commitZoneName() {
         let name = zoneNameDraft.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -460,23 +472,14 @@ private struct SettingsSheet: View {
                 }
                 .listRowBackground(Color.white.opacity(0.08))
                 Section {
-                    Button("Stop This Zone", role: .destructive) { confirmingStop = true }
+                    Button("End \(model.zoneName)", role: .destructive) { confirmingEnd = true }
                 } footer: {
-                    Text("Stops the music and the phone page here and goes back to the zone list, where you can join another zone or resume this one.")
+                    Text("Ends the music and the phone page here and goes back to the zone list, where you can join another zone or resume this one.")
                 }
                 .listRowBackground(Color.white.opacity(0.08))
             }
             .scrollContentBackground(.hidden)
-            // Stopping is destructive (and hosts can do it from the web page too, which also asks).
-            .alert("Stop \(model.zoneName)?", isPresented: $confirmingStop) {
-                Button("Stop", role: .destructive) {
-                    dismiss()
-                    model.stopHosting()
-                }
-                Button("Cancel", role: .cancel) {}
-            } message: {
-                Text("The music stops for everyone, and this iPad goes back to the zone list.")
-            }
+            .endZoneConfirmation(isPresented: $confirmingEnd) { dismiss() }
             .onAppear { zoneNameDraft = model.zoneName }
             .onDisappear { commitZoneName() }
             .onChange(of: model.zoneName) { _, name in zoneNameDraft = name }
@@ -485,6 +488,34 @@ private struct SettingsSheet: View {
             .toolbar {
                 ToolbarItem(placement: .confirmationAction) { Button("Done") { dismiss() }.tint(.primary) }
             }
+        }
+    }
+}
+
+// MARK: - Ending the zone
+
+private extension View {
+    /// Asks before ending the zone (hosts can also end it from the web page, which asks too), then
+    /// goes back to the zone list. `before` runs first, e.g. to close a sheet.
+    func endZoneConfirmation(isPresented: Binding<Bool>, before: @escaping () -> Void = {}) -> some View {
+        modifier(EndZoneConfirmation(isPresented: isPresented, before: before))
+    }
+}
+
+private struct EndZoneConfirmation: ViewModifier {
+    @Environment(AppModel.self) private var model
+    @Binding var isPresented: Bool
+    let before: () -> Void
+
+    func body(content: Content) -> some View {
+        content.alert("End \(model.zoneName)?", isPresented: $isPresented) {
+            Button("End", role: .destructive) {
+                before()
+                model.stopHosting()
+            }
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text("The music stops for everyone, and this iPad goes back to the zone list.")
         }
     }
 }

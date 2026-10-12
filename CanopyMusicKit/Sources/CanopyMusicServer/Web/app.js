@@ -1096,7 +1096,7 @@
     const hosts = snap.hostPhones || 0;
     $("settings-hosts").textContent = hosts === 1 ? "1 phone" : `${hosts} phones`;
     $("settings-forget").hidden = hosts < 2;
-    $("settings-stop").textContent = `Stop ${snap.zoneName || "this zone"}`;
+    $("settings-stop").textContent = `End ${snap.zoneName || "this zone"}`;
     fillWifi();
   }
 
@@ -1202,9 +1202,9 @@
   });
   $("settings-stop").addEventListener("click", async () => {
     const device = snap.hubKind === "tv" ? "Apple TV" : "iPad";
-    if (!confirm(`Stop ${snap.zoneName || "this zone"}? The music stops for everyone, and the ${device} goes back to its zone list.`)) return;
+    if (!confirm(`End ${snap.zoneName || "this zone"}? The music stops for everyone, and the ${device} goes back to its zone list.`)) return;
     $("settings-modal").hidden = true;
-    try { await api("/api/host/stop", { key: hostKey }); } catch { toast("Couldn't stop the zone"); }
+    try { await api("/api/host/stop", { key: hostKey }); } catch { toast("Couldn't end the zone"); }
   });
 
   $("transport").addEventListener("click", (event) => {

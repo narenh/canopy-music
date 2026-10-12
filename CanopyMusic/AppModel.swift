@@ -197,7 +197,7 @@ final class AppModel {
         #if DEBUG
         let debugFlags = ["-autoParty", "-autoSearch", "-autoLoad", "-autoResume", "-autoPrevious", "-autoStress", "-showSettings",
                           "-showPicker", "-appleMusicState", "-qrGallery", "-backgroundFor", "-screenshotParty", "-onboarding",
-                          "-onboardingSpotify", "-onboardingNetwork", "-easterEggPreview", "-diagnoseMusicKit", "-benchAppleMusic", "-autoLoadPlaylist"]
+                          "-onboardingSpotify", "-onboardingNetwork", "-easterEggPreview", "-diagnoseMusicKit", "-benchAppleMusic", "-autoLoadPlaylist", "-confirmEnd"]
         if ProcessInfo.processInfo.arguments.contains(where: debugFlags.contains) { role = .hub }
         #endif
         zoneRole = role
@@ -589,7 +589,7 @@ final class AppModel {
             if wifi.password != self.wifiPassword { self.wifiPassword = wifi.password }
             if wifi.simpleQR != self.wifiSimpleQR { self.wifiSimpleQR = wifi.simpleQR }
         }
-        // A host stopped the zone from the web page (it asked them first): as Stop This Zone does here.
+        // A host stopped the zone from the web page (it asked them first): as ending it here does.
         session.onStopRequested = { [weak self] in self?.stopHosting() }
     }
 

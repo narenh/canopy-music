@@ -202,8 +202,43 @@ html.sheet-open, html.sheet-open body { overflow: hidden; }
 .playlist-row .row-sub { font-size: 13px; color: var(--text-2); }
 .playlist-row.selected { background: var(--surface-2); }
 .playlist-row .check { margin-left: auto; color: var(--accent); }
-.primary-btn.wide { width: 100%; padding: 14px; font-size: 16px; position: sticky; bottom: calc(env(safe-area-inset-bottom) + 12px); }
-.primary-btn:disabled { opacity: .45; }
+.primary-btn.wide { width: 100%; padding: 14px; font-size: 16px; display: flex; align-items: center; justify-content: center; gap: 10px; }
+/* Solid even when disabled, so it reads clearly. */
+.primary-btn:disabled { background: var(--surface-2); color: var(--text-2); }
+/* Picker sheets: header, then the list (the only part that scrolls), then a footer of its own.
+   Sized to the visible viewport (--vvh, set from visualViewport) so the keyboard doesn't cover it. */
+.sheet.picker-sheet {
+  overflow: hidden; display: flex; flex-direction: column; padding-bottom: 0;
+  top: var(--vvt, 0px); bottom: auto; height: 100vh; height: 100dvh; height: var(--vvh, 100dvh);
+}
+.sheet.picker-sheet[hidden] { display: none; }
+.picker-head { flex: none; }
+.picker-head .search-bar { position: static; }
+.picker-note { margin: 10px 2px 4px; }
+.picker-list {
+  flex: 1 1 auto; min-height: 0; overflow-y: auto; -webkit-overflow-scrolling: touch; overscroll-behavior: contain;
+  margin: 0 -16px; padding: 4px 16px 12px;
+}
+.picker-list:last-child { padding-bottom: calc(env(safe-area-inset-bottom) + 16px); }
+.picker-foot {
+  flex: none; margin: 0 -16px; padding: 12px 16px calc(env(safe-area-inset-bottom) + 12px);
+  background: var(--base); border-top: 1px solid var(--line);
+}
+.picker-sheet.busy .playlist-row { pointer-events: none; }
+.picker-sheet.busy .playlist-row:not(.loading):not(.selected) { opacity: .5; }
+.playlist-row .spinner { margin-left: auto; }
+.spinner {
+  flex: none; width: 18px; height: 18px; border-radius: 50%;
+  border: 2px solid currentColor; border-right-color: transparent; animation: spin .8s linear infinite;
+}
+.spinner[hidden] { display: none; }
+@keyframes spin { to { transform: rotate(360deg); } }
+.empty .spinner { display: block; margin: 0 auto 10px; color: var(--text-2); }
+.card-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.card-head h2 { margin: 0; }
+.close-btn { flex: none; width: 44px; height: 44px; margin: -8px -10px -8px 0; display: grid; place-items: center; color: var(--text-2); }
+.close-btn span { width: 30px; height: 30px; border-radius: 50%; display: grid; place-items: center; background: var(--surface-2); }
+.close-btn svg { width: 16px; height: 16px; stroke-width: 2.2; }
 .setting-row { display: flex; justify-content: space-between; align-items: center; gap: 12px; padding: 13px 2px; border-bottom: 1px solid var(--line); font-size: 15px; }
 .switch, .modal-card input.switch { appearance: none; width: 46px; height: 28px; padding: 0; border-radius: 999px; background: var(--surface-2); position: relative; flex: none; transition: background .2s; margin: 0; }
 .switch::after { content: ""; position: absolute; top: 3px; left: 3px; width: 22px; height: 22px; border-radius: 50%; background: #fff; transition: transform .2s var(--ease); }

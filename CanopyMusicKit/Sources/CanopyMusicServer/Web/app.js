@@ -695,6 +695,18 @@
   const syncPageLock = () => document.documentElement.classList.toggle("sheet-open", sheets.some((sheet) => !sheet.hidden));
   const sheetWatcher = new MutationObserver(syncPageLock);
   for (const sheet of sheets) sheetWatcher.observe(sheet, { attributes: true, attributeFilter: ["hidden"] });
+  // Picker sheets fit the part of the screen that's visible, above the keyboard when it's up
+  // (iOS Safari then also pans the page, by offsetTop).
+  if (window.visualViewport) {
+    const fitViewport = () => {
+      const root = document.documentElement.style;
+      root.setProperty("--vvh", `${Math.round(visualViewport.height)}px`);
+      root.setProperty("--vvt", `${Math.max(0, Math.round(visualViewport.offsetTop))}px`);
+    };
+    visualViewport.addEventListener("resize", fitViewport);
+    visualViewport.addEventListener("scroll", fitViewport);
+    fitViewport();
+  }
 
   // MARK: Search
 
@@ -887,6 +899,7 @@
   let playlistsCache = null;
   let setupPick = null;
   let setupDismissed = false;
+  let setupStarting = false;
   const keyQuery = () => `key=${encodeURIComponent(hostKey || "")}`;
 
   function renderHost() {
@@ -896,7 +909,8 @@
     // A TV zone has no screens of its own for setup: the first host does it here.
     const needsSetup = snap.hubKind === "tv" && !snap.playlistName && !setupDismissed;
     if (needsSetup && $("setup").hidden) openSetup();
-    if (!needsSetup) $("setup").hidden = true;
+    // Kept open while starting, until the hub answers.
+    if (!needsSetup && !setupStarting) $("setup").hidden = true;
   }
 
   async function loadPlaylists() {
@@ -934,7 +948,11 @@
     const catalogList = $(`${prefix}-catalog`), catalogHead = $(`${prefix}-catalog-head`);
     let rows = [], loaded = false, timer = null, generation = 0;
 
-    function showEmpty(text) { empty.hidden = !text; empty.textContent = text || ""; }
+    function showEmpty(text, spinning = false) {
+      empty.hidden = !text;
+      empty.textContent = text || "";
+      if (spinning) { const s = document.createElement("span"); s.className = "spinner"; empty.prepend(s); }
+    }
 
     function filter() {
       const term = fold(search.value.trim());
@@ -966,8 +984,8 @@
     }
     search.addEventListener("input", () => {
       filter();
-      // Back to the first match (the picker sheet scrolls as a whole under its search field).
-      if (prefix === "playlists") $("playlists").scrollTop = 0;
+      // Back to the first match.
+      $(`${prefix}-scroll`).scrollTop = 0;
     });
 
     return {
@@ -975,7 +993,8 @@
         search.value = "";
         catalogList.innerHTML = "";
         catalogHead.hidden = true;
-        if (!loaded) showEmpty("Loading playlists…");
+        $(`${prefix}-scroll`).scrollTop = 0;
+        if (!loaded) showEmpty("Loading playlists…", true);
         try {
           const playlists = await loadPlaylists();
           if (!loaded) {
@@ -1026,16 +1045,30 @@
   }
 
   // Changing the base playlist from the host page (on top of the settings sheet).
+  // The sheet stays open, with a spinner on the chosen row, until the hub has loaded it (a big
+  // library playlist can take several seconds).
   const changePicker = playlistPicker("playlists", "playlist-list", "playlists-empty", async (p) => {
+    const sheet = $("playlists");
+    if (sheet.classList.contains("busy")) return;
     if (!confirm(`Switch to "${p.name}"? The queue starts over and requests are cleared.`)) return;
-    $("playlists").hidden = true;
+    const row = [...sheet.querySelectorAll(".playlist-row")].find((li) => li.dataset.id === p.id && !li.hidden);
+    const spinner = document.createElement("span");
+    spinner.className = "spinner";
+    sheet.classList.add("busy");
+    if (row) { row.classList.add("loading"); row.append(spinner); }
     try {
-      toastSkipped(await api("/api/host/playlist", { key: hostKey, playlist: p, play: !!(snap && snap.playback.isPlaying) }));
+      const reply = await api("/api/host/playlist", { key: hostKey, playlist: p, play: !!(snap && snap.playback.isPlaying) });
+      sheet.hidden = true;
+      toastSkipped(reply);
     } catch { toast("Couldn't change the playlist"); }
+    finally {
+      sheet.classList.remove("busy");
+      if (row) row.classList.remove("loading");
+      spinner.remove();
+    }
   });
   $("settings-playlist-change").addEventListener("click", () => {
     $("playlists").hidden = false;
-    $("playlists").scrollTop = 0;
     changePicker.open();
   });
   $("playlists-done").addEventListener("click", () => { $("playlists").hidden = true; });
@@ -1052,19 +1085,29 @@
     $("setup-start").disabled = false;
     setupPicker.select(p.id);
   });
+  /** Start the music: a spinner and "Starting…" until the hub answers (a big playlist can take a while). */
+  function setupBusy(busy) {
+    setupStarting = busy;
+    const button = $("setup-start");
+    button.disabled = busy;
+    button.querySelector(".spinner").hidden = !busy;
+    button.querySelector(".label").textContent = busy ? "Starting…" : "Start the music";
+    $("setup").classList.toggle("busy", busy);
+  }
   $("setup-start").addEventListener("click", async () => {
-    if (!setupPick) return;
-    $("setup-start").disabled = true;
+    if (!setupPick || setupStarting) return;
+    setupBusy(true);
     try {
       const name = $("setup-name").value.trim();
       if (name) await api("/api/host/settings", { key: hostKey, zoneName: name });
       const reply = await api("/api/host/playlist", { key: hostKey, playlist: setupPick, play: true });
       setupDismissed = true;
+      setupBusy(false);
       $("setup").hidden = true;
       toastSkipped(reply);
     } catch {
+      setupBusy(false);
       toast("Couldn't start. Try again.");
-      $("setup-start").disabled = false;
     }
   });
 
@@ -1135,6 +1178,7 @@
     $("settings-modal").hidden = false;
   });
   $("settings-done").addEventListener("click", () => { $("settings-modal").hidden = true; });
+  $("settings-close").addEventListener("click", () => { $("settings-modal").hidden = true; });
 
   /** Sends one change; false (after a toast) if the hub didn't take it. */
   async function saveSetting(change) {

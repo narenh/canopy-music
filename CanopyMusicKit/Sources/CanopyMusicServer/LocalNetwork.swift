@@ -3,23 +3,29 @@ import Foundation
 public enum LocalNetwork {
     /// The device's IPv4 address on Wi-Fi (or Ethernet), e.g. "192.168.1.23".
     public static func lanAddress() -> String? {
+        let candidates = ipv4Addresses()
+        for name in ["en0", "en1", "en2", "bridge100"] {
+            if let address = candidates[name] { return address }
+        }
+        return candidates.first { !$0.key.hasPrefix("lo") && !$0.value.hasPrefix("169.254") }?.value
+    }
+
+    /// This device's IPv4 addresses by interface name (e.g. "en0": "10.0.1.5").
+    static func ipv4Addresses() -> [String: String] {
         var head: UnsafeMutablePointer<ifaddrs>?
-        guard getifaddrs(&head) == 0, let first = head else { return nil }
+        guard getifaddrs(&head) == 0, let first = head else { return [:] }
         defer { freeifaddrs(head) }
 
-        var candidates: [String: String] = [:]
+        var addresses: [String: String] = [:]
         for pointer in sequence(first: first, next: { $0.pointee.ifa_next }) {
             let interface = pointer.pointee
             guard let addr = interface.ifa_addr, addr.pointee.sa_family == UInt8(AF_INET) else { continue }
             let name = String(cString: interface.ifa_name)
             var host = [CChar](repeating: 0, count: Int(NI_MAXHOST))
             guard getnameinfo(addr, socklen_t(addr.pointee.sa_len), &host, socklen_t(host.count), nil, 0, NI_NUMERICHOST) == 0 else { continue }
-            candidates[name] = String(decoding: host.prefix { $0 != 0 }.map(UInt8.init(bitPattern:)), as: UTF8.self)
+            addresses[name] = String(decoding: host.prefix { $0 != 0 }.map(UInt8.init(bitPattern:)), as: UTF8.self)
         }
-        for name in ["en0", "en1", "en2", "bridge100"] {
-            if let address = candidates[name] { return address }
-        }
-        return candidates.first { !$0.key.hasPrefix("lo") && !$0.value.hasPrefix("169.254") }?.value
+        return addresses
     }
 
     /// Payload for a QR code that joins a Wi-Fi network.

@@ -299,3 +299,41 @@ struct LocalNameTests {
         #expect(hostname.hostname == "living-room.local")
     }
 }
+
+/// Real mDNS on this Mac's network (skipped without one).
+@MainActor
+@Suite(.serialized)
+struct OwnHostnameTests {
+    /// Waits for the first confirmed name, or nil.
+    func confirmedName(_ hostname: FriendlyHostname, address: String, timeout: Double = 15) async -> String? {
+        var confirmed: String?
+        hostname.onConfirmed = { confirmed = $0 }
+        hostname.register(address: address)
+        let deadline = Date().addingTimeInterval(timeout)
+        while confirmed == nil, Date() < deadline { try? await Task.sleep(for: .milliseconds(100)) }
+        hostname.unregister()
+        return confirmed
+    }
+
+    /// A zone named after the device itself (an Apple TV called "Living Room" is already
+    /// `Living-Room.local`) uses that name rather than moving to `-2`.
+    @Test(.timeLimit(.minutes(1))) func usesTheDevicesOwnName() async throws {
+        let ownName = ProcessInfo.processInfo.hostName.lowercased()
+        let address = try #require(LocalNetwork.lanAddress())
+        try #require(ownName.hasSuffix(".local"), "this Mac's hostname isn't a .local name")
+        let base = String(ownName.dropLast(".local".count))
+        let found = await withCheckedContinuation { continuation in
+            FriendlyHostname.addresses(of: ownName, on: DispatchQueue(label: "test")) { continuation.resume(returning: $0) }
+        }
+        // It answers with this Mac's addresses (any interface; it may have more than one).
+        let own = Set(LocalNetwork.ipv4Addresses().filter { !$0.key.hasPrefix("lo") }.values)
+        #expect(!own.isDisjoint(with: found))
+        #expect(await confirmedName(FriendlyHostname(name: base), address: address) == "\(base).local")
+    }
+
+    @Test(.timeLimit(.minutes(1))) func otherNamesAreRegistered() async throws {
+        let address = try #require(LocalNetwork.lanAddress())
+        let name = "canopytest-\(UUID().uuidString.prefix(8).lowercased())"
+        #expect(await confirmedName(FriendlyHostname(name: name), address: address) == "\(name).local")
+    }
+}

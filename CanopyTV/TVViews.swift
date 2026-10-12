@@ -277,7 +277,7 @@ struct TVPartyView: View {
                     }
                     TVJoinCard()
                 }
-                .frame(width: 820)
+                .frame(width: 660)
                 .padding(.leading, 56)
                 .frame(maxHeight: .infinity)
                 // A sidebar running off the top, bottom and right edges.
@@ -292,26 +292,26 @@ struct TVPartyView: View {
 
 struct TVQueueRow: View {
     let item: QueueItem
-    static let height: CGFloat = 82
+    static let height: CGFloat = 70
 
     var body: some View {
-        HStack(spacing: 22) {
+        HStack(spacing: 18) {
             TVArtwork(track: item.track, cornerRadius: 8)
-                .frame(width: 64, height: 64)
-            VStack(alignment: .leading, spacing: 4) {
+                .frame(width: 54, height: 54)
+            VStack(alignment: .leading, spacing: 2) {
                 Text(item.track.title)
-                    .font(.system(size: 30, weight: .medium))
+                    .font(.system(size: 26, weight: .medium))
                 Text(item.track.artist)
-                    .font(.system(size: 24))
+                    .font(.system(size: 20))
                     .foregroundStyle(.white.opacity(0.6))
             }
             .lineLimit(1)
             Spacer(minLength: 16)
             if let requester = item.requester {
                 Text(requester.name ?? (requester.origin == .ipad ? "iPad" : "Guest"))
-                    .font(.system(size: 22, weight: .semibold))
-                    .padding(.horizontal, 16)
-                    .padding(.vertical, 7)
+                    .font(.system(size: 19, weight: .semibold))
+                    .padding(.horizontal, 14)
+                    .padding(.vertical, 6)
                     .background(.white.opacity(0.16), in: Capsule())
             }
         }
@@ -323,30 +323,29 @@ struct TVJoinCard: View {
     @Environment(TVModel.self) private var model
 
     var body: some View {
-        HStack(spacing: 30) {
+        HStack(spacing: 24) {
             TVQRCode(payload: model.shownGuestURL?.absoluteString)
-                .frame(width: 170, height: 170)
-            VStack(alignment: .leading, spacing: 8) {
+                .frame(width: 128, height: 128)
+            VStack(alignment: .leading, spacing: 6) {
                 Text("Queue from your phone")
-                    .font(.system(size: 36, weight: .bold))
+                    .font(.system(size: 30, weight: .bold))
                 Text("Scan with your camera, or go to")
-                    .font(.system(size: 26))
+                    .font(.system(size: 22))
                     .foregroundStyle(.white.opacity(0.6))
                 Text(Self.display(model.shownFriendlyURL ?? model.shownGuestURL))
-                    .font(.system(size: 30, weight: .semibold).monospaced())
+                    .font(.system(size: 25, weight: .semibold).monospaced())
             }
             .lineLimit(1)
-            .layoutPriority(1)
-            Spacer(minLength: 0)
+            .frame(maxWidth: .infinity, alignment: .leading)
             if let wifi = model.wifiPayload {
                 // Same as the iPad's: the Wi‑Fi symbol says what it is.
                 HalftoneQRCode(payload: wifi, symbol: "wifi", symbolScale: 0.6, dotScale: 0.7)
-                    .frame(width: 116, height: 116)
+                    .frame(width: 88, height: 88)
                     .opacity(0.75)
             }
         }
-        .padding(26)
-        .background(.white.opacity(0.08), in: RoundedRectangle(cornerRadius: 30, style: .continuous))
+        .padding(22)
+        .background(.white.opacity(0.08), in: RoundedRectangle(cornerRadius: 26, style: .continuous))
     }
 
     static func display(_ url: URL?) -> String {
@@ -435,13 +434,13 @@ struct TVQRCode: View {
 
     var body: some View {
         ZStack {
-            RoundedRectangle(cornerRadius: 28, style: .continuous).fill(.white)
+            RoundedRectangle(cornerRadius: 22, style: .continuous).fill(.white)
             if let payload, let image = Self.render(payload) {
                 Image(uiImage: image)
                     .interpolation(.none)
                     .resizable()
                     .scaledToFit()
-                    .padding(18)
+                    .padding(14)
             } else {
                 ProgressView().tint(.black)
             }

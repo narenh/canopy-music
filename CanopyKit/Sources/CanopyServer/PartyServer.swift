@@ -66,7 +66,10 @@ public final class PartyServer: Sendable {
         await server.appendRoute("GET /app.js", to: StaticFile("app.js", type: "text/javascript; charset=utf-8"))
         await server.appendRoute("GET /app.css", to: StaticFile("app.css", type: "text/css; charset=utf-8"))
         await server.appendRoute("GET /logo.png", to: StaticFile("logo.png", type: "image/png"))
+        // icon.png is square (iOS rounds home screen icons itself); favicon.png is already rounded.
         await server.appendRoute("GET /icon.png", to: StaticFile("icon.png", type: "image/png"))
+        await server.appendRoute("GET /favicon.png", to: StaticFile("favicon.png", type: "image/png"))
+        await server.appendRoute("GET /favicon.ico", to: StaticFile("favicon.png", type: "image/png"))
 
         await server.appendRoute("GET /api/state") { _ in
             try .json(await session.snapshot())

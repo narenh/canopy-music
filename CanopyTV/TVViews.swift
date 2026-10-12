@@ -60,6 +60,8 @@ struct TVRootView: View {
 /// Every launch starts here (docs/multi-device.md).
 struct TVZoneListView: View {
     @Environment(TVModel.self) private var model
+    /// A zone's id, or "create".
+    @FocusState private var focused: String?
 
     var body: some View {
         let zones = model.browser.zones.filter { $0.hubID != model.deviceID }
@@ -72,6 +74,7 @@ struct TVZoneListView: View {
             } else {
                 Text("Zones on this Wi\u{2011}Fi")
                     .font(.system(size: 52, weight: .bold))
+                    .foregroundStyle(.white)
             }
             VStack(spacing: 16) {
                 ForEach(zones) { zone in
@@ -85,12 +88,14 @@ struct TVZoneListView: View {
                                 .compactMap(\.self).joined(separator: " · ")
                         )
                     }
+                    .focused($focused, equals: zone.id)
                 }
                 Button {
                     Task { await model.createZone() }
                 } label: {
                     TVZoneRow(icon: "plus", title: "Create a new zone", subtitle: "This TV plays the music")
                 }
+                .focused($focused, equals: "create")
             }
             .frame(width: 900)
             if model.authorizationDenied {
@@ -100,8 +105,14 @@ struct TVZoneListView: View {
                     .frame(width: 900)
             }
         }
-        .foregroundStyle(.white)
+        // No forced white here: a focused button turns light and needs its dark text.
         .onAppear { model.browser.start() }
+        // Joining is the usual case (a second zone in one house is rare), so start on the first
+        // zone. Zones turn up a moment after launch, when focus is already on Create.
+        .defaultFocus($focused, zones.first?.id ?? "create")
+        .onChange(of: zones.isEmpty) { wasEmpty, isEmpty in
+            if wasEmpty, !isEmpty, focused == "create" || focused == nil { focused = zones.first?.id }
+        }
         #if DEBUG
         // `-createZone` / `-showZone <name>`: act without the remote, for the simulator.
         .task {

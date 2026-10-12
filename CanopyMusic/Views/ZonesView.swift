@@ -8,46 +8,36 @@ struct ZoneListView: View {
 
     var body: some View {
         let zones = model.zoneBrowser.zones.filter { $0.hubID != model.deviceID }
-        let hasRows = !zones.isEmpty || model.canResumeZone
         ZStack {
             LinearGradient(colors: [Color(white: 0.13), Color(white: 0.06)], startPoint: .top, endPoint: .bottom)
                 .ignoresSafeArea()
-            VStack(spacing: 22) {
+            VStack(spacing: 8) {
                 LogoView(height: 44)
-                if hasRows {
-                    Text("Zones on this Wi\u{2011}Fi")
-                        .font(.system(size: 34, weight: .bold))
-                } else {
-                    Text(model.zoneBrowser.hasSearched ? "No zones playing yet." : "Looking for zones…")
-                        .font(.system(size: 17))
-                        .foregroundStyle(.white.opacity(0.6))
-                }
-                VStack(spacing: 0) {
-                    if model.canResumeZone {
-                        ZoneRow(icon: "ipad.landscape", title: model.zoneName, subtitle: "This iPad · resume") {
-                            model.resumeZone()
+                    .padding(.top, 48)
+                List {
+                    // Hidden until a zone shows up.
+                    if !zones.isEmpty {
+                        Section("Active Zones") {
+                            zoneRows(zones)
                         }
                     }
-                    ForEach(zones) { zone in
-                        ZoneRow(
-                            icon: zone.kind == .tv ? "appletv" : "ipad.landscape",
-                            title: zone.name,
-                            subtitle: [zone.kind == .tv ? "Apple TV" : "iPad", zone.nowPlaying.map { "playing \($0)" }]
-                                .compactMap(\.self).joined(separator: " · ")
-                        ) {
-                            model.join(zone)
+                    Section {
+                        if model.canResumeZone {
+                            ZoneRow(icon: "ipad.landscape", title: "Resume \(model.zoneName)", subtitle: "This iPad plays the music") {
+                                model.resumeZone()
+                            }
+                        }
+                        ZoneRow(icon: "plus", title: "Create a new zone", subtitle: "This iPad plays the music") {
+                            model.beginCreatingZone()
                         }
                     }
-                    ZoneRow(icon: "plus", title: "Create a new zone", subtitle: "This iPad plays the music") {
-                        model.beginCreatingZone()
-                    }
                 }
-                .background(.white.opacity(0.08), in: RoundedRectangle(cornerRadius: 18, style: .continuous))
-                .frame(maxWidth: 520)
+                .listStyle(.insetGrouped)
+                .scrollContentBackground(.hidden)
+                .frame(maxWidth: 560)
             }
-            .padding(40)
-            .foregroundStyle(.white)
         }
+        .environment(\.colorScheme, .dark)
         .animation(.easeInOut(duration: 0.25), value: zones.map(\.id))
         .onAppear { model.zoneBrowser.start() }
         #if DEBUG
@@ -59,6 +49,19 @@ struct ZoneListView: View {
             model.join(zone)
         }
         #endif
+    }
+
+    private func zoneRows(_ zones: [ZoneListing]) -> some View {
+        ForEach(zones) { zone in
+            ZoneRow(
+                icon: zone.kind == .tv ? "appletv" : "ipad.landscape",
+                title: zone.name,
+                subtitle: [zone.kind == .tv ? "Apple TV" : "iPad", zone.nowPlaying.map { "playing \($0)" }]
+                    .compactMap(\.self).joined(separator: " · ")
+            ) {
+                model.join(zone)
+            }
+        }
     }
 }
 
@@ -77,18 +80,17 @@ private struct ZoneRow: View {
                     .background(.white.opacity(0.12), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
                 VStack(alignment: .leading, spacing: 2) {
                     Text(title).font(.system(size: 17, weight: .medium))
-                    Text(subtitle).font(.system(size: 13)).foregroundStyle(.white.opacity(0.55)).lineLimit(1)
+                    Text(subtitle).font(.system(size: 13)).foregroundStyle(.secondary).lineLimit(1)
                 }
                 Spacer(minLength: 8)
                 Image(systemName: "chevron.right")
                     .font(.system(size: 13, weight: .semibold))
-                    .foregroundStyle(.white.opacity(0.35))
+                    .foregroundStyle(.tertiary)
             }
-            .padding(.horizontal, 16)
-            .padding(.vertical, 12)
             .contentShape(Rectangle())
         }
-        .buttonStyle(.plain)
+        .foregroundStyle(.primary)
+        .listRowBackground(Color.white.opacity(0.08))
     }
 }
 

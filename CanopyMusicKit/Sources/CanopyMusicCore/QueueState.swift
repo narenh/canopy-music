@@ -62,6 +62,14 @@ public struct QueueState: Codable, Equatable, Sendable {
         version += 1
     }
 
+    /// Empties everything: base playlist, now playing, Up Next and history (the zone ended). The
+    /// version keeps counting up, so pages that stay open don't ignore the next zone's snapshots.
+    public mutating func clear() {
+        let next = version + 1
+        self = QueueState()
+        version = next
+    }
+
     /// Reshuffles the base playlist and rebuilds the playlist songs in Up Next. Requests stay put.
     public mutating func shufflePlaylist() {
         playlist.shuffle()

@@ -1246,7 +1246,7 @@
   });
   $("settings-stop").addEventListener("click", async () => {
     const device = snap.hubKind === "tv" ? "Apple TV" : "iPad";
-    if (!confirm(`End ${snap.zoneName || "this zone"}? The music stops for everyone, and the ${device} goes back to its zone list.`)) return;
+    if (!confirm(`End ${snap.zoneName || "this zone"}? The music stops for everyone and the queue is cleared. The ${device} goes back to its zone list.`)) return;
     $("settings-modal").hidden = true;
     try { await api("/api/host/stop", { key: hostKey }); } catch { toast("Couldn't end the zone"); }
   });

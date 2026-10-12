@@ -225,6 +225,24 @@ public final class PartySession {
         onStopRequested?()
     }
 
+    /// Ends the zone's session (hub only): stops playback, empties the queue, history and base
+    /// playlist, and deletes the saved queue, so the next zone on this device starts empty.
+    /// Settings (zone name, Wi‑Fi, toggles, Host Control) aren't the session's to clear.
+    public func end() {
+        guard remote == nil else { return }
+        if engine.isPlaying { engine.pause() }
+        saveTask?.cancel()
+        saveTask = nil
+        stagedItemID = nil
+        loadedItemID = nil
+        isPlaying = false
+        skippedOnLoad = []
+        displays = []
+        state.clear()
+        broadcast()
+        if let storeURL { try? FileManager.default.removeItem(at: storeURL) }
+    }
+
     public var hasParty: Bool { state.current != nil || !state.upNext.isEmpty }
 
     // MARK: Host actions

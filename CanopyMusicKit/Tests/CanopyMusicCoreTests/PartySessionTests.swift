@@ -386,3 +386,100 @@ struct SkippingCatalog: MusicCatalog {
         #expect(!session.state.upNext.isEmpty)
     }
 }
+
+/// Ending a zone clears the session and its saved queue, so the next zone starts empty.
+@MainActor
+@Suite struct EndZoneTests {
+    @Test func endStopsAndClearsEverything() async throws {
+        let engine = FakeEngine()
+        let session = PartySession(catalog: StubCatalog(ids: ["a", "b", "c"]), engine: engine)
+        try await session.load(playlist: base)
+        try await session.play()
+        session.add(track("x"), by: guest)
+        await session.skip()
+        #expect(!session.state.history.isEmpty)
+        let before = session.state.version
+
+        session.end()
+
+        #expect(!engine.isPlaying)
+        #expect(!session.isPlaying)
+        #expect(session.state.current == nil)
+        #expect(session.state.upNext.isEmpty)
+        #expect(session.state.history.isEmpty)
+        #expect(session.state.playlistName == nil)
+        #expect(session.state.upcomingPage(offset: 0, limit: 10).total == 0)
+        #expect(!session.hasParty)
+        // Pages that stay open drop snapshots older than the last one they saw.
+        #expect(session.state.version > before)
+    }
+
+    @Test func endDeletesTheSavedQueue() async throws {
+        let url = FileManager.default.temporaryDirectory.appendingPathComponent("canopy-\(UUID()).json")
+        defer { try? FileManager.default.removeItem(at: url) }
+        let session = PartySession(catalog: StubCatalog(ids: ["a", "b"]), engine: FakeEngine(), storeURL: url)
+        try await session.load(playlist: base)
+        try await session.play()
+        try await Task.sleep(for: .milliseconds(800))
+        #expect(FileManager.default.fileExists(atPath: url.path))
+
+        session.end()
+        #expect(!FileManager.default.fileExists(atPath: url.path))
+        let next = PartySession(catalog: StubCatalog(ids: []), engine: FakeEngine(), storeURL: url)
+        #expect(next.state.current == nil)
+        #expect(next.state.upNext.isEmpty)
+        #expect(next.state.history.isEmpty)
+    }
+
+    @Test func aSaveStillPendingDoesNotBringTheQueueBack() async throws {
+        let url = FileManager.default.temporaryDirectory.appendingPathComponent("canopy-\(UUID()).json")
+        defer { try? FileManager.default.removeItem(at: url) }
+        let session = PartySession(catalog: StubCatalog(ids: ["a", "b"]), engine: FakeEngine(), storeURL: url)
+        try await session.load(playlist: base) // schedules a save in 0.5 s
+        session.end()
+        try await Task.sleep(for: .milliseconds(800))
+        #expect(!FileManager.default.fileExists(atPath: url.path))
+    }
+
+    @Test func listenersSeeTheEmptyQueue() async throws {
+        let session = PartySession(catalog: StubCatalog(ids: ["a", "b"]), engine: FakeEngine())
+        try await session.load(playlist: base)
+        var updates = session.snapshots().makeAsyncIterator()
+        #expect(await updates.next()?.upNext.isEmpty == false)
+        session.end()
+        let last = await updates.next()
+        #expect(last?.upNext.isEmpty == true)
+        #expect(last?.current == nil)
+        #expect(last?.playlistName == nil)
+    }
+
+    @Test func endKeepsTheZoneSettings() async throws {
+        let session = PartySession(catalog: StubCatalog(ids: ["a"]), engine: FakeEngine())
+        session.configureHub(kind: .ipad, id: "hub", zoneName: "Den", serviceName: "Demo")
+        session.phonesCanQueue = false
+        session.phonesCanReorder = false
+        session.displaysCanControl = false
+        session.wifi = WifiDetails(ssid: "Guest", password: "pw")
+        session.hostKey = "key"
+        try await session.load(playlist: base)
+        session.end()
+        #expect(session.zoneName == "Den")
+        #expect(!session.phonesCanQueue)
+        #expect(!session.phonesCanReorder)
+        #expect(!session.displaysCanControl)
+        #expect(session.wifi.ssid == "Guest")
+        #expect(session.isHost(key: "key"))
+    }
+
+    @Test func theNextZoneStartsFromAnEmptyQueue() async throws {
+        let engine = FakeEngine()
+        let session = PartySession(catalog: StubCatalog(ids: ["a", "b"]), engine: engine)
+        try await session.load(playlist: base)
+        try await session.play()
+        session.end()
+        try await session.load(playlist: base)
+        try await session.play()
+        #expect(engine.playing?.id == "a")
+        #expect(session.state.history.isEmpty)
+    }
+}

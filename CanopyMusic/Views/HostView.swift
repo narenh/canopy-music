@@ -482,7 +482,7 @@ private struct SettingsSheet: View {
                 Section {
                     Button("End Zone", role: .destructive) { confirmingEnd = true }
                 } footer: {
-                    Text("Ends the music and the phone page here and goes back to the zone list, where you can join another zone or resume this one.")
+                    Text("Stops the music and the phone page, clears the queue, and goes back to the zone list. Your settings stay for the next zone.")
                 }
                 .listRowBackground(Color.white.opacity(0.08))
             }
@@ -517,14 +517,25 @@ private struct EndZoneConfirmation: ViewModifier {
 
     func body(content: Content) -> some View {
         content.alert("End \(model.zoneName)?", isPresented: $isPresented) {
-            Button("End", role: .destructive) {
-                before()
-                model.stopHosting()
-            }
+            Button("End", role: .destructive, action: end)
             Button("Cancel", role: .cancel) {}
         } message: {
-            Text("The music stops for everyone, and this iPad goes back to the zone list.")
+            Text("The music stops for everyone and the queue is cleared. This iPad goes back to the zone list.")
         }
+        #if DEBUG
+        // `-autoEnd` (with `-confirmEnd`): presses End 10 s after the alert opens.
+        .task(id: isPresented) {
+            guard isPresented, ProcessInfo.processInfo.arguments.contains("-autoEnd") else { return }
+            try? await Task.sleep(for: .seconds(10))
+            isPresented = false
+            end()
+        }
+        #endif
+    }
+
+    private func end() {
+        before()
+        model.endZone()
     }
 }
 

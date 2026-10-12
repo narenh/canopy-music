@@ -198,7 +198,11 @@ final class AppModel {
         let debugFlags = ["-autoParty", "-autoSearch", "-autoLoad", "-autoResume", "-autoPrevious", "-autoStress", "-showSettings",
                           "-showPicker", "-appleMusicState", "-qrGallery", "-backgroundFor", "-screenshotParty", "-onboarding",
                           "-onboardingSpotify", "-onboardingNetwork", "-easterEggPreview", "-diagnoseMusicKit", "-benchAppleMusic", "-autoLoadPlaylist", "-confirmEnd"]
-        if ProcessInfo.processInfo.arguments.contains(where: debugFlags.contains) { role = .hub }
+        if ProcessInfo.processInfo.arguments.contains(where: debugFlags.contains) {
+            role = .hub
+            // Running a zone, as `becomeHub()` records, so ending it and relaunching can be tested.
+            defaults.set(true, forKey: "wasHub")
+        }
         #endif
         zoneRole = role
         crossfade = defaults.bool(forKey: "crossfade")
@@ -237,8 +241,21 @@ final class AppModel {
         try? AVAudioSession.sharedInstance().setCategory(.playback, mode: .default, policy: .longFormAudio)
     }
 
+    /// Where each service's queue is saved between launches.
+    private static func storeURL(_ provider: Provider) -> URL {
+        URL.applicationSupportDirectory.appending(path: "party-\(provider.rawValue).json")
+    }
+
+    private static var allProviders: [Provider] {
+        #if DEBUG
+        [.appleMusic, .spotify, .demo]
+        #else
+        [.appleMusic, .spotify]
+        #endif
+    }
+
     private static func makeSession(_ provider: Provider, spotify: SpotifyAPI) -> PartySession {
-        let store = URL.applicationSupportDirectory.appending(path: "party-\(provider.rawValue).json")
+        let store = storeURL(provider)
         try? FileManager.default.createDirectory(at: .applicationSupportDirectory, withIntermediateDirectories: true)
         switch provider {
         case .none:
@@ -457,7 +474,8 @@ final class AppModel {
     @ObservationIgnored private let zoneAdvertiser = ZoneAdvertiser()
     @ObservationIgnored private var advertisedPlaying: String?
 
-    /// This iPad ran a zone last time, so the list offers to resume it.
+    /// This iPad was running a zone when the app last quit (or crashed) without ending it, so the
+    /// list offers to resume it. Ending the zone clears it.
     var canResumeZone: Bool { defaults.bool(forKey: "wasHub") && provider != .none }
 
     /// The guest page shown in QR codes: this hub's, or the hub a display is showing.
@@ -499,11 +517,19 @@ final class AppModel {
         }
     }
 
-    /// Stops running this zone (the server and its announcement) and goes back to the zone list.
-    func stopHosting() {
-        if session.engine.isPlaying { session.pause() }
+    /// Ends this zone and goes back to the zone list: stops the music, the server, the Bonjour
+    /// announcement and the `.local` name, and clears the queue, history, base playlist and saved
+    /// queue, so there's nothing to resume and the next zone starts empty. Settings stay.
+    func endZone() {
+        session.end()
+        // Queues saved under another service (from before a service change) would come back too.
+        for other in Self.allProviders where other != provider {
+            try? FileManager.default.removeItem(at: Self.storeURL(other))
+        }
+        defaults.removeObject(forKey: "wasHub")
         zoneRole = .choosing
         isLocked = false
+        UIApplication.shared.isIdleTimerDisabled = false
         Task { await stopServer() }
     }
 
@@ -590,7 +616,7 @@ final class AppModel {
             if wifi.simpleQR != self.wifiSimpleQR { self.wifiSimpleQR = wifi.simpleQR }
         }
         // A host stopped the zone from the web page (it asked them first): as ending it here does.
-        session.onStopRequested = { [weak self] in self?.stopHosting() }
+        session.onStopRequested = { [weak self] in self?.endZone() }
     }
 
     #if DEBUG

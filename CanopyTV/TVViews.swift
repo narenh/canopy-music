@@ -23,7 +23,10 @@ struct TVRootView: View {
                 }
             case .display:
                 TVPartyView()
+                    // Blurred behind the connection message so it reads.
+                    .blur(radius: model.isWaitingForHub ? 28 : 0)
                     .overlay { TVConnectionOverlay() }
+                    .animation(.easeInOut(duration: 0.4), value: model.isWaitingForHub)
                     .transition(.opacity)
             }
         }
@@ -156,20 +159,21 @@ struct TVConnectionOverlay: View {
     @Environment(TVModel.self) private var model
 
     var body: some View {
-        if let connection = model.connection, !connection.isConnected {
+        if let connection = model.connection, model.isWaitingForHub {
             let name = model.shownZone?.name ?? "the zone"
             ZStack {
-                Rectangle().fill(.black.opacity(connection.hasSnapshot ? 0.6 : 0.9)).ignoresSafeArea()
+                Rectangle().fill(.black.opacity(connection.hasSnapshot ? 0.45 : 0.9)).ignoresSafeArea()
                 VStack(spacing: 22) {
                     ProgressView()
                     Text(connection.hasSnapshot ? "Lost connection to \(name)" : "Connecting to \(name)…")
                         .font(.system(size: 40, weight: .bold))
                     if connection.hasSnapshot {
-                        Text("Trying again. Make sure \(model.shownZone?.kind == .tv ? "the Apple TV is on" : "the iPad is awake") and Canopy is open. Press Menu to leave.")
+                        Text("Trying again. Make sure \(model.shownZone?.kind == .tv ? "the Apple TV is on" : "the iPad is awake") and Canopy is open.\nPress Menu to leave.")
                             .font(.system(size: 26))
                             .foregroundStyle(.white.opacity(0.7))
                             .multilineTextAlignment(.center)
-                            .frame(width: 900)
+                            .lineSpacing(6)
+                            .frame(width: 1000)
                     }
                 }
                 .foregroundStyle(.white)

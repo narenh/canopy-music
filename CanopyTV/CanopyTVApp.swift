@@ -210,6 +210,11 @@ final class TVModel {
         return nil
     }
 
+    /// A display that isn't connected to its hub (yet, or any more).
+    var isWaitingForHub: Bool {
+        role == .display && connection.map { !$0.isConnected } == true
+    }
+
     /// The display's guest QR points at its hub.
     var shownGuestURL: URL? {
         role == .display ? session.lanAddress.flatMap { URL(string: "http://\($0)") } : guestURL

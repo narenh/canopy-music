@@ -105,16 +105,19 @@ final class AppModel {
     @ObservationIgnored private var subscriptionTask: Task<Void, Never>?
     /// This device's own guest page (hub). Displays show their hub's instead; see `guestURL`.
     private var localGuestURL: URL?
-    /// Key in the Host Control QR code. Forgetting phones replaces it.
-    @ObservationIgnored private var hostKey = UserDefaults.standard.string(forKey: "hostControlKey") ?? AppModel.newHostKey()
-    /// Client IDs of phones that have used the host key, for the "N phones" count.
-    private(set) var hostPhones: [String] = UserDefaults.standard.stringArray(forKey: "hostControlPhones") ?? []
+    /// The Host Control key and the phones that have used it (shared with the Apple TV app).
+    let hostControl = HostControl()
     private var localFriendlyURL: URL?
     var errorMessage: String?
     /// Shows "Where should music play?" (host Music section or the party screen's device button).
     var isPickingSpotifyDevice = false
 
-    var hostPIN: String { didSet { defaults.set(hostPIN, forKey: "hostPIN") } }
+    var hostPIN: String {
+        didSet {
+            defaults.set(hostPIN, forKey: "hostPIN")
+            session.hasPIN = !hostPIN.isEmpty
+        }
+    }
     var crossfade: Bool {
         didSet {
             defaults.set(crossfade, forKey: "crossfade")
@@ -145,11 +148,13 @@ final class AppModel {
         }
     }
 
+    /// Whether guests can queue from their phones. The server keeps running either way: host phones
+    /// and displays use it too.
     var phoneQueueEnabled: Bool {
         didSet {
             guard phoneQueueEnabled != oldValue else { return }
             defaults.set(phoneQueueEnabled, forKey: "phoneQueueEnabled")
-            Task { phoneQueueEnabled ? await restartServer() : await stopServer() }
+            session.phonesCanQueue = phoneQueueEnabled
         }
     }
 
@@ -214,7 +219,6 @@ final class AppModel {
         session.phonesCanReorder = phoneReorderEnabled // didSet doesn't run during init
         configureHubSession()
         watchHostnameRenames()
-        defaults.set(hostKey, forKey: "hostControlKey")
         connectHostControl()
         #if DEBUG
         // `-appleMusicState ready|unsynced|nosub|denied`: fakes the host Music row for screenshots.
@@ -465,7 +469,7 @@ final class AppModel {
     var friendlyURL: URL? {
         isDisplay ? session.guestAddress.flatMap { URL(string: "http://\($0)") } : localFriendlyURL
     }
-    var showsGuestQR: Bool { isDisplay ? guestURL != nil : phoneQueueEnabled }
+    var showsGuestQR: Bool { isDisplay ? guestURL != nil && session.phonesCanQueue : phoneQueueEnabled }
 
     func beginCreatingZone() {
         zoneRole = .creating
@@ -537,6 +541,8 @@ final class AppModel {
     private func configureHubSession() {
         session.configureHub(kind: .ipad, zoneName: zoneName, serviceName: provider == .none ? nil : provider.title)
         session.displaysCanControl = displaysCanControl
+        session.phonesCanQueue = phoneQueueEnabled
+        session.hasPIN = !hostPIN.isEmpty
     }
 
     /// Announces this zone (or refreshes what's playing in the announcement).
@@ -561,39 +567,27 @@ final class AppModel {
     /// the page moves to the `.local` address itself when the phone can reach it.
     var hostControlURL: URL? {
         guard let guestURL else { return nil }
-        return URL(string: "\(guestURL.absoluteString)/?host=\(hostKey)")
+        return URL(string: "\(guestURL.absoluteString)/?host=\(hostControl.key)")
     }
 
     /// Revokes every phone with host control by replacing the key.
     func forgetHostPhones() {
-        hostKey = Self.newHostKey()
-        defaults.set(hostKey, forKey: "hostControlKey")
-        hostPhones = []
-        defaults.set(hostPhones, forKey: "hostControlPhones")
-        session.hostKey = hostKey
+        hostControl.forget()
+        session.hostKey = hostControl.key
+        session.hostPhoneCount = 0
     }
 
     private func connectHostControl() {
-        session.hostKey = hostKey
+        hostControl.attach(to: session)
         // Settings changed by a host on the web page: keep ours in step and saved.
         session.onSettingsChanged = { [weak self] in
             guard let self else { return }
             if let name = self.session.zoneName, name != self.zoneName { self.zoneName = name }
             if self.session.phonesCanReorder != self.phoneReorderEnabled { self.phoneReorderEnabled = self.session.phonesCanReorder }
             if self.session.displaysCanControl != self.displaysCanControl { self.displaysCanControl = self.session.displaysCanControl }
+            if self.session.phonesCanQueue != self.phoneQueueEnabled { self.phoneQueueEnabled = self.session.phonesCanQueue }
         }
-        session.onHostPhone = { [weak self] clientID in
-            guard let self, !self.hostPhones.contains(clientID) else { return }
-            self.hostPhones.append(clientID)
-            self.defaults.set(self.hostPhones, forKey: "hostControlPhones")
-        }
-    }
-
-    private static func newHostKey() -> String {
-        var bytes = [UInt8](repeating: 0, count: 24)
-        _ = SecRandomCopyBytes(kSecRandomDefault, bytes.count, &bytes)
-        return Data(bytes).base64EncodedString()
-            .replacingOccurrences(of: "+", with: "-").replacingOccurrences(of: "/", with: "_").replacingOccurrences(of: "=", with: "")
+        session.onPINChanged = { [weak self] pin in self?.hostPIN = pin }
     }
 
     #if DEBUG
@@ -626,7 +620,7 @@ final class AppModel {
 
     func startServerIfNeeded() async {
         await serially {
-            guard self.phoneQueueEnabled, !self.needsOnboarding, self.zoneRole == .hub else { return }
+            guard !self.needsOnboarding, self.zoneRole == .hub else { return }
             if self.server != nil {
                 self.refreshAddresses()
                 return
@@ -655,7 +649,7 @@ final class AppModel {
 
     private func restartServerNow() async {
         await stopServerNow()
-        guard phoneQueueEnabled, !needsOnboarding, zoneRole == .hub else { return }
+        guard !needsOnboarding, zoneRole == .hub else { return }
         guard let (server, task) = await PartyServer.start(session: session) else {
             localGuestURL = nil
             localFriendlyURL = nil

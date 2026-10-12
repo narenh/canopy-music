@@ -101,6 +101,10 @@ public final class PartyServer: Sendable {
             // Displays (Canopy devices showing this zone) add as "iPad" requests with their own name
             // and pick the item ID, so their optimistic copy matches.
             let requester = Requester(name: body.name?.cleanedName, clientID: body.clientId, origin: body.origin == "ipad" ? .ipad : .phone)
+            // With queueing from phones off, only hosts and displays can add.
+            if requester.origin == .phone, !(await session.phonesCanQueue), !(await session.isHost(key: body.key)) {
+                return HTTPResponse(statusCode: .forbidden)
+            }
             let result = if let itemId = body.itemId {
                 await session.add(body.track, by: requester, id: itemId)
             } else {
@@ -166,10 +170,20 @@ public final class PartyServer: Sendable {
             guard await session.isHost(key: body.key) else { return HTTPResponse(statusCode: .forbidden) }
             await session.applyHostSettings(
                 zoneName: body.zoneName?.trimmingCharacters(in: .whitespacesAndNewlines).prefix(40).description,
+                phonesCanQueue: body.phonesCanQueue,
                 phonesCanReorder: body.phonesCanReorder,
-                displaysCanControl: body.displaysCanControl
+                displaysCanControl: body.displaysCanControl,
+                pin: body.pin.map { String($0.filter(\.isNumber).prefix(8)) }
             )
             return HTTPResponse(statusCode: .ok)
+        }
+
+        // Revokes Host Control from every other phone; this one gets the new key.
+        await server.appendRoute("POST /api/host/forget") { request in
+            let body = try JSONDecoder.api.decode(HostBody.self, from: await request.bodyData)
+            guard await session.isHost(key: body.key) else { return HTTPResponse(statusCode: .forbidden) }
+            guard let key = await session.forgetOtherHostPhones() else { return HTTPResponse(statusCode: .notImplemented) }
+            return try .json(["key": key])
         }
 
         await server.appendRoute("POST /api/host/stop") { request in
@@ -210,6 +224,8 @@ struct AddBody: Decodable {
     var track: QueueTrack
     var name: String?
     var clientId: String
+    /// Host Control key, so a host can add while queueing from phones is off.
+    var key: String?
     var itemId: UUID?
     var origin: String?
 }
@@ -234,6 +250,9 @@ struct PlaylistBody: Decodable {
 struct SettingsBody: Decodable {
     var key: String
     var zoneName: String?
+    var phonesCanQueue: Bool?
+    /// A new unlock PIN (digits), or "" to remove it. iPad hubs only.
+    var pin: String?
     var phonesCanReorder: Bool?
     var displaysCanControl: Bool?
 }

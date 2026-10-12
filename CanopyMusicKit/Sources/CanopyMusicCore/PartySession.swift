@@ -31,6 +31,12 @@ public struct PartySnapshot: Codable, Equatable, Sendable {
     public var displaysCanControl: Bool?
     /// Recently played songs, newest first, for displays' Up next history.
     public var history: [QueueItem]?
+    /// False when the host has turned off queueing from guests' phones (hosts and displays still can).
+    public var canQueue: Bool?
+    /// Whether the hub has an unlock PIN (iPad hubs; nil elsewhere). The PIN itself never leaves it.
+    public var hasPIN: Bool?
+    /// How many phones have Host Control.
+    public var hostPhones: Int?
 }
 
 /// Owns the queue and keeps the player in step with it. Both the iPad UI and the phone server
@@ -56,6 +62,23 @@ public final class PartySession {
     public var displaysCanControl = true {
         didSet { if displaysCanControl != oldValue, remote == nil { broadcast() } }
     }
+    /// Whether guests can add songs from their phones (a hub setting, on by default). Hosts and
+    /// displays always can.
+    public var phonesCanQueue = true {
+        didSet { if phonesCanQueue != oldValue, remote == nil { broadcast() } }
+    }
+    /// Whether the hub has an unlock PIN (set by an iPad hub; nil on a TV, which has nothing to unlock).
+    public var hasPIN: Bool? {
+        didSet { if hasPIN != oldValue, remote == nil { broadcast() } }
+    }
+    /// Phones with Host Control (set by the hub).
+    public var hostPhoneCount = 0 {
+        didSet { if hostPhoneCount != oldValue, remote == nil { broadcast() } }
+    }
+    /// A host set (non-empty) or removed (empty) the unlock PIN from the web page.
+    @ObservationIgnored public var onPINChanged: (@MainActor (String) -> Void)?
+    /// A host revoked every other phone's Host Control; returns the new key for that host.
+    @ObservationIgnored public var onForgetHostPhones: (@MainActor () -> String?)?
     /// The hub's guest address by IP, from the hub (display) or set by the app (hub).
     public var lanAddress: String?
     /// Displays that have checked in recently (hub only).
@@ -130,6 +153,7 @@ public final class PartySession {
         serviceName = snapshot.service
         phonesCanReorder = snapshot.canReorder
         displaysCanControl = snapshot.displaysCanControl ?? true
+        phonesCanQueue = snapshot.canQueue ?? true
         guestAddress = snapshot.address
         lanAddress = snapshot.lanAddress
     }
@@ -149,12 +173,20 @@ public final class PartySession {
         displays.sort { $0.name < $1.name }
     }
 
-    /// Applies settings sent by a host from the web page.
-    public func applyHostSettings(zoneName: String?, phonesCanReorder: Bool?, displaysCanControl: Bool?) {
+    /// Applies settings sent by a host from the web page. `pin`: a new PIN, or "" to remove it.
+    public func applyHostSettings(zoneName: String?, phonesCanQueue: Bool? = nil, phonesCanReorder: Bool?,
+                                  displaysCanControl: Bool?, pin: String? = nil) {
         if let zoneName, !zoneName.isEmpty { self.zoneName = zoneName }
+        if let phonesCanQueue { self.phonesCanQueue = phonesCanQueue }
         if let phonesCanReorder { self.phonesCanReorder = phonesCanReorder }
         if let displaysCanControl { self.displaysCanControl = displaysCanControl }
+        if let pin, hasPIN != nil { onPINChanged?(pin) }
         onSettingsChanged?()
+    }
+
+    /// Revokes Host Control from every phone but the one asking; returns its new key.
+    public func forgetOtherHostPhones() -> String? {
+        onForgetHostPhones?()
     }
 
     public func requestStop() {
@@ -384,7 +416,10 @@ public final class PartySession {
             hubKind: hubKind,
             service: serviceName,
             displaysCanControl: displaysCanControl,
-            history: Array(state.history.prefix(20))
+            history: Array(state.history.prefix(20)),
+            canQueue: phonesCanQueue,
+            hasPIN: hasPIN,
+            hostPhones: hostPhoneCount
         )
     }
 

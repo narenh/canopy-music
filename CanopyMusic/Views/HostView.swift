@@ -353,27 +353,25 @@ private struct SettingsSheet: View {
             Form {
                 Section {
                     Toggle("Queue from phones", isOn: $model.phoneQueueEnabled)
-                    if model.phoneQueueEnabled {
-                        Toggle("Reorder from phones", isOn: $model.phoneReorderEnabled)
-                        HStack(spacing: 0) {
-                            Text("Address")
-                            Spacer(minLength: 16)
-                            TextField("music", text: $localNameDraft)
-                                .multilineTextAlignment(.trailing)
-                                .textInputAutocapitalization(.never)
-                                .autocorrectionDisabled()
-                                .keyboardType(.asciiCapable)
-                                .submitLabel(.done)
-                                .onSubmit { model.setLocalName(localNameDraft) }
-                            Text(".local")
-                                .foregroundStyle(.secondary)
-                        }
+                    Toggle("Reorder from phones", isOn: $model.phoneReorderEnabled)
+                    HStack(spacing: 0) {
+                        Text("Address")
+                        Spacer(minLength: 16)
+                        TextField("music", text: $localNameDraft)
+                            .multilineTextAlignment(.trailing)
+                            .textInputAutocapitalization(.never)
+                            .autocorrectionDisabled()
+                            .keyboardType(.asciiCapable)
+                            .submitLabel(.done)
+                            .onSubmit { model.setLocalName(localNameDraft) }
+                        Text(".local")
+                            .foregroundStyle(.secondary)
                     }
                 } footer: {
-                    Text("Runs a small local web server at \(model.localName).local so guests can search and queue from their phones. Turning it off stops the server and hides the QR code.")
+                    Text("Guests search and queue from their phones at \(model.localName).local. Turning it off hides the QR code; Host Control and displays keep working.")
                 }
                 .listRowBackground(Color.white.opacity(0.08))
-                if model.phoneQueueEnabled, let hostURL = model.hostControlURL {
+                if let hostURL = model.hostControlURL {
                     Section("Host Control") {
                         HStack(spacing: 16) {
                             QRCodeView(payload: hostURL.absoluteString)
@@ -386,10 +384,10 @@ private struct SettingsSheet: View {
                         }
                         .padding(.vertical, 6)
                         HStack {
-                            Text(model.hostPhones.count == 1 ? "1 phone" : "\(model.hostPhones.count) phones")
+                            Text(model.hostControl.phones.count == 1 ? "1 phone" : "\(model.hostControl.phones.count) phones")
                             Spacer()
                             Button("Forget All", role: .destructive) { model.forgetHostPhones() }
-                                .disabled(model.hostPhones.isEmpty)
+                                .disabled(model.hostControl.phones.isEmpty)
                         }
                     }
                     .listRowBackground(Color.white.opacity(0.08))

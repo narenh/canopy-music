@@ -325,7 +325,10 @@ struct TVPartyView: View {
                             LinearGradient(colors: [.black, .clear], startPoint: .top, endPoint: .bottom).frame(height: 90)
                         }
                     }
-                    TVJoinCard()
+                    // Hidden while the host has queueing from phones off.
+                    if session.phonesCanQueue {
+                        TVJoinCard()
+                    }
                 }
                 .frame(width: 660)
                 .padding(.leading, 56)

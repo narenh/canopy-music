@@ -41,7 +41,10 @@ final class TVModel {
     let browser = ZoneBrowser()
     private(set) var guestURL: URL?
     private(set) var friendlyURL: URL?
-    private(set) var hostURL: URL?
+    /// The "Scan to host" link: the guest page plus the Host Control key.
+    var hostURL: URL? {
+        guestURL.flatMap { URL(string: "\($0.absoluteString)/?host=\(hostControl.key)") }
+    }
     /// The hub's party starts once a phone has taken Host Control from the start screen.
     private(set) var hostJoined = false
     private(set) var authorizationDenied = false
@@ -59,7 +62,8 @@ final class TVModel {
     @ObservationIgnored private var hostname = FriendlyHostname(name: "music")
     #endif
     @ObservationIgnored private let advertiser = ZoneAdvertiser()
-    @ObservationIgnored private var hostKey = TVModel.newKey()
+    /// The Host Control key and the phones that have used it (shared with the iPad app).
+    let hostControl = HostControl()
     @ObservationIgnored private let defaults = UserDefaults.standard
 
     var zoneName: String {
@@ -105,17 +109,22 @@ final class TVModel {
             let cache = SongCache()
             session = PartySession(catalog: AppleMusicCatalog(cache: cache), engine: AppleMusicEngine(cache: cache), storeURL: store)
         }
-        hostKey = Self.newKey()
         hostJoined = false
         session.configureHub(kind: .tv, zoneName: zoneName, serviceName: usesDemo ? "Demo" : "Apple Music")
-        session.hostKey = hostKey
-        session.onHostPhone = { [weak self] _ in
+        // Same settings, saved under the same names, as an iPad hub.
+        session.phonesCanQueue = defaults.object(forKey: "phoneQueueEnabled") as? Bool ?? true
+        session.phonesCanReorder = defaults.object(forKey: "phoneReorderEnabled") as? Bool ?? true
+        session.displaysCanControl = defaults.object(forKey: "displaysCanControl") as? Bool ?? true
+        hostControl.attach(to: session) { [weak self] _ in
             guard let self, !self.hostJoined else { return }
             withAnimation(.easeInOut(duration: 0.8)) { self.hostJoined = true }
         }
         session.onSettingsChanged = { [weak self] in
-            guard let self, let name = self.session.zoneName else { return }
-            self.zoneName = name
+            guard let self else { return }
+            self.defaults.set(self.session.phonesCanQueue, forKey: "phoneQueueEnabled")
+            self.defaults.set(self.session.phonesCanReorder, forKey: "phoneReorderEnabled")
+            self.defaults.set(self.session.displaysCanControl, forKey: "displaysCanControl")
+            if let name = self.session.zoneName { self.zoneName = name }
             self.advertise()
         }
         session.onStopRequested = { [weak self] in self?.stopZone() }
@@ -136,7 +145,6 @@ final class TVModel {
         advertiser.stop()
         guestURL = nil
         friendlyURL = nil
-        hostURL = nil
         hostJoined = false
         role = .choosing
         UIApplication.shared.isIdleTimerDisabled = false
@@ -168,7 +176,6 @@ final class TVModel {
         }
         hostname.register(address: ip)
         session.lanAddress = ip + (server.port == 80 ? "" : ":\(server.port)")
-        hostURL = guestURL.flatMap { URL(string: "\($0.absoluteString)/?host=\(hostKey)") }
         #if DEBUG
         print("[tv] host \(hostURL?.absoluteString ?? "-")")
         debugLog("host \(hostURL?.absoluteString ?? "-")")
@@ -247,12 +254,6 @@ final class TVModel {
         #endif
     }
 
-    private static func newKey() -> String {
-        var bytes = [UInt8](repeating: 0, count: 24)
-        _ = SecRandomCopyBytes(kSecRandomDefault, bytes.count, &bytes)
-        return Data(bytes).base64EncodedString()
-            .replacingOccurrences(of: "+", with: "-").replacingOccurrences(of: "/", with: "_").replacingOccurrences(of: "=", with: "")
-    }
 }
 
 /// Placeholders while no zone is running.

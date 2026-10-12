@@ -22,6 +22,47 @@ Status: built on the `tvos-spike` branch (see "Build status" at the end). Screen
 - *Playback controls on displays* is a new hub setting, on by default.
 - Displays have no admin at all. Long-pressing the logo (iPad), or Menu (TV), only offers **Leave**.
 
+## What each hub can do
+
+"Web" is the host page on a phone with Host Control: the admin view for every hub, and the only one an Apple TV has.
+
+| Feature | iPad hub | Apple TV hub |
+|---|---|---|
+| **Music** | | |
+| Apple Music | ✓ | ✓ |
+| Spotify | ✓ | — |
+| Crossfade | ✓ (Apple Music) | — (not on tvOS) |
+| Choose speakers (AirPlay) | ✓ | — (the TV's own audio settings) |
+| Spotify playback device | ✓ | — |
+| **Zone setup** | | |
+| Create a zone | iPad: name, PIN, service | TV: Scan to host, then web: name, playlist |
+| Zone name | iPad, web | web |
+| Base playlist | iPad, web | web |
+| Unlock PIN | iPad, web | — (nothing to unlock) |
+| `.local` address | iPad (default `music`) | fixed `music` |
+| Stop the zone | iPad host mode | Menu on the remote, web |
+| Resume after relaunch | Resume row | create again (the queue is restored) |
+| **Guests** | | |
+| Guest QR code on the party screen | ✓ | ✓ |
+| Queue from phones | iPad, web | web |
+| Reorder from phones | iPad, web | web |
+| Wi‑Fi join QR code | iPad | — (not yet; no way to set it) |
+| **Hosts** | | |
+| Host Control QR code | iPad settings | Scan to host screen |
+| Add another host | iPad settings, web | web |
+| Forget other hosts | iPad, web | web |
+| Play/pause, skip | iPad, web | web, remote's Play/Pause |
+| Scrub | iPad | — |
+| Reorder, delete anything | iPad, web | web |
+| Search and add on the hub itself | ✓ | — (no keyboard UI) |
+| **Displays** | | |
+| Playback controls on displays | iPad, web | web |
+| List of connected displays | iPad host mode | — |
+| **Other** | | |
+| Lock the party screen | press and hold the logo (+ Guided Access) | — |
+| Lyrics takeover (easter egg) | ✓ | — |
+| Keeps the screen awake | ✓ | ✓ |
+
 ## Launch flow (every device, every time)
 
 1. **The zone list:** "Zones on this Wi‑Fi". It always shows, even with one zone or none (with none, the heading hides). There's no auto-join.

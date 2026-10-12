@@ -106,3 +106,74 @@ struct ZoneTests {
         #expect(Date().timeIntervalSince(started) < 10)
     }
 }
+
+/// Hub settings changed from the web page (an Apple TV has no settings screens of its own).
+@MainActor
+@Suite(.serialized)
+struct HostSettingsTests {
+    func post(_ port: UInt16, _ path: String, _ body: [String: Any]) async throws -> (Int, Data) {
+        var request = URLRequest(url: URL(string: "http://127.0.0.1:\(port)\(path)")!)
+        request.httpMethod = "POST"
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.httpBody = try JSONSerialization.data(withJSONObject: body)
+        let (data, response) = try await URLSession.shared.data(for: request)
+        return ((response as? HTTPURLResponse)?.statusCode ?? 0, data)
+    }
+
+    func track() throws -> [String: Any] {
+        let data = try JSONEncoder.api.encode(DemoCatalog.track(21))
+        return try #require(try JSONSerialization.jsonObject(with: data) as? [String: Any])
+    }
+
+    @Test func queueingOffBlocksGuestsNotHosts() async throws {
+        let hub = PartySession(catalog: DemoCatalog(), engine: DemoPlaybackEngine())
+        hub.configureHub(kind: .tv, zoneName: "Living Room", serviceName: "Demo")
+        hub.hostKey = "secret"
+        let (server, task) = try #require(await PartyServer.start(session: hub, ports: [18791]))
+        defer { task.cancel(); Task { await server.stop() } }
+
+        let (off, _) = try await post(18791, "/api/host/settings", ["key": "secret", "phonesCanQueue": false])
+        #expect(off == 200)
+        #expect(!hub.phonesCanQueue)
+        #expect(hub.snapshot().canQueue == false)
+        let (guest, _) = try await post(18791, "/api/add", ["track": try track(), "clientId": "guest"])
+        #expect(guest == 403)
+        let (host, _) = try await post(18791, "/api/add", ["track": try track(), "clientId": "host", "key": "secret"])
+        #expect(host == 200)
+        let (display, _) = try await post(18791, "/api/add", ["track": try track(), "clientId": "kitchen", "origin": "ipad"])
+        #expect(display == 200)
+    }
+
+    @Test func pinOnlyOnHubsThatUseOne() async throws {
+        let hub = PartySession(catalog: DemoCatalog(), engine: DemoPlaybackEngine())
+        hub.hostKey = "secret"
+        var pins: [String] = []
+        hub.onPINChanged = { pins.append($0) }
+        let (server, task) = try #require(await PartyServer.start(session: hub, ports: [18792]))
+        defer { task.cancel(); Task { await server.stop() } }
+
+        // A TV hub (hasPIN nil) has nothing to unlock: ignored.
+        _ = try await post(18792, "/api/host/settings", ["key": "secret", "pin": "1234"])
+        #expect(pins.isEmpty)
+        // An iPad hub takes digits only; "" removes it.
+        hub.hasPIN = false
+        _ = try await post(18792, "/api/host/settings", ["key": "secret", "pin": "12a34"])
+        _ = try await post(18792, "/api/host/settings", ["key": "secret", "pin": ""])
+        #expect(pins == ["1234", ""])
+        #expect(hub.snapshot().hasPIN == false)
+    }
+
+    @Test func forgettingHostsGivesTheAskerANewKey() async throws {
+        let hub = PartySession(catalog: DemoCatalog(), engine: DemoPlaybackEngine())
+        hub.hostKey = "old"
+        hub.onForgetHostPhones = { hub.hostKey = "new"; return "new" }
+        let (server, task) = try #require(await PartyServer.start(session: hub, ports: [18793]))
+        defer { task.cancel(); Task { await server.stop() } }
+
+        let (code, data) = try await post(18793, "/api/host/forget", ["key": "old"])
+        #expect(code == 200)
+        #expect(try JSONDecoder().decode([String: String].self, from: data)["key"] == "new")
+        let (again, _) = try await post(18793, "/api/host/forget", ["key": "old"])
+        #expect(again == 403)
+    }
+}

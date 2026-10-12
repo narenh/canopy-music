@@ -81,7 +81,7 @@
   }
   if (params.get("host") || params.get("cid")) {
     ["host", "cid"].forEach((key) => params.delete(key));
-    history.replaceState(null, "", location.pathname + (params.toString() ? `?${params}` : ""));
+    history.replaceState(null, "", location.pathname + (params.toString() ? `?${params}` : "") + location.hash);
   }
   let hostKey = store.get("canopymusic.hostKey");
   let hostPaired = false;
@@ -169,6 +169,9 @@
     // The host can turn off reordering from phones (host control can always reorder).
     document.querySelector(".list-head .hint").hidden = snap.canReorder === false && !hosting();
     $("transport").hidden = !hosting();
+    const queueOff = snap.canQueue === false && !hosting();
+    $("search-trigger").hidden = queueOff;
+    $("queue-off").hidden = !queueOff;
     renderHost();
     const playing = !!(current && snap.playback.isPlaying);
     $("t-play").innerHTML = playing ? icons.pause : icons.play;
@@ -609,7 +612,7 @@
     button.disabled = true;
     button.textContent = "…";
     try {
-      const reply = await api("/api/add", { track, name: myName, clientId });
+      const reply = await api("/api/add", { track, name: myName, clientId, key: hosting() ? hostKey : undefined });
       if (reply.result === "added") {
         addedWhileSearching.push(reply.itemId);
         toast(`Added · #${reply.index + 1} in line`);
@@ -670,10 +673,8 @@
 
   function renderHost() {
     const on = hosting();
-    $("host-playlist").hidden = !on;
-    $("host-links").hidden = !on;
-    if (!on) { $("setup").hidden = true; return; }
-    $("host-playlist-name").textContent = snap.playlistName || "None yet";
+    $("settings-btn").hidden = !on;
+    if (!on) { $("setup").hidden = true; $("settings-modal").hidden = true; return; }
     // A TV zone has no screens of its own for setup: the first host does it here.
     const needsSetup = snap.hubKind === "tv" && !snap.playlistName && !setupDismissed;
     if (needsSetup && $("setup").hidden) openSetup();
@@ -716,7 +717,8 @@
   }
 
   // Changing the base playlist from the host page.
-  $("host-playlist-change").addEventListener("click", async () => {
+  $("settings-playlist-change").addEventListener("click", async () => {
+    $("settings-modal").hidden = true;
     $("playlists").hidden = false;
     $("playlists-empty").hidden = false;
     $("playlists-empty").textContent = "Loading playlists…";
@@ -764,21 +766,47 @@
   });
 
   // Another host: the hub draws the QR code.
-  $("host-invite").addEventListener("click", () => {
+  $("settings-invite").addEventListener("click", () => {
     $("invite-img").src = `/api/host/invite.png?${keyQuery()}&t=${Date.now()}`;
     $("invite-modal").hidden = false;
   });
   $("invite-done").addEventListener("click", () => { $("invite-modal").hidden = true; });
 
-  // Zone settings.
-  $("host-settings").addEventListener("click", () => {
+  // Zone settings: the admin view for every hub (an Apple TV has no settings screens).
+  $("settings-btn").addEventListener("click", () => {
     $("settings-name").value = snap.zoneName || "";
+    // Only hubs with something to unlock (iPads) have a PIN. It's never sent here, only whether it's set.
+    const pinBlock = $("settings-pin-block");
+    pinBlock.hidden = snap.hasPIN == null;
+    $("settings-pin").value = "";
+    $("settings-pin").placeholder = snap.hasPIN ? "Set (type a new one to change it)" : "Not set";
+    $("settings-pin-remove").hidden = !snap.hasPIN;
+    $("settings-playlist").textContent = snap.playlistName || "None yet";
+    $("settings-queue").checked = snap.canQueue !== false;
     $("settings-reorder").checked = snap.canReorder !== false;
     $("settings-displays").checked = snap.displaysCanControl !== false;
+    const hosts = snap.hostPhones || 0;
+    $("settings-hosts").textContent = hosts === 1 ? "1 phone" : `${hosts} phones`;
+    $("settings-forget").hidden = hosts < 2;
     const stop = $("settings-stop");
     stop.hidden = snap.hubKind !== "tv";
     stop.textContent = `Stop ${snap.zoneName || "this zone"}`;
     $("settings-modal").hidden = false;
+  });
+  $("settings-pin-remove").addEventListener("click", async () => {
+    if (!confirm("Remove the unlock PIN?")) return;
+    try { await api("/api/host/settings", { key: hostKey, pin: "" }); $("settings-pin-remove").hidden = true; $("settings-pin").placeholder = "Not set"; }
+    catch { toast("Couldn't remove the PIN"); }
+  });
+  $("settings-forget").addEventListener("click", async () => {
+    if (!confirm("Forget every other host? Their phones go back to guest view. This phone stays a host.")) return;
+    try {
+      const reply = await api("/api/host/forget", { key: hostKey });
+      hostKey = reply.key;
+      store.set("canopymusic.hostKey", hostKey);
+      $("settings-hosts").textContent = "1 phone";
+      $("settings-forget").hidden = true;
+    } catch { toast("Couldn't forget the other hosts"); }
   });
   $("settings-cancel").addEventListener("click", () => { $("settings-modal").hidden = true; });
   $("settings-form").addEventListener("submit", async (event) => {
@@ -788,6 +816,8 @@
       await api("/api/host/settings", {
         key: hostKey,
         zoneName: $("settings-name").value.trim() || undefined,
+        pin: $("settings-pin").value.trim() || undefined,
+        phonesCanQueue: $("settings-queue").checked,
         phonesCanReorder: $("settings-reorder").checked,
         displaysCanControl: $("settings-displays").checked,
       });
@@ -836,6 +866,8 @@
         hostPaired = true;
         updateNameChip();
         if (snap) render();
+        // A link to …/#settings opens the zone settings.
+        if (location.hash === "#settings" && snap && hosting()) $("settings-btn").click();
       })
       .catch((error) => {
         // Only a refusal means the key was revoked; a network hiccup keeps it.

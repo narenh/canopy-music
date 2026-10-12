@@ -97,6 +97,9 @@ final class TVModel {
 
     // MARK: Hub
 
+    /// The hub's queue, kept between launches until the zone is ended.
+    private static var storeURL: URL { URL.applicationSupportDirectory.appending(path: "tv-party.json") }
+
     func createZone() async {
         debugLog("createZone")
         if !usesDemo {
@@ -104,7 +107,7 @@ final class TVModel {
             authorizationDenied = status != .authorized
             guard status == .authorized else { return }
         }
-        let store = URL.applicationSupportDirectory.appending(path: "tv-party.json")
+        let store = Self.storeURL
         try? FileManager.default.createDirectory(at: .applicationSupportDirectory, withIntermediateDirectories: true)
         if usesDemo {
             #if DEBUG
@@ -146,8 +149,12 @@ final class TVModel {
         await Task { await self.startServer() }.value
     }
 
+    /// Ends the zone (Menu › End, or a host on the web page) and goes back to the zone list: stops
+    /// the music, the server, the Bonjour announcement and the `.local` name, and clears the queue
+    /// and the saved queue, so the next zone starts empty. Settings and Host Control stay.
     func stopZone() {
-        if session.isPlaying { session.pause() }
+        session.end()
+        session = PartySession(catalog: DemoOrEmptyCatalog(), engine: SilentEngine())
         serverTask?.cancel()
         serverTask = nil
         let server = server

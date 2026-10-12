@@ -94,6 +94,7 @@ private extension View {
 struct TVZoneListView: View {
     #if DEBUG
     @MainActor static var didAutoShow = false
+    @MainActor static var didAutoCreate = false
     #endif
     @Environment(TVModel.self) private var model
     /// A zone's id, or "create".
@@ -146,9 +147,12 @@ struct TVZoneListView: View {
             if wasEmpty, !isEmpty, focused == "create" || focused == nil { focused = zones.first?.id }
         }
         #if DEBUG
-        // `-createZone` / `-showZone <name>`: act without the remote, for the simulator.
+        // `-createZone` / `-showZone <name>`: act without the remote, for the simulator. Once per
+        // launch, so ending the zone comes back to this list.
         .task {
-            if ProcessInfo.processInfo.arguments.contains("-createZone") { await model.createZone() }
+            guard !Self.didAutoCreate, ProcessInfo.processInfo.arguments.contains("-createZone") else { return }
+            Self.didAutoCreate = true
+            await model.createZone()
         }
         .onChange(of: zones.map(\.id), initial: true) {
             let args = ProcessInfo.processInfo.arguments

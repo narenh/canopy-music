@@ -41,7 +41,7 @@ Status: built on the `tvos-spike` branch (see "Build status" at the end). Screen
 | Unlock PIN | iPad settings (only on the iPad, not the web) | — |
 | `.local` address | follows the zone name | follows the zone name |
 | End the zone | iPad host mode (top, and in settings), web (both ask first) | Menu on the remote, web (web asks first) |
-| Resume after relaunch | Resume row | create again (the queue is restored) |
+| Resume after a relaunch or crash without End | Resume row | create again (the queue is restored) |
 | **Guests** | | |
 | Guest QR code on the party screen | ✓ | ✓ |
 | Queue from phones | iPad, web | web |
@@ -84,14 +84,15 @@ Status: built on the `tvos-spike` branch (see "Build status" at the end). Screen
   - `POST /api/host/playlist`: load a base playlist. Answers with how many of its songs were left out (not on the music service, e.g. iTunes Match uploads with no catalog match) and the first few titles. Snapshots carry the same (`skippedOnLoad`, `skippedTitles`) until another playlist loads: the iPad shows "3 songs aren't on Apple Music" under the base playlist (tap for the list), the web settings sheet shows it under Base playlist, and an Apple TV's host also gets it once as a toast. Debug builds' demo library has "Road trip", which leaves 4 out.
   - `POST /api/host/settings`: zone name, queue and reorder from phones, display controls, Wi‑Fi; any subset (the web sheet saves each change as it's made). Not the iPad's unlock PIN, which is set only on the iPad.
   - `GET /api/host/details`: the Wi‑Fi details and the connected displays. The Wi‑Fi password is never in the snapshots guests get.
-  - `POST /api/host/stop`: ends the zone (any hub). The page asks first.
+  - `POST /api/host/stop`: ends the zone (any hub), exactly as ending it on the hub does. The page asks first.
   - `GET /api/host/invite.png`: the "Add another host" QR, rendered by the hub.
 - **Host keys are kept per hub:** snapshots carry the hub's device ID (`hubID`), and the page keeps one key per hub. A hub that refuses a key only drops its own, so a phone that's a host of two zones (or of a zone whose address another hub later takes) stays a host of both. Keys move along with the phone's ID and name when the page moves to the friendly address.
 - **If a hub disappears,** displays show "Lost connection to <zone>" and keep retrying. The queue is saved on the hub.
 
 ## Decisions taken while building (review)
 
-- **"Resume" row:** an iPad that was a hub last time shows its own zone first in the list ("Resume Upstairs"), so relaunching after a crash is one tap.
+- **"Resume" row:** an iPad whose zone was still running when the app quit or crashed shows it first in the list ("Resume Upstairs"), so getting it back is one tap. Ending the zone removes the row.
+- **Ending a zone** (iPad, TV or web, all the same) stops the music, the guest server, the Bonjour announcement and the `.local` name, so the zone leaves every device's list at once. It clears the queue, history and base playlist and deletes the saved queue, so the next zone on that device starts empty. Settings stay: zone name, Wi‑Fi, the toggles, Host Control and its phones, and the service sign-in.
 - **"Queue from phones" isn't offered on a TV hub,** since the web page is how a TV zone is run.
 - **Displays add songs as "<zone display name>"** (e.g. "Kitchen iPad"), so the requester pill shows where a song came from. Displays can't delete, including songs they added.
 - **The device-name default needs Apple's user-assigned-device-name entitlement** on iOS 16 and later. Until it's granted, the default is "iPad" / "Apple TV".
@@ -105,6 +106,7 @@ Status: built on the `tvos-spike` branch (see "Build status" at the end). Screen
 - **iPad:** the zone list; an iPad hub announcing its zone; another iPad joining as a display, with the hub's live queue and progress, prev/play/next without AirPlay or crossfade, and its QR pointing at the hub.
 - **Apple TV:** the zone list finding the iPad's zone; showing it as a display with the zone badge; creating a zone; "Scan to host"; first-host setup from the web API (name and playlist), after which the TV plays and announces the renamed zone.
 - **Web:** the host page with the base playlist row; the invite QR (rendered by the hub); the playlists endpoint.
+- **Ending a zone** (simulators, 12 Oct 2026): from the iPad's End alert, the web endpoint on an iPad hub and on a TV hub, the zone leaves `dns-sd -B _canopymusic._tcp`, the server and `.local` name go, the saved queue is deleted, there's no Resume row, and a relaunch starts empty. A quit without End still offers Resume with the queue.
 - **Package tests:** display mirroring, adding with the display's ID, refused moves undone, display controls following the hub setting, port fallback.
 
 **Not tested yet:**

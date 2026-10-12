@@ -24,7 +24,7 @@ struct ZoneListView: View {
                     if !zones.isEmpty || model.canResumeZone {
                         Section("Active Zones") {
                             if model.canResumeZone {
-                                ZoneRow(icon: "ipad.landscape", title: model.zoneName, subtitle: "This iPad · resume") {
+                                ZoneRow(icon: "ipad.landscape", title: model.zoneName, subtitle: "Resume on this iPad") {
                                     model.resumeZone()
                                 }
                             }

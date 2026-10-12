@@ -5,15 +5,19 @@ import SwiftUI
 /// Every launch starts here: the zones on this Wi‑Fi, plus "Create a new zone" (docs/multi-device.md).
 struct ZoneListView: View {
     @Environment(AppModel.self) private var model
+    /// The list's content height, so it's only as tall as its rows and the whole screen can be
+    /// centered (a List otherwise takes all the height it's offered).
+    @State private var listHeight: CGFloat = 300
 
     var body: some View {
         let zones = model.zoneBrowser.zones.filter { $0.hubID != model.deviceID }
         ZStack {
             LinearGradient(colors: [Color(white: 0.13), Color(white: 0.06)], startPoint: .top, endPoint: .bottom)
                 .ignoresSafeArea()
-            VStack(spacing: 8) {
+            VStack(spacing: 0) {
+                Spacer(minLength: 24)
                 LogoView(height: 44)
-                    .padding(.top, 48)
+                    .padding(.bottom, 28)
                 List {
                     // Hidden until there's a zone to show. This iPad's own zone from last time
                     // comes first.
@@ -35,7 +39,16 @@ struct ZoneListView: View {
                 }
                 .listStyle(.insetGrouped)
                 .scrollContentBackground(.hidden)
-                .frame(maxWidth: 560)
+                .onScrollGeometryChange(for: CGFloat.self) { geometry in
+                    geometry.contentSize.height + geometry.contentInsets.top + geometry.contentInsets.bottom
+                } action: { _, height in
+                    // Before the rows are laid out it reports nothing; collapsing then would stick.
+                    if height > 1 { listHeight = height }
+                }
+                .frame(maxWidth: 560, maxHeight: listHeight)
+                Spacer(minLength: 24)
+                // A little more room below than above, so it looks centered rather than sitting low.
+                Color.clear.frame(height: 64)
             }
         }
         .environment(\.colorScheme, .dark)

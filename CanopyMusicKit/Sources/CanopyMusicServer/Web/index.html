@@ -114,7 +114,13 @@
     <p class="settings-head">Phones</p>
     <label class="setting-row"><span>Queue from phones</span><input type="checkbox" class="switch" id="settings-queue"></label>
     <label class="setting-row"><span>Reorder from phones</span><input type="checkbox" class="switch" id="settings-reorder"></label>
+    <p class="settings-head">Wi&#8209;Fi information</p>
+    <input class="text-input" id="settings-wifi-ssid" maxlength="32" placeholder="Network name" autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck="false" data-1p-ignore data-lpignore="true">
+    <input class="text-input settings-gap" id="settings-wifi-password" maxlength="63" placeholder="Password" autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck="false" data-1p-ignore data-lpignore="true">
+    <label class="setting-row"><span>Simple QR code</span><input type="checkbox" class="switch" id="settings-wifi-simple"></label>
+    <p class="small">Shows a “Join Wi&#8209;Fi” QR code next to the guest one. Turn on Simple QR code if a phone has trouble scanning it.</p>
     <p class="settings-head">Displays</p>
+    <ul class="settings-displays" id="settings-display-list"></ul>
     <label class="setting-row"><span>Playback controls on displays</span><input type="checkbox" class="switch" id="settings-displays"></label>
     <p class="settings-head">Host Control</p>
     <div class="setting-row"><span class="setting-value" id="settings-hosts"></span><button type="button" class="pill-btn" id="settings-invite">Add another host</button></div>

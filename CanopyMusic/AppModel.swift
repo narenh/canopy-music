@@ -131,10 +131,10 @@ final class AppModel {
             applyCrossfade()
         }
     }
-    var wifiSSID: String { didSet { defaults.set(wifiSSID, forKey: "wifiSSID") } }
-    var wifiPassword: String { didSet { defaults.set(wifiPassword, forKey: "wifiPassword") } }
+    var wifiSSID: String { didSet { defaults.set(wifiSSID, forKey: "wifiSSID"); session.wifi.ssid = wifiSSID } }
+    var wifiPassword: String { didSet { defaults.set(wifiPassword, forKey: "wifiPassword"); session.wifi.password = wifiPassword } }
     /// Plain Join Wi‑Fi code with a caption, for phones that struggle with the Wi‑Fi symbol design.
-    var wifiSimpleQR: Bool { didSet { defaults.set(wifiSimpleQR, forKey: "wifiSimpleQR") } }
+    var wifiSimpleQR: Bool { didSet { defaults.set(wifiSimpleQR, forKey: "wifiSimpleQR"); session.wifi.simpleQR = wifiSimpleQR } }
     /// The `<name>.local` address guests can type. Set through `setLocalName(_:)`.
     private(set) var localName: String
     /// Runs the LAN web server guests use to queue from their phones.
@@ -543,6 +543,7 @@ final class AppModel {
         session.displaysCanControl = displaysCanControl
         session.phonesCanQueue = phoneQueueEnabled
         session.hasPIN = !hostPIN.isEmpty
+        session.wifi = WifiDetails(ssid: wifiSSID, password: wifiPassword, simpleQR: wifiSimpleQR)
     }
 
     /// Announces this zone (or refreshes what's playing in the announcement).
@@ -586,6 +587,10 @@ final class AppModel {
             if self.session.phonesCanReorder != self.phoneReorderEnabled { self.phoneReorderEnabled = self.session.phonesCanReorder }
             if self.session.displaysCanControl != self.displaysCanControl { self.displaysCanControl = self.session.displaysCanControl }
             if self.session.phonesCanQueue != self.phoneQueueEnabled { self.phoneQueueEnabled = self.session.phonesCanQueue }
+            let wifi = self.session.wifi
+            if wifi.ssid != self.wifiSSID { self.wifiSSID = wifi.ssid }
+            if wifi.password != self.wifiPassword { self.wifiPassword = wifi.password }
+            if wifi.simpleQR != self.wifiSimpleQR { self.wifiSimpleQR = wifi.simpleQR }
         }
         session.onPINChanged = { [weak self] pin in self?.hostPIN = pin }
     }

@@ -160,6 +160,15 @@
     if (snap && next.version < snap.version) return;
     snap = next;
     render();
+    openSettingsFromLink();
+  }
+
+  // A link to …/#settings opens the zone settings once this phone is a host and the state has loaded.
+  let settingsLinkPending = location.hash === "#settings";
+  function openSettingsFromLink() {
+    if (!settingsLinkPending || !snap || !hosting()) return;
+    settingsLinkPending = false;
+    $("settings-btn").click();
   }
 
   function render() {
@@ -791,8 +800,33 @@
     const stop = $("settings-stop");
     stop.hidden = snap.hubKind !== "tv";
     stop.textContent = `Stop ${snap.zoneName || "this zone"}`;
+    // Host-only details: the Wi‑Fi (never in the snapshot guests get) and connected displays.
+    settingsWifiLoaded = false;
+    for (const id of ["settings-wifi-ssid", "settings-wifi-password"]) { $(id).value = ""; $(id).disabled = true; }
+    const list = $("settings-display-list");
+    list.innerHTML = "";
+    api(`/api/host/details?${keyQuery()}`).then((details) => {
+      $("settings-wifi-ssid").value = details.wifi.ssid;
+      $("settings-wifi-password").value = details.wifi.password;
+      $("settings-wifi-simple").checked = details.wifi.simpleQR;
+      for (const id of ["settings-wifi-ssid", "settings-wifi-password"]) $(id).disabled = false;
+      settingsWifiLoaded = true;
+      for (const d of details.displays) {
+        const li = document.createElement("li");
+        li.innerHTML = d.kind === "tv" ? icons.tv : icons.ipad;
+        li.append(d.name);
+        list.append(li);
+      }
+      if (!details.displays.length) {
+        const li = document.createElement("li");
+        li.className = "none";
+        li.textContent = "No displays connected";
+        list.append(li);
+      }
+    }).catch(() => {});
     $("settings-modal").hidden = false;
   });
+  let settingsWifiLoaded = false;
   $("settings-pin-remove").addEventListener("click", async () => {
     if (!confirm("Remove the unlock PIN?")) return;
     try { await api("/api/host/settings", { key: hostKey, pin: "" }); $("settings-pin-remove").hidden = true; $("settings-pin").placeholder = "Not set"; }
@@ -817,6 +851,12 @@
         key: hostKey,
         zoneName: $("settings-name").value.trim() || undefined,
         pin: $("settings-pin").value.trim() || undefined,
+        // Only if the current values loaded, so a slow load can't blank the Wi‑Fi.
+        wifi: settingsWifiLoaded ? {
+          ssid: $("settings-wifi-ssid").value.trim(),
+          password: $("settings-wifi-password").value,
+          simpleQR: $("settings-wifi-simple").checked,
+        } : undefined,
         phonesCanQueue: $("settings-queue").checked,
         phonesCanReorder: $("settings-reorder").checked,
         displaysCanControl: $("settings-displays").checked,
@@ -866,8 +906,7 @@
         hostPaired = true;
         updateNameChip();
         if (snap) render();
-        // A link to …/#settings opens the zone settings.
-        if (location.hash === "#settings" && snap && hosting()) $("settings-btn").click();
+        openSettingsFromLink();
       })
       .catch((error) => {
         // Only a refusal means the key was revoked; a network hiccup keeps it.

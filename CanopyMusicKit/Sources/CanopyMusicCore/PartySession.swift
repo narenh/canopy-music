@@ -7,6 +7,21 @@ public struct PlaybackSnapshot: Codable, Equatable, Sendable {
     public var capturedAt: Date
 }
 
+/// The hub's guest Wi‑Fi, shown as a "Join Wi‑Fi" QR code. Hosts edit it from the web page; it's
+/// never part of a snapshot, so guests' phones don't receive the password.
+public struct WifiDetails: Codable, Equatable, Sendable {
+    public var ssid: String
+    public var password: String
+    /// A plain QR code instead of the halftone one with the Wi‑Fi symbol, for phones that struggle.
+    public var simpleQR: Bool
+
+    public init(ssid: String = "", password: String = "", simpleQR: Bool = false) {
+        self.ssid = ssid
+        self.password = password
+        self.simpleQR = simpleQR
+    }
+}
+
 /// What phones (and anything else outside the app) see.
 public struct PartySnapshot: Codable, Equatable, Sendable {
     public var version: Int
@@ -75,6 +90,8 @@ public final class PartySession {
     public var hostPhoneCount = 0 {
         didSet { if hostPhoneCount != oldValue, remote == nil { broadcast() } }
     }
+    /// The hub's guest Wi‑Fi (hub only; not in snapshots).
+    public var wifi = WifiDetails()
     /// A host set (non-empty) or removed (empty) the unlock PIN from the web page.
     @ObservationIgnored public var onPINChanged: (@MainActor (String) -> Void)?
     /// A host revoked every other phone's Host Control; returns the new key for that host.
@@ -175,7 +192,8 @@ public final class PartySession {
 
     /// Applies settings sent by a host from the web page. `pin`: a new PIN, or "" to remove it.
     public func applyHostSettings(zoneName: String?, phonesCanQueue: Bool? = nil, phonesCanReorder: Bool?,
-                                  displaysCanControl: Bool?, pin: String? = nil) {
+                                  displaysCanControl: Bool?, pin: String? = nil, wifi: WifiDetails? = nil) {
+        if let wifi { self.wifi = wifi }
         if let zoneName, !zoneName.isEmpty { self.zoneName = zoneName }
         if let phonesCanQueue { self.phonesCanQueue = phonesCanQueue }
         if let phonesCanReorder { self.phonesCanReorder = phonesCanReorder }

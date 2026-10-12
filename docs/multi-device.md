@@ -46,7 +46,7 @@ Status: built on the `tvos-spike` branch (see "Build status" at the end). Screen
 | Guest QR code on the party screen | ✓ | ✓ |
 | Queue from phones | iPad, web | web |
 | Reorder from phones | iPad, web | web |
-| Wi‑Fi join QR code | iPad | — (not yet; no way to set it) |
+| Wi‑Fi join QR code | iPad, web | web |
 | **Hosts** | | |
 | Host Control QR code | iPad settings | Scan to host screen |
 | Add another host | iPad settings, web | web |
@@ -57,7 +57,7 @@ Status: built on the `tvos-spike` branch (see "Build status" at the end). Screen
 | Search and add on the hub itself | ✓ | — (no keyboard UI) |
 | **Displays** | | |
 | Playback controls on displays | iPad, web | web |
-| List of connected displays | iPad host mode | — |
+| List of connected displays | iPad host mode, web | web |
 | **Other** | | |
 | Lock the party screen | press and hold the logo (+ Guided Access) | — |
 | Lyrics takeover (easter egg) | ✓ | — |
@@ -81,7 +81,8 @@ Status: built on the `tvos-spike` branch (see "Build status" at the end). Screen
 - **Hosts on the web** get new endpoints, all requiring the host key:
   - `GET /api/host/playlists`: the hub's library.
   - `POST /api/host/playlist`: load a base playlist.
-  - `POST /api/host/settings`: zone name, reorder, display controls.
+  - `POST /api/host/settings`: zone name, reorder, display controls, Wi‑Fi.
+  - `GET /api/host/details`: the Wi‑Fi details and the connected displays. The Wi‑Fi password is never in the snapshots guests get.
   - `POST /api/host/stop`: TV hubs.
   - `GET /api/host/invite.png`: the "Add another host" QR, rendered by the hub.
 - **If a hub disappears,** displays show "Lost connection to <zone>" and keep retrying. The queue is saved on the hub.

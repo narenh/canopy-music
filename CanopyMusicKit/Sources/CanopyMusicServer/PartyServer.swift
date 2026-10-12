@@ -173,9 +173,17 @@ public final class PartyServer: Sendable {
                 phonesCanQueue: body.phonesCanQueue,
                 phonesCanReorder: body.phonesCanReorder,
                 displaysCanControl: body.displaysCanControl,
-                pin: body.pin.map { String($0.filter(\.isNumber).prefix(8)) }
+                pin: body.pin.map { String($0.filter(\.isNumber).prefix(8)) },
+                wifi: body.wifi.map { WifiDetails(ssid: String($0.ssid.prefix(32)), password: String($0.password.prefix(63)), simpleQR: $0.simpleQR) }
             )
             return HTTPResponse(statusCode: .ok)
+        }
+
+        // Settings only hosts see: the Wi‑Fi password, and which displays are connected.
+        await server.appendRoute("GET /api/host/details") { request in
+            guard await session.isHost(key: request.query["key"]) else { return HTTPResponse(statusCode: .forbidden) }
+            let displays = await session.displays.filter { Date().timeIntervalSince($0.lastSeen) < 30 }
+            return try .json(HostDetails(wifi: await session.wifi, displays: displays.map { .init(name: $0.name, kind: $0.kind) }))
         }
 
         // Revokes Host Control from every other phone; this one gets the new key.
@@ -247,7 +255,14 @@ struct PlaylistBody: Decodable {
     var play: Bool?
 }
 
+struct HostDetails: Encodable {
+    struct Display: Encodable { var name: String; var kind: HubKind }
+    var wifi: WifiDetails
+    var displays: [Display]
+}
+
 struct SettingsBody: Decodable {
+    var wifi: WifiDetails?
     var key: String
     var zoneName: String?
     var phonesCanQueue: Bool?

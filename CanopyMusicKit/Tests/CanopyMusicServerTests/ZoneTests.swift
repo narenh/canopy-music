@@ -163,6 +163,29 @@ struct HostSettingsTests {
         #expect(hub.snapshot().hasPIN == false)
     }
 
+    @Test func wifiIsHostOnly() async throws {
+        let hub = PartySession(catalog: DemoCatalog(), engine: DemoPlaybackEngine())
+        hub.hostKey = "secret"
+        hub.noteDisplay(ZoneDisplay(id: "kitchen", name: "Kitchen iPad", kind: .ipad))
+        let (server, task) = try #require(await PartyServer.start(session: hub, ports: [18794]))
+        defer { task.cancel(); Task { await server.stop() } }
+
+        let (code, _) = try await post(18794, "/api/host/settings", [
+            "key": "secret", "wifi": ["ssid": "Party", "password": "hunter22", "simpleQR": true],
+        ])
+        #expect(code == 200)
+        #expect(hub.wifi == WifiDetails(ssid: "Party", password: "hunter22", simpleQR: true))
+        // Guests never get it.
+        let state = try await URLSession.shared.data(from: URL(string: "http://127.0.0.1:18794/api/state")!).0
+        #expect(!String(decoding: state, as: UTF8.self).contains("hunter22"))
+        // Hosts do, with the connected displays.
+        let (refused, _) = try await URLSession.shared.data(from: URL(string: "http://127.0.0.1:18794/api/host/details?key=nope")!)
+        #expect(refused.isEmpty)
+        let (details, _) = try await URLSession.shared.data(from: URL(string: "http://127.0.0.1:18794/api/host/details?key=secret")!)
+        let text = String(decoding: details, as: UTF8.self)
+        #expect(text.contains("hunter22") && text.contains("Kitchen iPad"))
+    }
+
     @Test func forgettingHostsGivesTheAskerANewKey() async throws {
         let hub = PartySession(catalog: DemoCatalog(), engine: DemoPlaybackEngine())
         hub.hostKey = "old"

@@ -416,10 +416,22 @@ struct TVJoinCard: View {
             .lineLimit(1)
             .frame(maxWidth: .infinity, alignment: .leading)
             if let wifi = model.wifiPayload {
-                // Same as the iPad's: the Wi‑Fi symbol says what it is.
-                HalftoneQRCode(payload: wifi, symbol: "wifi", symbolScale: 0.6, dotScale: 0.7)
-                    .frame(width: 88, height: 88)
-                    .opacity(0.75)
+                // Same as the iPad's: the Wi‑Fi symbol says what it is, unless the host chose a plain
+                // code for phones that struggle with it.
+                if model.session.wifi.simpleQR {
+                    VStack(spacing: 6) {
+                        QRCodeView(payload: wifi, inverted: true)
+                            .frame(width: 74, height: 74)
+                            .opacity(0.75)
+                        Text("Join Wi\u{2011}Fi")
+                            .font(.system(size: 15, weight: .semibold))
+                            .foregroundStyle(.white.opacity(0.5))
+                    }
+                } else {
+                    HalftoneQRCode(payload: wifi, symbol: "wifi", symbolScale: 0.6, dotScale: 0.7)
+                        .frame(width: 88, height: 88)
+                        .opacity(0.75)
+                }
             }
         }
         .padding(22)
@@ -515,24 +527,12 @@ struct TVQRCode: View {
     var body: some View {
         ZStack {
             RoundedRectangle(cornerRadius: 22, style: .continuous).fill(.white)
-            if let payload, let image = Self.render(payload) {
-                Image(uiImage: image)
-                    .interpolation(.none)
-                    .resizable()
-                    .scaledToFit()
+            if let payload {
+                QRCodeView(payload: payload)
                     .padding(14)
             } else {
                 ProgressView().tint(.black)
             }
         }
-    }
-
-    static func render(_ payload: String) -> UIImage? {
-        let filter = CIFilter.qrCodeGenerator()
-        filter.message = Data(payload.utf8)
-        filter.correctionLevel = "M"
-        guard let output = filter.outputImage,
-              let cgImage = CIContext().createCGImage(output, from: output.extent) else { return nil }
-        return UIImage(cgImage: cgImage)
     }
 }

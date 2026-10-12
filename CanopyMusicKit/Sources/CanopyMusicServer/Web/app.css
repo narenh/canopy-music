@@ -55,6 +55,10 @@ main, .sheet {
 .queue-off[hidden] { display: none; }
 .settings-card { max-height: 86vh; overflow-y: auto; }
 .settings-head { font-size: 12px; font-weight: 600; text-transform: uppercase; letter-spacing: .04em; color: var(--text-3) !important; margin: 18px 2px 4px !important; }
+.settings-gap { margin-top: 8px; }
+.settings-displays { list-style: none; margin: 0; padding: 0; }
+.settings-displays li { display: flex; align-items: center; gap: 8px; padding: 11px 2px; border-bottom: 1px solid var(--line); font-size: 15px; }
+.settings-displays li.none { color: var(--text-3); }
 .setting-value { min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .chips { display: flex; flex: 0 1 auto; min-width: 0; border-radius: 999px; background: var(--surface); overflow: hidden; }
 .chips .name-chip { background: none; max-width: none; min-width: 0; }

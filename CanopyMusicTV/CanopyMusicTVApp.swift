@@ -115,6 +115,8 @@ final class TVModel {
         session.phonesCanQueue = defaults.object(forKey: "phoneQueueEnabled") as? Bool ?? true
         session.phonesCanReorder = defaults.object(forKey: "phoneReorderEnabled") as? Bool ?? true
         session.displaysCanControl = defaults.object(forKey: "displaysCanControl") as? Bool ?? true
+        session.wifi = WifiDetails(ssid: defaults.string(forKey: "wifiSSID") ?? "", password: defaults.string(forKey: "wifiPassword") ?? "",
+                                   simpleQR: defaults.bool(forKey: "wifiSimpleQR"))
         hostControl.attach(to: session) { [weak self] _ in
             guard let self, !self.hostJoined else { return }
             withAnimation(.easeInOut(duration: 0.8)) { self.hostJoined = true }
@@ -124,6 +126,9 @@ final class TVModel {
             self.defaults.set(self.session.phonesCanQueue, forKey: "phoneQueueEnabled")
             self.defaults.set(self.session.phonesCanReorder, forKey: "phoneReorderEnabled")
             self.defaults.set(self.session.displaysCanControl, forKey: "displaysCanControl")
+            self.defaults.set(self.session.wifi.ssid, forKey: "wifiSSID")
+            self.defaults.set(self.session.wifi.password, forKey: "wifiPassword")
+            self.defaults.set(self.session.wifi.simpleQR, forKey: "wifiSimpleQR")
             if let name = self.session.zoneName { self.zoneName = name }
             self.advertise()
         }
@@ -215,15 +220,16 @@ final class TVModel {
         UIApplication.shared.isIdleTimerDisabled = false
     }
 
-    /// A Wi‑Fi join code shown next to the guest QR. The TV has no settings screens, so for now
-    /// only the debug `-fakeWifi` flag sets it.
+    /// The "Join Wi‑Fi" code next to the guest QR: this hub's Wi‑Fi, set by a host on the web page.
+    /// A display doesn't know its hub's (as on the iPad).
     var wifiPayload: String? {
         #if DEBUG
         if ProcessInfo.processInfo.arguments.contains("-fakeWifi") {
             return LocalNetwork.wifiJoinPayload(ssid: "Canopy Guest", password: "summer-party-2026")
         }
         #endif
-        return nil
+        guard role == .hub, !session.wifi.ssid.isEmpty else { return nil }
+        return LocalNetwork.wifiJoinPayload(ssid: session.wifi.ssid, password: session.wifi.password)
     }
 
     /// A display that isn't connected to its hub (yet, or any more).

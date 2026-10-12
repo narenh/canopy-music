@@ -5,6 +5,40 @@ import SwiftUI
 import UIKit
 import Vision
 
+struct QRCodeView: View {
+    let payload: String
+    /// White modules on a transparent background, for a quieter secondary code.
+    var inverted = false
+
+    var body: some View {
+        if let image = Self.render(payload, inverted: inverted) {
+            Image(uiImage: image)
+                .interpolation(.none)
+                .resizable()
+                .scaledToFit()
+        } else {
+            Color.clear
+        }
+    }
+
+    static func render(_ payload: String, inverted: Bool = false) -> UIImage? {
+        let filter = CIFilter.qrCodeGenerator()
+        filter.message = Data(payload.utf8)
+        filter.correctionLevel = "M"
+        guard var output = filter.outputImage else { return nil }
+        if inverted {
+            let recolor = CIFilter.falseColor()
+            recolor.inputImage = output
+            recolor.color0 = CIColor(red: 1, green: 1, blue: 1, alpha: 1)
+            recolor.color1 = CIColor(red: 0, green: 0, blue: 0, alpha: 0)
+            guard let recolored = recolor.outputImage else { return nil }
+            output = recolored
+        }
+        guard let cgImage = CIContext().createCGImage(output, from: output.extent) else { return nil }
+        return UIImage(cgImage: cgImage)
+    }
+}
+
 /// The module grid of a QR code, taken from Core Image's generator so we can draw it our way.
 struct QRMatrix {
     let size: Int

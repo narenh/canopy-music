@@ -67,6 +67,11 @@ Status: built on the `tvos-spike` branch (see "Build status" at the end). Screen
 - **The iPad's "Create a new zone" screens** (name, PIN): built, but not tapped through. The simulator can't be tapped from here.
 - **Leaving a zone and the lost-connection overlay** (iPad and TV): built, but not seen.
 - **Moving to `music-2.local` on a name clash:** simulators share the Mac's IP address, which mDNS doesn't treat as a clash. Needs two real devices.
-- **Real Apple Music on an Apple TV.**
-- **Pressing Menu and Play/Pause on the Siri Remote.**
+- **Pressing Menu and Play/Pause on the Siri Remote** (now handled; not yet confirmed on the remote).
+
+**Apple TV and Apple Music (found on a real Apple TV, 12 Oct 2026):**
+- The TV app shares the iPad's bundle ID (`com.canopysf.CanopyMusic`). That's required for one App Store listing across iPad and Apple TV, and the separate `com.canopysf.CanopyTV` ID had no MusicKit service, so every Apple Music request failed.
+- Library playlists' songs are fetched fresh from the catalog on tvOS. The catalog songs that come with library tracks can't start a fresh player there: the player connection drops and the app hangs. Verified on Living Room with two playlists.
+- **Still open: a dropped player connection freezes the whole app** (screen and web server). Reading the playback time off the main thread wasn't enough: it still hung, so something else blocks the main thread. Next step: log around each player call on the device to find which one never returns. The work in progress is a patch with that logging, not committed.
+- The TV's debug-only `-playTest` screen plays Apple Music without the rest of the app, for telling Apple bugs from ours.
 - **The web page's setup sheet, settings and invite modals** in a real phone browser (only the API behind them was exercised).

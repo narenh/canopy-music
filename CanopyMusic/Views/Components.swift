@@ -172,7 +172,7 @@ struct LogoView: View {
             .resizable()
             .scaledToFit()
             .frame(height: height)
-            .accessibilityLabel("Canopy")
+            .accessibilityLabel("Canopy Music")
     }
 }
 

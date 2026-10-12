@@ -11,11 +11,11 @@ iPad party jukebox for Apple Music or Spotify. Pick a base playlist, lock the iP
   <img src="docs/screenshots/4-phone.jpg" width="24%" alt="Guest queue page on a phone at music.local">
 </p>
 
-Privacy: Canopy has no servers, accounts or tracking. See the [privacy policy](PRIVACY.md).
+Privacy: Canopy Music has no servers, accounts or tracking. See the [privacy policy](PRIVACY.md).
 
 ## License
 
-The code is under the [PolyForm Noncommercial License 1.0.0](LICENSE.md): you can use, change and share it for noncommercial purposes. Commercial use needs permission. The Canopy name, logo and app icon aren't covered by the license, and neither are the Apple Music and Spotify marks, which belong to Apple and Spotify.
+The code is under the [PolyForm Noncommercial License 1.0.0](LICENSE.md): you can use, change and share it for noncommercial purposes. Commercial use needs permission. The Canopy Music name, logo and app icon aren't covered by the license, and neither are the Apple Music and Spotify marks, which belong to Apple and Spotify.
 
 ## Building it for your iPad
 
@@ -34,7 +34,7 @@ The simulator can't play Apple Music or Spotify, so use **Demo** (Settings → M
 2. Pick speakers with the **Speakers** row (AirPlay).
 3. Press **Start**. It begins playback and locks into the party screen.
 4. Triple-click the top button to turn on Guided Access so guests can't leave the app.
-5. To get back to host mode, press and hold the Canopy logo (asks for the PIN if you set one in Settings).
+5. To get back to host mode, press and hold the logo (asks for the PIN if you set one in Settings).
 
 ## Phones
 
@@ -54,24 +54,24 @@ Spotify only lets each developer app have **5 user accounts** in Development Mod
 
 1. Go to the [Spotify developer dashboard](https://developer.spotify.com/dashboard) and log in with the Spotify account you'll use at parties.
 2. **Create app**:
-   - **App name / description:** anything (e.g. Canopy).
+   - **App name / description:** anything (e.g. Canopy Music).
    - **Redirect URI:** `canopy-music://spotify-callback` (exactly this; click **Add**).
    - **Which API/SDKs:** check **Web API**.
    - Accept the terms and save.
 3. Open the app's **Settings** and copy the **Client ID**. No client secret is needed.
 4. Under **User Management**, add the email of each Spotify account that will sign in (yours, plus up to 4 others).
-5. In Canopy: **Settings → Music service → Spotify**, paste the **Client ID**, tap Done.
+5. In Canopy Music: **Settings → Music service → Spotify**, paste the **Client ID**, tap Done.
 6. Open the **Spotify app** on the iPad or another device in your home (TV, game console, speaker, computer). Spotify only lists devices with the app open.
 7. In host mode: **Sign in to Spotify**, then tap the device row and choose **where music should play**. Start stays disabled until that device is available.
 
 How it works and what to expect:
 
-- Canopy can't stream Spotify audio itself. It controls a Spotify player (the Spotify app on the iPad, a TV, or another Spotify Connect device) through the Web API. Audio comes out wherever that device plays. When it's the iPad's Spotify app, pick AirPlay speakers with the Speakers row; for other devices Canopy hides it.
-- Spotify's queue can only be added to, so Canopy hands Spotify the next song about 20 seconds before the current one ends; it shows as locked from then on.
+- Canopy Music can't stream Spotify audio itself. It controls a Spotify player (the Spotify app on the iPad, a TV, or another Spotify Connect device) through the Web API. Audio comes out wherever that device plays. When it's the iPad's Spotify app, pick AirPlay speakers with the Speakers row; for other devices Canopy Music hides it.
+- Spotify's queue can only be added to, so Canopy Music hands Spotify the next song about 20 seconds before the current one ends; it shows as locked from then on.
 - Only playlists you own or collaborate on can be base playlists (Development Mode can't read other playlists). Copy an editorial playlist into your library first.
 - If the Spotify app is paused for a long time, iPadOS may suspend it and the device disappears. Open Spotify again; host mode shows the device as not available until then.
-- Crossfade is set in the Spotify app, not in Canopy.
-- Settings shows how many Spotify requests Canopy has made, since Development Mode has an unpublished request quota.
+- Crossfade is set in the Spotify app, not in Canopy Music.
+- Settings shows how many Spotify requests Canopy Music has made, since Development Mode has an unpublished request quota.
 
 ## Layout
 

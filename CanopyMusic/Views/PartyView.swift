@@ -588,7 +588,9 @@ private struct ProgressBar: View {
     @State private var isScrubbing = false
 
     var body: some View {
-        TimelineView(.periodic(from: .now, by: 0.5)) { _ in
+        // Every frame while playing so the bar grows smoothly (a seek just jumps); twice a second
+        // while paused, to catch seeks.
+        TimelineView(.animation(minimumInterval: session.isPlaying ? nil : 0.5)) { _ in
             let total = max(duration ?? 0, 1)
             let elapsed = scrub.map { $0 * total } ?? session.engine.currentTime
             VStack(spacing: 6) {
@@ -720,7 +722,7 @@ private struct DisplayConnectionOverlay: View {
                     Text(connection.hasSnapshot ? "Lost connection to \(name)" : "Connecting to \(name)…")
                         .font(.system(size: 22, weight: .bold))
                     if connection.hasSnapshot {
-                        Text("Trying again. Make sure \(model.displayedZone?.kind == .tv ? "the Apple TV is on" : "the iPad is awake") and Canopy is open.")
+                        Text("Reconnecting. Make sure \(model.displayedZone?.kind == .tv ? "the Apple TV is on" : "the iPad is awake") and Canopy is open.")
                             .foregroundStyle(.white.opacity(0.7))
                             .multilineTextAlignment(.center)
                             .frame(maxWidth: 380)

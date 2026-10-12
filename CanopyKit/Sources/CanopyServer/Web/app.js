@@ -293,7 +293,14 @@
     const elapsed = pb.position + (pb.isPlaying ? (Date.now() - pb.capturedAt) / 1000 : 0);
     fill.style.width = `${Math.min(100, (elapsed / snap.current.track.duration) * 100)}%`;
   }
-  setInterval(updateProgress, 500);
+  // Every frame while playing so the bar grows smoothly (a seek just jumps); browsers pause
+  // frames in background tabs. Twice a second otherwise, which is plenty while paused.
+  function progressLoop() {
+    updateProgress();
+    if (snap && snap.playback.isPlaying) requestAnimationFrame(progressLoop);
+    else setTimeout(progressLoop, 500);
+  }
+  progressLoop();
 
   // MARK: Network
 

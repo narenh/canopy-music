@@ -168,7 +168,7 @@ struct TVConnectionOverlay: View {
                     Text(connection.hasSnapshot ? "Lost connection to \(name)" : "Connecting to \(name)…")
                         .font(.system(size: 40, weight: .bold))
                     if connection.hasSnapshot {
-                        Text("Trying again. Make sure \(model.shownZone?.kind == .tv ? "the Apple TV is on" : "the iPad is awake") and Canopy is open.\nPress Menu to leave.")
+                        Text("Reconnecting. Make sure \(model.shownZone?.kind == .tv ? "the Apple TV is on" : "the iPad is awake") and Canopy is open.\nPress Menu to leave.")
                             .font(.system(size: 26))
                             .foregroundStyle(.white.opacity(0.7))
                             .multilineTextAlignment(.center)
@@ -367,7 +367,9 @@ struct TVProgress: View {
     let session: PartySession
 
     var body: some View {
-        TimelineView(.periodic(from: .now, by: 0.5)) { _ in
+        // Every frame while playing so the bar grows smoothly (a seek just jumps); twice a second
+        // while paused, to catch seeks.
+        TimelineView(.animation(minimumInterval: session.isPlaying ? nil : 0.5)) { _ in
             let duration = session.state.current?.track.duration ?? 0
             let time = min(session.engine.currentTime, duration)
             VStack(spacing: 10) {

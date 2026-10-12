@@ -206,8 +206,8 @@
     if (snap && next.version < snap.version) return;
     snap = next;
     render();
-    hideSplash();
     openSettingsFromLink();
+    hideSplash();
     followRename();
   }
 
@@ -236,9 +236,15 @@
     $("settings-btn").click();
   }
 
+  /** Fades the splash out onto the first screen, once it's known: a phone with a host key waits
+   * for the hub's answer too, so a host doesn't see the guest view first (a new Apple TV zone's
+   * host gets the setup sheet, a guest "Getting ready"). */
   function hideSplash() {
     const splash = $("splash");
-    if (splash.hidden || splash.classList.contains("gone")) return;
+    if (!snap || !hostChecked || splash.hidden || splash.classList.contains("gone")) return;
+    // A sheet that opened as the first screen is already in place under the splash; it doesn't
+    // also slide in while the splash fades.
+    for (const sheet of document.querySelectorAll(".sheet")) if (!sheet.hidden) sheet.classList.add("instant");
     splash.classList.add("gone");
     setTimeout(() => { splash.hidden = true; }, 400);
   }
@@ -710,7 +716,11 @@
   // hand the scroll to the page underneath).
   const sheets = [...document.querySelectorAll(".sheet")];
   const syncPageLock = () => document.documentElement.classList.toggle("sheet-open", sheets.some((sheet) => !sheet.hidden));
-  const sheetWatcher = new MutationObserver(syncPageLock);
+  const sheetWatcher = new MutationObserver(() => {
+    // Opened again later, a first-screen sheet slides in like the others.
+    for (const sheet of sheets) if (sheet.hidden) sheet.classList.remove("instant");
+    syncPageLock();
+  });
   for (const sheet of sheets) sheetWatcher.observe(sheet, { attributes: true, attributeFilter: ["hidden"] });
   // Picker sheets fit the part of the screen that's visible, above the keyboard when it's up
   // (iOS Safari then also pans the page, by offsetTop).
@@ -1435,10 +1445,12 @@
         updateNameChip();
         if (snap) render();
         openSettingsFromLink();
+        hideSplash();
       })
       .catch((error) => {
         hostChecked = true;
         if (snap) render(); else askNameIfNeeded();
+        hideSplash();
         // Only a refusal means the key was revoked; a network hiccup keeps it.
         // Only this hub's key goes; an old single key it refused may be another hub's, so it stays.
         if (error.message === "403") {

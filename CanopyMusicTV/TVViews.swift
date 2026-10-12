@@ -40,13 +40,7 @@ struct TVRootView: View {
                     TVPartyView().transition(.opacity)
                 }
             case .display:
-                Group {
-                    if model.session.isWaitingForSetup {
-                        TVGettingReadyView()
-                    } else {
-                        TVPartyView()
-                    }
-                }
+                TVPartyView()
                     // Blurred behind the connection message so it reads.
                     .blur(radius: model.isWaitingForHub ? 28 : 0)
                     .overlay { TVConnectionOverlay() }
@@ -59,6 +53,8 @@ struct TVRootView: View {
         // A zone (hub or display) keeps the screen awake; the zone list doesn't.
         .onChange(of: model.role, initial: true) { UIApplication.shared.isIdleTimerDisabled = model.role != .choosing }
         .onChange(of: current?.id) { model.advertise() }
+        // A hub's zone is announced once a host has picked the music.
+        .onChange(of: model.session.isWaitingForSetup) { model.advertise() }
         .overlay {
             if let (item, lines) = takeover {
                 TakeoverView(lines: lines, track: item.track, session: model.session, scale: 1.4) {
@@ -450,43 +446,6 @@ struct TVStartView: View {
         }
         .foregroundStyle(.white)
         .animation(.easeInOut(duration: 0.4), value: model.hostJoined)
-    }
-}
-
-/// A display showing an Apple TV zone whose host is still picking the music: no empty party
-/// screen, just that, and how guests can join.
-struct TVGettingReadyView: View {
-    @Environment(TVModel.self) private var model
-
-    var body: some View {
-        VStack(spacing: 0) {
-            Spacer(minLength: 0)
-            Image("CanopyLogo")
-                .resizable()
-                .scaledToFit()
-                .frame(height: 70)
-                .padding(.bottom, 44)
-            ProgressView()
-                .scaleEffect(1.4)
-                .padding(.bottom, 36)
-            Text("Getting ready")
-                .font(.system(size: 76, weight: .bold))
-                .holdsRemoteFocus()
-            Text("The host is picking the music.")
-                .font(.system(size: 34))
-                .foregroundStyle(.white.opacity(0.7))
-                .padding(.top, 14)
-            TVZoneBadge()
-                .padding(.top, 28)
-            Spacer(minLength: 0)
-            if model.session.phonesCanQueue {
-                TVJoinCard()
-                    .frame(width: 760)
-                    .padding(.bottom, 60)
-            }
-        }
-        .foregroundStyle(.white)
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
 }
 

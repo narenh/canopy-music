@@ -238,7 +238,7 @@
 
   /** Fades the splash out onto the first screen, once it's known: a phone with a host key waits
    * for the hub's answer too, so a host doesn't see the guest view first (a new Apple TV zone's
-   * host gets the setup sheet, a guest "Getting ready"). */
+   * host gets the setup sheet). */
   function hideSplash() {
     const splash = $("splash");
     if (!snap || !hostChecked || splash.hidden || splash.classList.contains("gone")) return;
@@ -249,15 +249,9 @@
     setTimeout(() => { splash.hidden = true; }, 400);
   }
 
-  /** An Apple TV zone whose host hasn't picked the music yet (hosts get the setup sheet). */
-  const waitingForSetup = () => snap.hubKind === "tv" && !snap.playlistName && !snap.current && !snap.upNext.length;
-
   function render() {
     const current = snap.current;
     applyTheme(current && current.track);
-    const waiting = waitingForSetup() && !hosting();
-    $("home").classList.toggle("waiting", waiting);
-    $("getting-ready").hidden = !waiting;
 
     // The host can turn off reordering from phones (host control can always reorder).
     document.querySelector(".list-head .hint").hidden = snap.canReorder === false && !hosting();

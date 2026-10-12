@@ -180,13 +180,6 @@ html.sheet-open, html.sheet-open body { overflow: hidden; }
 .splash-logo { width: min(62vw, 300px); height: auto; }
 .splash-status { display: flex; align-items: center; gap: 10px; font-size: 16px; font-weight: 600; color: rgba(255,255,255,.85); text-align: center; margin: 0; }
 
-.getting-ready { text-align: center; padding: 18vh 24px 0; }
-.getting-ready[hidden] { display: none; }
-.getting-ready h2 { font-size: 24px; margin: 14px 0 6px; }
-.getting-ready p { color: var(--text-2); font-size: 15px; margin: 0; }
-.getting-ready .spinner { display: inline-block; width: 26px; height: 26px; color: var(--text-2); }
-#home.waiting > :not(.top):not(#getting-ready) { display: none !important; }
-
 .modal { position: fixed; inset: 0; background: rgba(0,0,0,.6); display: grid; place-items: center; padding: 16px; z-index: 50; }
 /* Opened from the settings sheet, so on top of it. */
 .modal.over, .sheet.over { z-index: 60; }

@@ -283,9 +283,11 @@ final class TVModel {
         advertise()
     }
 
-    /// Announces this zone; called again when the song or name changes.
+    /// Announces this zone; called again when the song or name changes. Not until a host has
+    /// picked the music (crash-restore included): a zone with nothing to play isn't one to join.
+    /// The server and the host's QR link work all along.
     func advertise() {
-        guard role == .hub, let server, let address = session.lanAddress else { return }
+        guard role == .hub, !session.isWaitingForSetup, let server, let address = session.lanAddress else { return }
         let playing = session.state.current.map { "\($0.track.title) – \($0.track.artist)" } ?? ""
         advertiser.advertise(name: zoneName, port: server.port, txt: [
             "name": zoneName, "kind": HubKind.tv.rawValue, "addr": address, "hub": deviceID, "playing": String(playing.prefix(120)),

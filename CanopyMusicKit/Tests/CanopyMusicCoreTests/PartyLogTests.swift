@@ -214,7 +214,7 @@ private func item(_ id: String, by requester: Requester? = nil) -> QueueItem {
         #expect(catalog.saved.isEmpty)
     }
 
-    /// "Scan to host" / "Continue on your phone" / "Getting ready" until a TV zone's host picks music.
+    /// "Scan to host" / "Continue on your phone", and no announcement, until a TV zone's host picks music.
     @Test func aTVZoneWaitsForItsHostToPickTheMusic() async throws {
         let session = PartySession(catalog: StubCatalog(ids: ["a", "b"]), engine: FakeEngine())
         #expect(!session.isWaitingForSetup) // not a hub yet

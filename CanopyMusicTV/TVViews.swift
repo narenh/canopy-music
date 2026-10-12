@@ -7,9 +7,9 @@ import SwiftUI
 struct TVRootView: View {
     @Environment(TVModel.self) private var model
     @State private var confirming = false
+    /// Menu › End once songs guests added have played: the sheet that saves them first.
+    @State private var endingWithSave = false
     @State private var easterEgg = LyricsEasterEgg()
-    /// Saving the party failed: try again, or end without saving.
-    @State private var saveError: String?
 
     /// `-capture` (debug builds, as on the iPad): screenshots for the App Store and the README,
     /// so the lyrics takeover never shows in them.
@@ -76,58 +76,36 @@ struct TVRootView: View {
         .onExitCommand(perform: model.role == .choosing ? nil : {
             if let (item, lines) = takeover, TakeoverView.isShowing(lines, at: model.session.engine.currentTime) {
                 easterEgg.dismissedItemID = item.id
+            } else if model.canSaveParty {
+                endingWithSave = true
             } else {
                 confirming = true
             }
         })
         .onPlayPauseCommand(perform: model.role == .choosing ? nil : { model.playPause() })
-        .confirmationDialog(model.role == .hub && model.canSaveParty ? "End \(model.zoneName)?" : "",
-                            isPresented: $confirming, titleVisibility: model.role == .hub && model.canSaveParty ? .visible : .hidden) {
+        // Nothing worth saving yet (or a display leaving): a plain confirmation.
+        .confirmationDialog("", isPresented: $confirming, titleVisibility: .hidden) {
             if model.role == .hub {
-                if model.canSaveParty {
-                    Button("Save Playlist and End") { saveAndEnd() }
-                    Button("End Without Saving", role: .destructive) { model.stopZone() }
-                } else {
-                    Button("End \(model.zoneName)", role: .destructive) { model.stopZone() }
-                }
+                Button("End \(model.zoneName)", role: .destructive) { model.stopZone() }
             } else {
                 Button("Leave \(model.shownZone?.name ?? "zone")", role: .destructive) { model.leave() }
             }
             Button("Cancel", role: .cancel) {}
-        } message: {
-            if model.role == .hub, model.canSaveParty {
-                let info = model.session.partySaveInfo
-                Text("The \(info.requestCount == 1 ? "song" : "\(info.requestCount) songs") guests added, as “\(model.partyPlaylistName)”. \(info.destination ?? "").")
-            }
         }
-        .alert("Couldn't save the playlist", isPresented: Binding(get: { saveError != nil }, set: { if !$0 { saveError = nil } })) {
-            Button("Try Again") { saveAndEnd() }
-            Button("End Without Saving", role: .destructive) { model.stopZone() }
-            Button("Cancel", role: .cancel) {}
-        } message: {
-            Text(saveError ?? "")
-        }
-        .overlay {
-            if model.isSavingParty {
-                Label("Saving playlist…", systemImage: "music.note.list")
-                    .font(.system(size: 30, weight: .semibold))
-                    .padding(.horizontal, 40)
-                    .padding(.vertical, 24)
-                    .background(.ultraThinMaterial, in: Capsule())
-            }
-        }
+        .sheet(isPresented: $endingWithSave) { TVEndZoneSheet() }
         #if DEBUG
-        // `-confirmEnd`: opens Menu › End 12 s after hosting starts; with `-autoEnd`, chooses the
-        // first option (Save Playlist and End, when offered) 8 s later. For the simulator.
+        // `-confirmEnd`: opens Menu › End 12 s after hosting starts; with `-autoEnd`, presses End
+        // 8 s later (the save sheet presses Save and End itself). For the simulator.
         .task(id: model.role) {
             let args = ProcessInfo.processInfo.arguments
             guard model.role == .hub, args.contains("-confirmEnd") else { return }
             try? await Task.sleep(for: .seconds(12))
+            if model.canSaveParty { endingWithSave = true; return }
             confirming = true
             guard args.contains("-autoEnd") else { return }
             try? await Task.sleep(for: .seconds(8))
             confirming = false
-            if model.canSaveParty { saveAndEnd() } else { model.stopZone() }
+            model.stopZone()
         }
         #endif
         #if DEBUG
@@ -142,15 +120,109 @@ struct TVRootView: View {
 
 }
 
-private extension TVRootView {
-    func saveAndEnd() {
+// MARK: - Ending the zone
+
+/// Menu › End once songs guests added have played: saves them as a playlist, then ends the zone.
+/// The name starts as the party's date and a space; the host can finish it with the Siri Remote,
+/// dictation, or the keyboard tvOS offers on a nearby iPhone, or leave it as the date (then it's
+/// "<date> <zone>"). Menu cancels.
+struct TVEndZoneSheet: View {
+    @Environment(TVModel.self) private var model
+    @Environment(\.dismiss) private var dismiss
+    @State private var name = ""
+    @State private var saving = false
+    @State private var errorText: String?
+    private enum Focus: Hashable { case name, save, end }
+    @FocusState private var focus: Focus?
+
+    var body: some View {
+        let info = model.session.partySaveInfo
+        let songs = info.requestCount == 1 ? "the song a guest added" : "the \(info.requestCount) songs guests added"
+        VStack(alignment: .leading, spacing: 36) {
+            VStack(alignment: .leading, spacing: 14) {
+                Text("End \(model.zoneName)?")
+                    .font(.system(size: 52, weight: .bold))
+                Text("The music stops and the queue is cleared. Save \(songs) as a playlist first?")
+                    .font(.system(size: 29))
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            VStack(alignment: .leading, spacing: 12) {
+                TextField("Playlist name", text: $name)
+                    .focused($focus, equals: .name)
+                    .submitLabel(.done)
+                if let destination = info.destination {
+                    Text(destination + ".")
+                        .font(.system(size: 24))
+                        .foregroundStyle(.secondary)
+                }
+            }
+            if let errorText {
+                Label(errorText, systemImage: "exclamationmark.triangle.fill")
+                    .font(.system(size: 26))
+                    .foregroundStyle(.orange)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            HStack(spacing: 30) {
+                Button {
+                    save()
+                } label: {
+                    HStack(spacing: 14) {
+                        if saving { ProgressView() }
+                        Text(saving ? "Saving playlist…" : errorText == nil ? "Save and End" : "Try Again")
+                    }
+                    .frame(minWidth: 380)
+                }
+                .focused($focus, equals: .save)
+                // Not `.destructive`: on tvOS its red label sits on a red button, hard to read.
+                Button("End Without Saving") { end() }
+                    .focused($focus, equals: .end)
+            }
+            .disabled(saving)
+        }
+        .frame(width: 1100, alignment: .leading)
+        .padding(70)
+        // Starts on Save and End, so a quick press saves under the date and zone; the name field
+        // is one swipe up.
+        .defaultFocus($focus, .save)
+        // Menu cancels (the sheet's own dismissal), except while saving.
+        .interactiveDismissDisabled(saving)
+        // Play/Pause would otherwise act on the focused button here; the music keeps its state.
+        .onPlayPauseCommand {}
+        .onAppear { name = info.suggestedName }
+        #if DEBUG
+        // `-partyName <text>`: types the rest of the name. `-autoEnd`: presses Save and End 8 s
+        // after the sheet opens (with `-failSave`, the demo library fails it). For the simulator.
+        .task {
+            let args = ProcessInfo.processInfo.arguments
+            if let i = args.firstIndex(of: "-partyName"), i + 1 < args.count { name += args[i + 1] }
+            guard args.contains("-autoEnd") else { return }
+            try? await Task.sleep(for: .seconds(8))
+            save()
+        }
+        #endif
+    }
+
+    private func save() {
+        guard !saving else { return }
+        saving = true
+        errorText = nil
         Task {
             do {
-                try await model.saveAndStopZone()
+                try await model.saveParty(typedName: name)
+                saving = false
+                end()
             } catch {
-                saveError = error.localizedDescription
+                saving = false
+                errorText = "Couldn't save the playlist. \(error.localizedDescription)"
+                focus = .save
             }
         }
+    }
+
+    private func end() {
+        dismiss()
+        model.stopZone()
     }
 }
 

@@ -1184,8 +1184,12 @@
     fillPartyRow();
   }
 
+  /** Saving is offered once a song a guest added has played; until then the party is just the
+   * base playlist, nothing worth saving. */
+  const partyCanSave = () => !!(partyInfo && partyInfo.destination && partyInfo.requestCount > 0);
+
   function fillPartyRow() {
-    $("settings-party-row").hidden = !(partyInfo && partyInfo.destination);
+    $("settings-party-row").hidden = !partyCanSave();
     if (partyInfo) $("settings-party").textContent = partyInfo.allCount === 1 ? "1 song played" : `${partyInfo.allCount} songs played`;
   }
 
@@ -1306,10 +1310,11 @@
   let partyBusy = false;
   const partySaving = () => partyMode === "save" || $("party-save").checked;
   const partyCount = () => !partyInfo ? 0 : $("party-only").checked ? partyInfo.requestCount : partyInfo.allCount;
-  const partyWillSave = () => !!(partyInfo && partyInfo.destination) && partySaving() && partyCount() > 0;
+  const partyWillSave = () => partyCanSave() && partySaving() && partyCount() > 0;
 
   function updateParty() {
-    const canSave = !!(partyInfo && partyInfo.destination);
+    // With nothing worth saving, End is a plain confirmation.
+    const canSave = partyCanSave();
     $("party-save-row").hidden = partyMode !== "end" || !canSave;
     $("party-fields").hidden = !canSave || !partySaving();
     const n = partyCount();

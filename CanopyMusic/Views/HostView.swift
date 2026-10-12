@@ -480,12 +480,14 @@ private struct SettingsSheet: View {
                     Text("Music Service")
                 }
                 .listRowBackground(Color.white.opacity(0.08))
-                Section {
-                    Button("Save as Playlist") { savingPlaylist = true }
-                } footer: {
-                    Text("Saves the songs that have played so far. The party carries on.")
+                if model.session.partySaveInfo.offersSave {
+                    Section {
+                        Button("Save as Playlist") { savingPlaylist = true }
+                    } footer: {
+                        Text("Saves the songs that have played so far. The party carries on.")
+                    }
+                    .listRowBackground(Color.white.opacity(0.08))
                 }
-                .listRowBackground(Color.white.opacity(0.08))
                 Section {
                     Button("End Zone", role: .destructive) { confirmingEnd = true }
                 } footer: {
@@ -521,15 +523,49 @@ private extension View {
     }
 }
 
-/// A small sheet rather than an alert, for "Save as playlist" and its name field.
+/// A small sheet with "Save as playlist" and its name field once songs guests added have played;
+/// until then a plain alert (the party is just the base playlist, nothing worth saving).
 private struct EndZoneConfirmation: ViewModifier {
+    @Environment(AppModel.self) private var model
     @Binding var isPresented: Bool
     let before: () -> Void
+    /// Decided when it opens, so a song starting meanwhile doesn't swap the alert for the sheet.
+    @State private var showingSheet = false
+    @State private var showingAlert = false
 
     func body(content: Content) -> some View {
-        content.sheet(isPresented: $isPresented) {
-            PartyPlaylistSheet(purpose: .end, beforeEnding: before)
-        }
+        content
+            .onChange(of: isPresented, initial: true) { _, presented in
+                guard presented else { showingSheet = false; showingAlert = false; return }
+                let offersSave = model.session.partySaveInfo.offersSave
+                showingSheet = offersSave
+                showingAlert = !offersSave
+            }
+            .sheet(isPresented: Binding(get: { showingSheet }, set: { showingSheet = $0; if !$0 { isPresented = false } })) {
+                PartyPlaylistSheet(purpose: .end, beforeEnding: before)
+            }
+            .alert("End \(model.zoneName)?", isPresented: Binding(get: { showingAlert }, set: { showingAlert = $0; if !$0 { isPresented = false } })) {
+                Button("End", role: .destructive, action: end)
+                Button("Cancel", role: .cancel) {}
+            } message: {
+                Text("The music stops for everyone and the queue is cleared. This iPad goes back to the zone list.")
+            }
+            #if DEBUG
+            // `-autoEnd` (with `-confirmEnd`): presses End 10 s after the alert opens (the sheet
+            // presses its own button).
+            .task(id: showingAlert) {
+                guard showingAlert, ProcessInfo.processInfo.arguments.contains("-autoEnd") else { return }
+                try? await Task.sleep(for: .seconds(10))
+                showingAlert = false
+                isPresented = false
+                end()
+            }
+            #endif
+    }
+
+    private func end() {
+        before()
+        model.endZone()
     }
 }
 

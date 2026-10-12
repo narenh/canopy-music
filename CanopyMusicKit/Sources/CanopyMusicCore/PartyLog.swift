@@ -104,6 +104,10 @@ public struct PartySaveInfo: Codable, Equatable, Sendable {
     public var requestCount: Int
     /// "Saves to your Apple Music library", or nil when the service can't save playlists.
     public var destination: String?
+
+    /// Hubs offer saving once a song a guest added has played: until then the party is just the
+    /// base playlist, nothing worth saving, and End is a plain confirmation.
+    public var offersSave: Bool { destination != nil && requestCount > 0 }
 }
 
 public enum PartySaveError: LocalizedError, Equatable {

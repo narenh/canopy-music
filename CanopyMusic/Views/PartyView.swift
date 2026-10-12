@@ -1,4 +1,4 @@
-import CanopyCore
+import CanopyMusicCore
 import SwiftUI
 
 /// The locked guest screen: now playing + search on the left, Up Next + phone QR on the right.

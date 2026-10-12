@@ -1,5 +1,5 @@
 import Testing
-@testable import CanopyCore
+@testable import CanopyMusicCore
 
 @Suite struct SearchRankingTests {
     let popular = QueueTrack(id: "1", title: "Big Hearts & Downfalls (Fast)", artist: "DJKUU305", album: "Big Hearts & Downfalls")

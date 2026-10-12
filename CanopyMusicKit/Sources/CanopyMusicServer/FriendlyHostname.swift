@@ -22,7 +22,7 @@ public final class FriendlyHostname: @unchecked Sendable {
     private var address: String?
     private var connection: DNSServiceRef?
     private var record: DNSRecordRef?
-    private let queue = DispatchQueue(label: "canopy.mdns")
+    private let queue = DispatchQueue(label: "canopymusic.mdns")
 
     /// `name` without the `.local` suffix, e.g. "music".
     public init(name: String) {

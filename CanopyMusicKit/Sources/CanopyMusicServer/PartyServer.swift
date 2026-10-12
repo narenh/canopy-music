@@ -1,4 +1,4 @@
-import CanopyCore
+import CanopyMusicCore
 import CoreImage
 import CoreImage.CIFilterBuiltins
 import FlyingFox

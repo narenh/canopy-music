@@ -1,4 +1,4 @@
-import CanopyCore
+import CanopyMusicCore
 import Foundation
 
 /// Controls playback on a Spotify Connect device (the iPad's Spotify app, an Apple TV…) through

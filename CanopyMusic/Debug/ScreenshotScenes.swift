@@ -1,5 +1,5 @@
 #if DEBUG
-import CanopyCore
+import CanopyMusicCore
 import Foundation
 
 /// `-screenshotParty <scene>`: the party screen posed with real Apple Music catalog songs (looked up,

@@ -1,6 +1,6 @@
 import Foundation
 import Testing
-@testable import CanopyCore
+@testable import CanopyMusicCore
 
 @MainActor
 final class FakeEngine: PlaybackEngine {

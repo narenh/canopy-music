@@ -1,5 +1,5 @@
 #if DEBUG
-import CanopyCore
+import CanopyMusicCore
 import MediaPlayer
 @preconcurrency import MusicKit
 import SwiftUI

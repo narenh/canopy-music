@@ -1,4 +1,4 @@
-import CanopyCore
+import CanopyMusicCore
 import SwiftUI
 
 /// Dark theme derived from album artwork. Same rules as the phone web app (`app.js` `themeFor`).

@@ -1,5 +1,5 @@
-import CanopyCore
-import CanopyServer
+import CanopyMusicCore
+import CanopyMusicServer
 import SwiftUI
 
 /// Every launch starts here: the zones on this Wi‑Fi, plus "Create a new zone" (docs/multi-device.md).

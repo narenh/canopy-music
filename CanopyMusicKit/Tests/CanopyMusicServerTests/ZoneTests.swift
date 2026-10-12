@@ -1,5 +1,5 @@
-@testable import CanopyCore
-@testable import CanopyServer
+@testable import CanopyMusicCore
+@testable import CanopyMusicServer
 import Foundation
 import Testing
 

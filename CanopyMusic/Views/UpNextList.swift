@@ -1,4 +1,4 @@
-import CanopyCore
+import CanopyMusicCore
 import SwiftUI
 
 /// The single reorderable queue. Always in edit mode so the drag handles are visible to guests.

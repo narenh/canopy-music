@@ -1,6 +1,6 @@
 import AVFoundation
-import CanopyCore
-import CanopyServer
+import CanopyMusicCore
+import CanopyMusicServer
 import Foundation
 import MusicKit
 import Security

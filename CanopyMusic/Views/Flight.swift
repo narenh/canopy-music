@@ -1,4 +1,4 @@
-import CanopyCore
+import CanopyMusicCore
 import SwiftUI
 
 /// A copy of a song's artwork flying from a search result into its new slot in Up Next.

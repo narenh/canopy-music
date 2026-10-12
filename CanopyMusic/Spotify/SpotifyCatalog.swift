@@ -1,4 +1,4 @@
-import CanopyCore
+import CanopyMusicCore
 import Foundation
 
 /// Search and playlists through the Spotify Web API. Track ids are Spotify URIs.

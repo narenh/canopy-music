@@ -76,19 +76,21 @@ How it works and what to expect:
 ## Layout
 
 ```
-CanopyKit/                   Swift package (no MusicKit or Spotify code)
-  Sources/CanopyCore/        Track, QueueState (all queue rules), PartySession, provider protocols, demo provider
-  Sources/CanopyServer/      LAN web server (FlyingFox), mDNS name, web app in Web/
-  Sources/CanopyDevServer/   `swift run CanopyDevServer`: phone web app + demo data on your Mac
-  Tests/CanopyCoreTests/     queue and session tests
-CanopyMusic/                 iPad app (SwiftUI, iPadOS 26)
-  AppleMusic/                MusicKit catalog + ApplicationMusicPlayer engine
-  Spotify/                   Spotify sign-in, Web API client, catalog and Connect engine
-  Views/                     host, party (locked), Up Next, search, fly-in animation
+CanopyMusicKit/                   Swift package (no MusicKit or Spotify code)
+  Sources/CanopyMusicCore/        Track, QueueState (all queue rules), PartySession, provider protocols, demo provider
+  Sources/CanopyMusicServer/      LAN web server (FlyingFox), mDNS name, zones, web app in Web/
+  Sources/CanopyMusicDevServer/   `swift run CanopyMusicDevServer`: phone web app + demo data on your Mac
+  Tests/CanopyMusicCoreTests/     queue and session tests
+  Tests/CanopyMusicServerTests/   zone and server tests
+CanopyMusic/                      iPad app (SwiftUI, iPadOS 26)
+  AppleMusic/                     MusicKit catalog + ApplicationMusicPlayer engine
+  Spotify/                        Spotify sign-in, Web API client, catalog and Connect engine
+  Views/                          host, party (locked), Up Next, search, fly-in animation
+CanopyMusicTV/                    Apple TV app (tvOS 26); shares some iPad files by symlink
 ```
 
 ```bash
-cd CanopyKit && swift test
+cd CanopyMusicKit && swift test
 ```
 
 Debug launch arguments: `-autoParty` starts a demo party and locks; `-autoSearch <term>` searches and adds the first result; `-autoLoad`, `-autoResume`, `-autoPrevious`, `-autoStress`, `-showSettings`, `-showPicker`, `-appleMusicState ready|unsynced|nosub|denied`, `-benchAppleMusic`, `-qrGallery` and `-diagnoseMusicKit` exist for testing specific paths.

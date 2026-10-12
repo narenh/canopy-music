@@ -32,7 +32,7 @@ Status: built on the `tvos-spike` branch (see "Build status" at the end). Screen
 
 ## Network
 
-- **Discovery:** hubs advertise Bonjour `_canopy._tcp`. The TXT record carries the zone name, the hub kind (ipad/tv), what's playing and the guest address. Displays browse for it; the list updates live.
+- **Discovery:** hubs advertise Bonjour `_canopymusic._tcp`. The TXT record carries the zone name, the hub kind (ipad/tv), what's playing and the guest address. Displays browse for it; the list updates live.
 - **Addresses:** each hub announces its own `.local` name (`music.local`, then `music-2.local`… on a clash). Every QR code points at its own hub.
 - **Displays** use the same JSON API and WebSocket snapshots as the guest page, plus a few display endpoints:
   - `POST /api/display/hello`: a heartbeat, so the hub can list connected displays.

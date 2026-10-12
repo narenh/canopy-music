@@ -1,5 +1,5 @@
 import AVFoundation
-import CanopyCore
+import CanopyMusicCore
 import MusicKit
 import SwiftUI
 

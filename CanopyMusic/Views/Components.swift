@@ -1,5 +1,5 @@
 import AVKit
-import CanopyCore
+import CanopyMusicCore
 import CoreImage.CIFilterBuiltins
 import SwiftUI
 

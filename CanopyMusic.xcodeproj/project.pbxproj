@@ -7,17 +7,17 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
-		CA0000000000000000000010 /* CanopyCore in Frameworks */ = {isa = PBXBuildFile; productRef = CA0000000000000000000020 /* CanopyCore */; };
-		CA0000000000000000000011 /* CanopyServer in Frameworks */ = {isa = PBXBuildFile; productRef = CA0000000000000000000021 /* CanopyServer */; };
-		CB0000000000000000000010 /* CanopyCore in Frameworks */ = {isa = PBXBuildFile; productRef = CB0000000000000000000020 /* CanopyCore */; };
-		CB0000000000000000000011 /* CanopyServer in Frameworks */ = {isa = PBXBuildFile; productRef = CB0000000000000000000021 /* CanopyServer */; };
+		CA0000000000000000000010 /* CanopyMusicCore in Frameworks */ = {isa = PBXBuildFile; productRef = CA0000000000000000000020 /* CanopyMusicCore */; };
+		CA0000000000000000000011 /* CanopyMusicServer in Frameworks */ = {isa = PBXBuildFile; productRef = CA0000000000000000000021 /* CanopyMusicServer */; };
+		CB0000000000000000000010 /* CanopyMusicCore in Frameworks */ = {isa = PBXBuildFile; productRef = CB0000000000000000000020 /* CanopyMusicCore */; };
+		CB0000000000000000000011 /* CanopyMusicServer in Frameworks */ = {isa = PBXBuildFile; productRef = CB0000000000000000000021 /* CanopyMusicServer */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
 		CA0000000000000000000001 /* CanopyMusic.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = CanopyMusic.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		CA0000000000000000000012 /* CanopyMusic-Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = "CanopyMusic-Info.plist"; sourceTree = "<group>"; };
-		CA0000000000000000000013 /* CanopyKit */ = {isa = PBXFileReference; lastKnownFileType = wrapper; path = CanopyKit; sourceTree = "<group>"; };
-		CB0000000000000000000001 /* CanopyTV.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = CanopyTV.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		CA0000000000000000000013 /* CanopyMusicKit */ = {isa = PBXFileReference; lastKnownFileType = wrapper; path = CanopyMusicKit; sourceTree = "<group>"; };
+		CB0000000000000000000001 /* CanopyMusicTV.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = CanopyMusicTV.app; sourceTree = BUILT_PRODUCTS_DIR; };
 /* End PBXFileReference section */
 
 /* Begin PBXFileSystemSynchronizedRootGroup section */
@@ -26,9 +26,9 @@
 			path = CanopyMusic;
 			sourceTree = "<group>";
 		};
-		CB0000000000000000000002 /* CanopyTV */ = {
+		CB0000000000000000000002 /* CanopyMusicTV */ = {
 			isa = PBXFileSystemSynchronizedRootGroup;
-			path = CanopyTV;
+			path = CanopyMusicTV;
 			sourceTree = "<group>";
 		};
 /* End PBXFileSystemSynchronizedRootGroup section */
@@ -38,8 +38,8 @@
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
-				CA0000000000000000000010 /* CanopyCore in Frameworks */,
-				CA0000000000000000000011 /* CanopyServer in Frameworks */,
+				CA0000000000000000000010 /* CanopyMusicCore in Frameworks */,
+				CA0000000000000000000011 /* CanopyMusicServer in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -47,8 +47,8 @@
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
-				CB0000000000000000000010 /* CanopyCore in Frameworks */,
-				CB0000000000000000000011 /* CanopyServer in Frameworks */,
+				CB0000000000000000000010 /* CanopyMusicCore in Frameworks */,
+				CB0000000000000000000011 /* CanopyMusicServer in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -58,9 +58,9 @@
 		CA0000000000000000000004 = {
 			isa = PBXGroup;
 			children = (
-				CA0000000000000000000013 /* CanopyKit */,
+				CA0000000000000000000013 /* CanopyMusicKit */,
 				CA0000000000000000000002 /* CanopyMusic */,
-				CB0000000000000000000002 /* CanopyTV */,
+				CB0000000000000000000002 /* CanopyMusicTV */,
 				CA0000000000000000000012 /* CanopyMusic-Info.plist */,
 				CA0000000000000000000005 /* Products */,
 			);
@@ -70,7 +70,7 @@
 			isa = PBXGroup;
 			children = (
 				CA0000000000000000000001 /* CanopyMusic.app */,
-				CB0000000000000000000001 /* CanopyTV.app */,
+				CB0000000000000000000001 /* CanopyMusicTV.app */,
 			);
 			name = Products;
 			sourceTree = "<group>";
@@ -95,16 +95,16 @@
 			);
 			name = CanopyMusic;
 			packageProductDependencies = (
-				CA0000000000000000000020 /* CanopyCore */,
-				CA0000000000000000000021 /* CanopyServer */,
+				CA0000000000000000000020 /* CanopyMusicCore */,
+				CA0000000000000000000021 /* CanopyMusicServer */,
 			);
 			productName = CanopyMusic;
 			productReference = CA0000000000000000000001 /* CanopyMusic.app */;
 			productType = "com.apple.product-type.application";
 		};
-		CB0000000000000000000006 /* CanopyTV */ = {
+		CB0000000000000000000006 /* CanopyMusicTV */ = {
 			isa = PBXNativeTarget;
-			buildConfigurationList = CB0000000000000000000030 /* Build configuration list for PBXNativeTarget "CanopyTV" */;
+			buildConfigurationList = CB0000000000000000000030 /* Build configuration list for PBXNativeTarget "CanopyMusicTV" */;
 			buildPhases = (
 				CB0000000000000000000007 /* Sources */,
 				CB0000000000000000000003 /* Frameworks */,
@@ -115,15 +115,15 @@
 			dependencies = (
 			);
 			fileSystemSynchronizedGroups = (
-				CB0000000000000000000002 /* CanopyTV */,
+				CB0000000000000000000002 /* CanopyMusicTV */,
 			);
-			name = CanopyTV;
+			name = CanopyMusicTV;
 			packageProductDependencies = (
-				CB0000000000000000000020 /* CanopyCore */,
-				CB0000000000000000000021 /* CanopyServer */,
+				CB0000000000000000000020 /* CanopyMusicCore */,
+				CB0000000000000000000021 /* CanopyMusicServer */,
 			);
-			productName = CanopyTV;
-			productReference = CB0000000000000000000001 /* CanopyTV.app */;
+			productName = CanopyMusicTV;
+			productReference = CB0000000000000000000001 /* CanopyMusicTV.app */;
 			productType = "com.apple.product-type.application";
 		};
 /* End PBXNativeTarget section */
@@ -154,7 +154,7 @@
 			mainGroup = CA0000000000000000000004;
 			minimizedProjectReferenceProxies = 1;
 			packageReferences = (
-				CA0000000000000000000022 /* XCLocalSwiftPackageReference "CanopyKit" */,
+				CA0000000000000000000022 /* XCLocalSwiftPackageReference "CanopyMusicKit" */,
 			);
 			preferredProjectObjectVersion = 77;
 			productRefGroup = CA0000000000000000000005 /* Products */;
@@ -162,7 +162,7 @@
 			projectRoot = "";
 			targets = (
 				CA0000000000000000000006 /* CanopyMusic */,
-				CB0000000000000000000006 /* CanopyTV */,
+				CB0000000000000000000006 /* CanopyMusicTV */,
 			);
 		};
 /* End PBXProject section */
@@ -327,7 +327,7 @@
 				DEVELOPMENT_TEAM = UC3Y84QJ83;
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
-				INFOPLIST_FILE = "CanopyTV-Info.plist";
+				INFOPLIST_FILE = "CanopyMusicTV-Info.plist";
 				INFOPLIST_KEY_CFBundleDisplayName = "Canopy Music";
 				INFOPLIST_KEY_ITSAppUsesNonExemptEncryption = NO;
 				INFOPLIST_KEY_NSAppleMusicUsageDescription = "Canopy Music plays your Apple Music playlists and lets guests search Apple Music to queue songs.";
@@ -358,7 +358,7 @@
 				DEVELOPMENT_TEAM = UC3Y84QJ83;
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
-				INFOPLIST_FILE = "CanopyTV-Info.plist";
+				INFOPLIST_FILE = "CanopyMusicTV-Info.plist";
 				INFOPLIST_KEY_CFBundleDisplayName = "Canopy Music";
 				INFOPLIST_KEY_ITSAppUsesNonExemptEncryption = NO;
 				INFOPLIST_KEY_NSAppleMusicUsageDescription = "Canopy Music plays your Apple Music playlists and lets guests search Apple Music to queue songs.";
@@ -402,7 +402,7 @@
 			defaultConfigurationIsVisible = 0;
 			defaultConfigurationName = Release;
 		};
-		CB0000000000000000000030 /* Build configuration list for PBXNativeTarget "CanopyTV" */ = {
+		CB0000000000000000000030 /* Build configuration list for PBXNativeTarget "CanopyMusicTV" */ = {
 			isa = XCConfigurationList;
 			buildConfigurations = (
 				CB0000000000000000000042 /* Debug */,
@@ -414,28 +414,28 @@
 /* End XCConfigurationList section */
 
 /* Begin XCLocalSwiftPackageReference section */
-		CA0000000000000000000022 /* XCLocalSwiftPackageReference "CanopyKit" */ = {
+		CA0000000000000000000022 /* XCLocalSwiftPackageReference "CanopyMusicKit" */ = {
 			isa = XCLocalSwiftPackageReference;
-			relativePath = CanopyKit;
+			relativePath = CanopyMusicKit;
 		};
 /* End XCLocalSwiftPackageReference section */
 
 /* Begin XCSwiftPackageProductDependency section */
-		CA0000000000000000000020 /* CanopyCore */ = {
+		CA0000000000000000000020 /* CanopyMusicCore */ = {
 			isa = XCSwiftPackageProductDependency;
-			productName = CanopyCore;
+			productName = CanopyMusicCore;
 		};
-		CA0000000000000000000021 /* CanopyServer */ = {
+		CA0000000000000000000021 /* CanopyMusicServer */ = {
 			isa = XCSwiftPackageProductDependency;
-			productName = CanopyServer;
+			productName = CanopyMusicServer;
 		};
-		CB0000000000000000000020 /* CanopyCore */ = {
+		CB0000000000000000000020 /* CanopyMusicCore */ = {
 			isa = XCSwiftPackageProductDependency;
-			productName = CanopyCore;
+			productName = CanopyMusicCore;
 		};
-		CB0000000000000000000021 /* CanopyServer */ = {
+		CB0000000000000000000021 /* CanopyMusicServer */ = {
 			isa = XCSwiftPackageProductDependency;
-			productName = CanopyServer;
+			productName = CanopyMusicServer;
 		};
 /* End XCSwiftPackageProductDependency section */
 	};

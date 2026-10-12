@@ -2,10 +2,16 @@
   "use strict";
 
   const $ = (id) => document.getElementById(id);
+  // Keys were "canopy.*" before the app's name change; reading falls back to them so phones keep
+  // their ID, name and host pairing.
   const store = {
-    get(key) { try { return localStorage.getItem(key); } catch { return null; } },
+    get(key) {
+      try { return localStorage.getItem(key) ?? localStorage.getItem(key.replace(/^canopymusic\./, "canopy.")); } catch { return null; }
+    },
     set(key, value) { try { localStorage.setItem(key, value); } catch {} },
-    remove(key) { try { localStorage.removeItem(key); } catch {} },
+    remove(key) {
+      try { localStorage.removeItem(key); localStorage.removeItem(key.replace(/^canopymusic\./, "canopy.")); } catch {}
+    },
   };
 
   // crypto.randomUUID needs a secure context, and this page is plain http on the LAN.
@@ -28,9 +34,9 @@
     // Only if that name reaches this same hub: another zone can answer at music.local too.
     if (!(await reachable(address, lan))) return;
     const next = new URLSearchParams(params);
-    const existing = store.get("canopy.clientId");
+    const existing = store.get("canopymusic.clientId");
     if (existing) next.set("cid", existing);
-    if (store.get("canopy.name")) next.set("name", store.get("canopy.name"));
+    if (store.get("canopymusic.name")) next.set("name", store.get("canopymusic.name"));
     location.replace(`http://${address}/${next.toString() ? `?${next}` : ""}`);
     await new Promise(() => {}); // stop here while the browser navigates
   })();
@@ -50,36 +56,36 @@
   // Coming from the IP address, the link carries this phone's existing ID (`cid`), so it's still
   // the same phone here.
   const handedId = params.get("cid") ? params.get("cid").slice(0, 64) : null;
-  if (handedId && !store.get("canopy.clientId")) store.set("canopy.clientId", handedId);
-  const clientId = store.get("canopy.clientId") || (() => { const id = uuid(); store.set("canopy.clientId", id); return id; })();
+  if (handedId && !store.get("canopymusic.clientId")) store.set("canopymusic.clientId", handedId);
+  const clientId = store.get("canopymusic.clientId") || (() => { const id = uuid(); store.set("canopymusic.clientId", id); return id; })();
   // Each address keeps its own storage, so a phone that used the IP address while it already had
   // an ID here has two. Both are this phone: its songs show as "You" and it can remove them.
   let otherIds = [];
-  try { otherIds = JSON.parse(store.get("canopy.otherIds") || "[]"); } catch {}
+  try { otherIds = JSON.parse(store.get("canopymusic.otherIds") || "[]"); } catch {}
   if (handedId && handedId !== clientId && !otherIds.includes(handedId)) {
     otherIds = [...otherIds, handedId].slice(-5);
-    store.set("canopy.otherIds", JSON.stringify(otherIds));
+    store.set("canopymusic.otherIds", JSON.stringify(otherIds));
   }
   const myIds = new Set([clientId, ...otherIds]);
   // A link can carry a name (`?name=Sam`), which skips the name prompt.
   const linkName = params.get("name");
-  if (linkName) { store.set("canopy.name", linkName.slice(0, 30)); store.set("canopy.nameAsked", "1"); }
-  let myName = store.get("canopy.name") || null;
+  if (linkName) { store.set("canopymusic.name", linkName.slice(0, 30)); store.set("canopymusic.nameAsked", "1"); }
+  let myName = store.get("canopymusic.name") || null;
 
   // Host control: a phone that scanned the iPad's Host Control QR code. The key arrives in the
   // link once, is kept on the phone, and is checked with the iPad on every load. Host mode is
   // remembered per phone; the switch next to the name flips between it and the guest view.
   if (params.get("host")) {
-    store.set("canopy.hostKey", params.get("host"));
-    store.set("canopy.hostMode", "host");
+    store.set("canopymusic.hostKey", params.get("host"));
+    store.set("canopymusic.hostMode", "host");
   }
   if (params.get("host") || params.get("cid")) {
     ["host", "cid"].forEach((key) => params.delete(key));
     history.replaceState(null, "", location.pathname + (params.toString() ? `?${params}` : ""));
   }
-  let hostKey = store.get("canopy.hostKey");
+  let hostKey = store.get("canopymusic.hostKey");
   let hostPaired = false;
-  let hostMode = store.get("canopy.hostMode") !== "guest";
+  let hostMode = store.get("canopymusic.hostMode") !== "guest";
   const hosting = () => hostPaired && hostMode;
 
   let snap = null;
@@ -649,7 +655,7 @@
   }
   $("mode-chip").addEventListener("click", () => {
     hostMode = !hostMode;
-    store.set("canopy.hostMode", hostMode ? "host" : "guest");
+    store.set("canopymusic.hostMode", hostMode ? "host" : "guest");
     updateNameChip();
     if (snap) render();
   });
@@ -805,7 +811,7 @@
     setTimeout(() => $("name-input").focus(), 50);
   }
   function closeName() {
-    store.set("canopy.nameAsked", "1");
+    store.set("canopymusic.nameAsked", "1");
     $("name-modal").hidden = true;
     updateNameChip();
   }
@@ -815,14 +821,14 @@
     event.preventDefault();
     const name = $("name-input").value.trim().slice(0, 24);
     myName = name || null;
-    store.set("canopy.name", myName || "");
+    store.set("canopymusic.name", myName || "");
     closeName();
   });
 
   // MARK: Start
 
   updateNameChip();
-  if (!store.get("canopy.nameAsked")) askName();
+  if (!store.get("canopymusic.nameAsked")) askName();
   if (hostKey) {
     api("/api/host/check", { key: hostKey, clientId })
       .then(() => {
@@ -832,7 +838,7 @@
       })
       .catch((error) => {
         // Only a refusal means the key was revoked; a network hiccup keeps it.
-        if (error.message === "403") { store.remove("canopy.hostKey"); hostKey = null; }
+        if (error.message === "403") { store.remove("canopymusic.hostKey"); hostKey = null; }
       });
   }
   api("/api/state").then(applySnapshot).catch(() => {});

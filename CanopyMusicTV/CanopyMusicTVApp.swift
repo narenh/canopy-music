@@ -1,5 +1,5 @@
-import CanopyCore
-import CanopyServer
+import CanopyMusicCore
+import CanopyMusicServer
 @preconcurrency import MusicKit
 import Security
 import SwiftUI
@@ -9,7 +9,7 @@ import UIKit
 /// the hub (Apple Music), run entirely from hosts' phones; choosing a zone shows it as a display.
 /// See docs/multi-device.md.
 @main
-struct CanopyTVApp: App {
+struct CanopyMusicTVApp: App {
     @State private var model = TVModel()
 
     var body: some Scene {

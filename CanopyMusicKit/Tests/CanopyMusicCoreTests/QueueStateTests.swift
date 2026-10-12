@@ -1,6 +1,6 @@
 import Foundation
 import Testing
-@testable import CanopyCore
+@testable import CanopyMusicCore
 
 func track(_ id: String) -> QueueTrack { QueueTrack(id: id, title: id, artist: "Artist") }
 let guest = Requester(name: "Sam", clientID: "phone-1", origin: .phone)

@@ -1,4 +1,4 @@
-import CanopyCore
+import CanopyMusicCore
 import SwiftUI
 
 /// Full-screen lyrics takeover: the album's color floods the screen and each line's words punch

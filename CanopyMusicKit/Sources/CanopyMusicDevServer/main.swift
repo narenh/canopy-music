@@ -1,10 +1,10 @@
-import CanopyCore
-import CanopyServer
+import CanopyMusicCore
+import CanopyMusicServer
 import Foundation
 
 #if DEBUG
 // Runs the phone web app against the demo catalog on this Mac, for working on the web UI
-// without an iPad. `swift run CanopyDevServer` then open http://localhost:8080.
+// without an iPad. `swift run CanopyMusicDevServer` then open http://localhost:8080.
 
 let session = PartySession(catalog: DemoCatalog(), engine: DemoPlaybackEngine())
 try await session.load(playlist: PlaylistSummary(id: "demo-party", name: "House party", kind: .library))
@@ -20,5 +20,5 @@ print("Canopy Music dev server: \(server.url(host: "localhost")!) · LAN \(serve
 print(registered ? "Also at \(server.url(host: hostname.hostname)!)" : "mDNS hostname registration failed")
 try await task.value
 #else
-print("CanopyDevServer is a debug-only tool.")
+print("CanopyMusicDevServer is a debug-only tool.")
 #endif

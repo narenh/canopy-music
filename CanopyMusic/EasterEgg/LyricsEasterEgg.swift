@@ -1,4 +1,4 @@
-import CanopyCore
+import CanopyMusicCore
 import Foundation
 import Observation
 

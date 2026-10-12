@@ -1,4 +1,4 @@
-import CanopyCore
+import CanopyMusicCore
 import Combine
 import Foundation
 @preconcurrency import MusicKit

@@ -1,14 +1,14 @@
-import CanopyCore
+import CanopyMusicCore
 import dnssd
 import Foundation
 import Network
 import Observation
 
-// Zones: one hub per zone advertises `_canopy._tcp`; other Canopy devices browse for it and join
+// Zones: one hub per zone advertises `_canopymusic._tcp`; other Canopy devices browse for it and join
 // as displays (docs/multi-device.md).
 
 public enum ZoneService {
-    public static let type = "_canopy._tcp"
+    public static let type = "_canopymusic._tcp"
 }
 
 /// A zone found on the network.
@@ -32,7 +32,7 @@ public struct ZoneListing: Identifiable, Hashable, Sendable {
 /// what's playing; `update` refreshes it without re-registering.
 public final class ZoneAdvertiser: @unchecked Sendable {
     private var service: DNSServiceRef?
-    private let queue = DispatchQueue(label: "canopy.zone-advertiser")
+    private let queue = DispatchQueue(label: "canopymusic.zone-advertiser")
     private var registeredName: String?
 
     public init() {}

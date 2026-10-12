@@ -21,6 +21,8 @@ enum SpotifyConfig {
         "playlist-read-private",
         "playlist-read-collaborative",
         "user-library-read",
+        // Saving the party as a playlist (private).
+        "playlist-modify-private",
     ]
 
     static var isConfigured: Bool { !clientID.isEmpty }
@@ -33,6 +35,8 @@ enum SpotifyError: LocalizedError {
     case badResponse(Int, String)
     case rateLimited(retryAfter: Int)
     case noDevice
+    /// Signed in before Canopy Music asked to save playlists.
+    case needsPlaylistAccess
 
     var errorDescription: String? {
         switch self {
@@ -42,6 +46,7 @@ enum SpotifyError: LocalizedError {
         case .badResponse(let code, let message): message.isEmpty ? "Spotify returned error \(code)." : "Spotify: \(message)."
         case .rateLimited(let seconds): "Spotify is rate limiting Canopy Music. Try again in \(seconds) s."
         case .noDevice: "Open Spotify on the device music plays from."
+        case .needsPlaylistAccess: "Sign in to Spotify again on the iPad to let Canopy Music save playlists."
         }
     }
 }
@@ -55,6 +60,8 @@ final class SpotifyAuth {
         var accessToken: String
         var refreshToken: String
         var expiresAt: Date
+        /// What the sign-in allowed, space separated. nil for sign-ins saved by earlier builds.
+        var scope: String?
     }
 
     private(set) var isSignedIn: Bool
@@ -65,6 +72,12 @@ final class SpotifyAuth {
     init() {
         tokens = Keychain.load(Tokens.self)
         isSignedIn = tokens != nil
+    }
+
+    /// The sign-in allows saving playlists. Sign-ins from before that was asked for need to sign
+    /// in again (once): Spotify only grants new scopes through the sign-in page.
+    var canSavePlaylists: Bool {
+        tokens?.scope?.split(separator: " ").contains("playlist-modify-private") == true
     }
 
     func signIn() async throws {
@@ -144,13 +157,15 @@ final class SpotifyAuth {
             var access_token: String
             var refresh_token: String?
             var expires_in: Double
+            var scope: String?
         }
         let reply = try JSONDecoder().decode(Reply.self, from: data)
         let next = Tokens(
             accessToken: reply.access_token,
             // Spotify may or may not rotate the refresh token.
             refreshToken: reply.refresh_token ?? tokens?.refreshToken ?? "",
-            expiresAt: Date().addingTimeInterval(reply.expires_in)
+            expiresAt: Date().addingTimeInterval(reply.expires_in),
+            scope: reply.scope ?? tokens?.scope
         )
         tokens = next
         Keychain.save(next)

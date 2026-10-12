@@ -459,6 +459,43 @@ struct AppleMusicCatalog: MusicCatalog {
     }
     #endif
 
+    // MARK: Saving a party
+
+    var playlistDestination: String? { "Saves to your Apple Music library" }
+
+    /// Creates a library playlist with the songs in order (Apple Music API, so it works on the
+    /// Apple TV too). Songs from the library search have library ids ("i.…"); the rest are catalog
+    /// songs. Added 100 at a time.
+    func savePlaylist(name: String, description: String, tracks: [QueueTrack]) async throws {
+        struct Ref: Encodable { var id: String; var type: String }
+        struct Tracks: Encodable { var data: [Ref] }
+        struct Create: Encodable {
+            struct Attributes: Encodable { var name: String; var description: String }
+            struct Relationships: Encodable { var tracks: Tracks }
+            var attributes: Attributes
+            var relationships: Relationships
+        }
+        struct Created: Decodable { struct Item: Decodable { var id: String }; var data: [Item] }
+        let refs = tracks.map { Ref(id: $0.id, type: $0.id.hasPrefix("i.") ? "library-songs" : "songs") }
+        let chunks = stride(from: 0, to: refs.count, by: 100).map { Array(refs[$0..<min($0 + 100, refs.count)]) }
+        guard let first = chunks.first else { return }
+        let body = Create(attributes: .init(name: name, description: description), relationships: .init(tracks: Tracks(data: first)))
+        let data = try await send("POST", "/v1/me/library/playlists", body: body)
+        guard let id = try JSONDecoder().decode(Created.self, from: data).data.first?.id else { throw AppleMusicError.badResponse }
+        for chunk in chunks.dropFirst() {
+            _ = try await send("POST", "/v1/me/library/playlists/\(id)/tracks", body: Tracks(data: chunk))
+        }
+    }
+
+    private func send(_ method: String, _ path: String, body: some Encodable) async throws -> Data {
+        guard let url = URL(string: "https://api.music.apple.com" + path) else { throw AppleMusicError.badResponse }
+        var request = URLRequest(url: url)
+        request.httpMethod = method
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.httpBody = try JSONEncoder().encode(body)
+        return try await MusicDataRequest(urlRequest: request).response().data
+    }
+
     private func fetch<T: Decodable>(_ path: String) async throws -> T {
         guard let url = URL(string: "https://api.music.apple.com" + path) else { throw AppleMusicError.badResponse }
         let response = try await MusicDataRequest(urlRequest: URLRequest(url: url)).response()

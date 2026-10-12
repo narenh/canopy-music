@@ -248,6 +248,14 @@ html.sheet-open, html.sheet-open body { overflow: hidden; }
 .danger-btn[hidden] { display: none; }
 .modal-card.centered { text-align: center; }
 .modal-card .small { font-size: 12px; margin: 12px 0 0; }
+.modal-card .party-name { margin: 4px 0 2px; }
+.modal-card .party-error { color: #ff6961; }
+.party-error[hidden], #party-fields[hidden] { display: none; }
+.text-btn.danger-text { color: #ff6961; margin-right: auto; }
+#party-form .modal-actions { flex-wrap: wrap; row-gap: 8px; }
+#party-form .modal-actions button { white-space: nowrap; }
+.text-btn[hidden] { display: none; }
+.primary-btn.danger { background: #ff453a; color: #fff; }
 .modal-card .skipped-note { color: #ffb340; margin: 8px 2px 4px; }
 .skipped-note[hidden] { display: none; }
 .invite-qr { width: 220px; height: 220px; image-rendering: pixelated; background: #fff; border-radius: 14px; padding: 10px; }

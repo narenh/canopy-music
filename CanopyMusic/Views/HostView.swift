@@ -41,7 +41,7 @@ struct HostView: View {
         }
         #if DEBUG
         .onAppear {
-            if ProcessInfo.processInfo.arguments.contains("-showSettings") { showSettings = true }
+            if ProcessInfo.processInfo.arguments.contains(where: ["-showSettings", "-showSave"].contains) { showSettings = true }
             if ProcessInfo.processInfo.arguments.contains("-showPicker") { showPicker = true }
             if ProcessInfo.processInfo.arguments.contains("-confirmEnd") { confirmingEnd = true }
             if ProcessInfo.processInfo.arguments.contains("-showSkipped") {
@@ -126,7 +126,7 @@ struct HostView: View {
                                     Text("Display").font(.footnote).foregroundStyle(.secondary)
                                 }
                             } icon: {
-                                Image(systemName: display.kind == .tv ? "appletv" : "ipad.landscape")
+                                Image(systemName: display.kind == .tv ? "tv" : "ipad.landscape")
                             }
                         }
                     }
@@ -365,6 +365,7 @@ private struct SettingsSheet: View {
     /// `.local` address) isn't re-announced on every keystroke.
     @State private var zoneNameDraft = ""
     @State private var confirmingEnd = false
+    @State private var savingPlaylist = false
 
     private func commitZoneName() {
         let name = zoneNameDraft.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -480,6 +481,12 @@ private struct SettingsSheet: View {
                 }
                 .listRowBackground(Color.white.opacity(0.08))
                 Section {
+                    Button("Save as Playlist") { savingPlaylist = true }
+                } footer: {
+                    Text("Saves the songs that have played so far. The party carries on.")
+                }
+                .listRowBackground(Color.white.opacity(0.08))
+                Section {
                     Button("End Zone", role: .destructive) { confirmingEnd = true }
                 } footer: {
                     Text("Stops the music and the phone page, clears the queue, and goes back to the zone list. Your settings stay for the next zone.")
@@ -488,6 +495,10 @@ private struct SettingsSheet: View {
             }
             .scrollContentBackground(.hidden)
             .endZoneConfirmation(isPresented: $confirmingEnd) { dismiss() }
+            .sheet(isPresented: $savingPlaylist) { PartyPlaylistSheet(purpose: .save) }
+            #if DEBUG
+            .onAppear { if ProcessInfo.processInfo.arguments.contains("-showSave") { savingPlaylist = true } }
+            #endif
             .onAppear { zoneNameDraft = model.zoneName }
             .onDisappear { commitZoneName() }
             .onChange(of: model.zoneName) { _, name in zoneNameDraft = name }
@@ -510,32 +521,15 @@ private extension View {
     }
 }
 
+/// A small sheet rather than an alert, for "Save as playlist" and its name field.
 private struct EndZoneConfirmation: ViewModifier {
-    @Environment(AppModel.self) private var model
     @Binding var isPresented: Bool
     let before: () -> Void
 
     func body(content: Content) -> some View {
-        content.alert("End \(model.zoneName)?", isPresented: $isPresented) {
-            Button("End", role: .destructive, action: end)
-            Button("Cancel", role: .cancel) {}
-        } message: {
-            Text("The music stops for everyone and the queue is cleared. This iPad goes back to the zone list.")
+        content.sheet(isPresented: $isPresented) {
+            PartyPlaylistSheet(purpose: .end, beforeEnding: before)
         }
-        #if DEBUG
-        // `-autoEnd` (with `-confirmEnd`): presses End 10 s after the alert opens.
-        .task(id: isPresented) {
-            guard isPresented, ProcessInfo.processInfo.arguments.contains("-autoEnd") else { return }
-            try? await Task.sleep(for: .seconds(10))
-            isPresented = false
-            end()
-        }
-        #endif
-    }
-
-    private func end() {
-        before()
-        model.endZone()
     }
 }
 

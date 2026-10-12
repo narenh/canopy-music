@@ -1121,6 +1121,7 @@
   // Zone settings: the admin view for every hub (an Apple TV has no settings screens). Everything
   // saves as it changes: switches at once, text values from the edit dialog on top of the sheet.
   let wifiDetails = null; // host-only (never in snapshots); loaded when the sheet opens
+  let partyInfo = null; // "Save as playlist": suggested name, song counts, where it saves
   const settingsOpen = () => !$("settings-modal").hidden;
 
   /** Shows the hub's current settings (again on every snapshot while the sheet is open). */
@@ -1141,6 +1142,21 @@
     $("settings-forget").hidden = hosts < 2;
     $("settings-stop").textContent = `End ${snap.zoneName || "this zone"}`;
     fillWifi();
+    fillPartyRow();
+  }
+
+  function fillPartyRow() {
+    $("settings-party-row").hidden = !(partyInfo && partyInfo.destination);
+    if (partyInfo) $("settings-party").textContent = partyInfo.allCount === 1 ? "1 song played" : `${partyInfo.allCount} songs played`;
+  }
+
+  /** Fetches the host details (Wi‑Fi, displays, the party so far). */
+  function loadHostDetails() {
+    return api(`/api/host/details?${keyQuery()}`).then((details) => {
+      partyInfo = details.party || null;
+      fillPartyRow();
+      return details;
+    });
   }
 
   function fillWifi() {
@@ -1156,10 +1172,11 @@
 
   $("settings-btn").addEventListener("click", () => {
     wifiDetails = null;
+    partyInfo = null;
     fillSettings();
     const list = $("settings-display-list");
     list.innerHTML = "";
-    api(`/api/host/details?${keyQuery()}`).then((details) => {
+    loadHostDetails().then((details) => {
       wifiDetails = details.wifi;
       fillWifi();
       for (const d of details.displays) {
@@ -1244,12 +1261,97 @@
       $("settings-forget").hidden = true;
     } catch { toast("Couldn't forget the other hosts"); }
   });
-  $("settings-stop").addEventListener("click", async () => {
+  // End (with "Save as playlist", on by default) and Save as playlist share one dialog. The name
+  // starts as the party's date and a space, for the host to type the rest.
+  let partyMode = null; // "end" or "save"
+  let partyBusy = false;
+  const partySaving = () => partyMode === "save" || $("party-save").checked;
+  const partyCount = () => !partyInfo ? 0 : $("party-only").checked ? partyInfo.requestCount : partyInfo.allCount;
+  const partyWillSave = () => !!(partyInfo && partyInfo.destination) && partySaving() && partyCount() > 0;
+
+  function updateParty() {
+    const canSave = !!(partyInfo && partyInfo.destination);
+    $("party-save-row").hidden = partyMode !== "end" || !canSave;
+    $("party-fields").hidden = !canSave || !partySaving();
+    const n = partyCount();
+    $("party-note").textContent = n === 0
+      ? ($("party-only").checked ? "No songs guests added have played yet." : "No songs have played yet.")
+      : `${n === 1 ? "1 song" : `${n} songs`}. ${partyInfo.destination}.`;
+    const go = $("party-go");
+    go.disabled = partyBusy || (partyMode === "save" && !partyWillSave());
+    go.classList.toggle("danger", partyMode === "end");
+    if (partyBusy) go.textContent = "Saving…";
+    else if (!$("party-error").hidden) go.textContent = "Try again";
+    else go.textContent = partyMode === "save" ? "Save" : partyWillSave() ? "Save and end" : "End";
+  }
+
+  function openParty(mode) {
+    partyMode = mode;
+    partyBusy = false;
     const device = snap.hubKind === "tv" ? "Apple TV" : "iPad";
-    if (!confirm(`End ${snap.zoneName || "this zone"}? The music stops for everyone and the queue is cleared. The ${device} goes back to its zone list.`)) return;
+    $("party-title").textContent = mode === "end" ? `End ${snap.zoneName || "this zone"}?` : "Save as playlist";
+    $("party-sub").textContent = mode === "end"
+      ? `The music stops for everyone and the queue is cleared. The ${device} goes back to its zone list.`
+      : "Saves the songs that have played so far. The party carries on.";
+    $("party-save").checked = true;
+    $("party-only").checked = true;
+    $("party-error").hidden = true;
+    $("party-nosave").hidden = true;
+    const today = new Date();
+    const pad = (v) => String(v).padStart(2, "0");
+    const name = $("party-name");
+    name.value = partyInfo ? partyInfo.suggestedName : `${today.getFullYear()}-${pad(today.getMonth() + 1)}-${pad(today.getDate())} `;
+    updateParty();
+    $("party-modal").hidden = false;
+    // Straight away, so phones show the keyboard; the cursor goes after the date.
+    if (!$("party-fields").hidden) { name.focus(); name.setSelectionRange(name.value.length, name.value.length); }
+    // The counts may have moved on since the settings sheet opened.
+    loadHostDetails().then(() => { if (!$("party-modal").hidden) updateParty(); }).catch(() => {});
+  }
+
+  function closeParty() { $("party-modal").hidden = true; partyMode = null; }
+
+  async function endZone() {
+    closeParty();
     $("settings-modal").hidden = true;
     try { await api("/api/host/stop", { key: hostKey }); } catch { toast("Couldn't end the zone"); }
+  }
+
+  $("party-save").addEventListener("change", updateParty);
+  $("party-only").addEventListener("change", updateParty);
+  $("party-cancel").addEventListener("click", closeParty);
+  $("party-nosave").addEventListener("click", endZone);
+  $("party-form").addEventListener("submit", async (event) => {
+    event.preventDefault();
+    if (partyBusy) return;
+    if (!partyWillSave()) { if (partyMode === "end") endZone(); return; }
+    partyBusy = true;
+    $("party-error").hidden = true;
+    updateParty();
+    const name = $("party-name").value.trim();
+    let error = null;
+    try {
+      const res = await fetch("/api/host/save-playlist", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ key: hostKey, name, onlyRequests: $("party-only").checked }),
+      });
+      if (!res.ok) error = (await res.json().catch(() => null))?.error || `No answer from ${hubName()}.`;
+    } catch { error = `Couldn't reach ${hubName()}.`; }
+    partyBusy = false;
+    if (error) {
+      // Nothing ends until the host chooses: try again, or end without saving.
+      $("party-error").textContent = `Couldn't save the playlist. ${error}`;
+      $("party-error").hidden = false;
+      $("party-nosave").hidden = partyMode !== "end";
+      updateParty();
+      return;
+    }
+    if (partyMode === "end") { endZone(); return; }
+    closeParty();
+    toast(`Saved “${name || partyInfo.suggestedName.trim()}”`);
   });
+  $("settings-party-save").addEventListener("click", () => openParty("save"));
+  $("settings-stop").addEventListener("click", () => openParty("end"));
 
   $("transport").addEventListener("click", (event) => {
     const button = event.target.closest("[data-action]");

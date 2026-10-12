@@ -8,6 +8,8 @@ struct TVRootView: View {
     @Environment(TVModel.self) private var model
     @State private var confirming = false
     @State private var easterEgg = LyricsEasterEgg()
+    /// Saving the party failed: try again, or end without saving.
+    @State private var saveError: String?
 
     var body: some View {
         let current = model.session.state.current
@@ -62,14 +64,55 @@ struct TVRootView: View {
             }
         })
         .onPlayPauseCommand(perform: model.role == .choosing ? nil : { model.playPause() })
-        .confirmationDialog("", isPresented: $confirming, titleVisibility: .hidden) {
+        .confirmationDialog(model.role == .hub && model.canSaveParty ? "End \(model.zoneName)?" : "",
+                            isPresented: $confirming, titleVisibility: model.role == .hub && model.canSaveParty ? .visible : .hidden) {
             if model.role == .hub {
-                Button("End \(model.zoneName)", role: .destructive) { model.stopZone() }
+                if model.canSaveParty {
+                    Button("Save Playlist and End") { saveAndEnd() }
+                    Button("End Without Saving", role: .destructive) { model.stopZone() }
+                } else {
+                    Button("End \(model.zoneName)", role: .destructive) { model.stopZone() }
+                }
             } else {
                 Button("Leave \(model.shownZone?.name ?? "zone")", role: .destructive) { model.leave() }
             }
             Button("Cancel", role: .cancel) {}
+        } message: {
+            if model.role == .hub, model.canSaveParty {
+                let info = model.session.partySaveInfo
+                Text("The \(info.requestCount == 1 ? "song" : "\(info.requestCount) songs") guests added, as “\(model.partyPlaylistName)”. \(info.destination ?? "").")
+            }
         }
+        .alert("Couldn't save the playlist", isPresented: Binding(get: { saveError != nil }, set: { if !$0 { saveError = nil } })) {
+            Button("Try Again") { saveAndEnd() }
+            Button("End Without Saving", role: .destructive) { model.stopZone() }
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text(saveError ?? "")
+        }
+        .overlay {
+            if model.isSavingParty {
+                Label("Saving playlist…", systemImage: "music.note.list")
+                    .font(.system(size: 30, weight: .semibold))
+                    .padding(.horizontal, 40)
+                    .padding(.vertical, 24)
+                    .background(.ultraThinMaterial, in: Capsule())
+            }
+        }
+        #if DEBUG
+        // `-confirmEnd`: opens Menu › End 12 s after hosting starts; with `-autoEnd`, chooses the
+        // first option (Save Playlist and End, when offered) 8 s later. For the simulator.
+        .task(id: model.role) {
+            let args = ProcessInfo.processInfo.arguments
+            guard model.role == .hub, args.contains("-confirmEnd") else { return }
+            try? await Task.sleep(for: .seconds(12))
+            confirming = true
+            guard args.contains("-autoEnd") else { return }
+            try? await Task.sleep(for: .seconds(8))
+            confirming = false
+            if model.canSaveParty { saveAndEnd() } else { model.stopZone() }
+        }
+        #endif
         #if DEBUG
         // `-autoLeave`: leaves a shown zone after 6 s (testing the way back without a remote).
         .task(id: model.role) {
@@ -80,6 +123,18 @@ struct TVRootView: View {
         #endif
     }
 
+}
+
+private extension TVRootView {
+    func saveAndEnd() {
+        Task {
+            do {
+                try await model.saveAndStopZone()
+            } catch {
+                saveError = error.localizedDescription
+            }
+        }
+    }
 }
 
 private extension View {
@@ -120,7 +175,7 @@ struct TVZoneListView: View {
                     Button {
                         Task { await model.resumeZone() }
                     } label: {
-                        TVZoneRow(icon: "appletv", title: model.zoneName, subtitle: "Resume on this TV")
+                        TVZoneRow(icon: "tv", title: model.zoneName, subtitle: "Resume on this TV")
                     }
                     .focused($focused, equals: "resume")
                 }
@@ -129,7 +184,7 @@ struct TVZoneListView: View {
                         model.show(zone)
                     } label: {
                         TVZoneRow(
-                            icon: zone.kind == .tv ? "appletv" : "ipad.landscape",
+                            icon: zone.kind == .tv ? "tv" : "ipad.landscape",
                             // The icon says what kind of device it is.
                             title: zone.name,
                             subtitle: zone.nowPlaying.map { "Playing \($0)" }
@@ -231,7 +286,7 @@ struct TVZoneBadge: View {
         if let zone = model.shownZone {
             // Plain text, not a capsule, so it can't be mistaken for a requester pill.
             HStack(spacing: 12) {
-                Image(systemName: zone.kind == .tv ? "appletv.fill" : "ipad.landscape")
+                Image(systemName: zone.kind == .tv ? "tv.fill" : "ipad.landscape")
                     .font(.system(size: 22, weight: .medium))
                 Text("Playing from \(zone.name)")
                     .font(.system(size: 24, weight: .medium))

@@ -245,6 +245,38 @@ public final class PartySession {
 
     public var hasParty: Bool { state.current != nil || !state.upNext.isEmpty }
 
+    // MARK: Saving the party
+
+    /// Every song that has played in this zone (hub only), for saving it as a playlist.
+    public var partyLog: PartyLog { state.log }
+
+    /// What saving would do right now (hub only).
+    public var partySaveInfo: PartySaveInfo {
+        let log = state.log
+        return PartySaveInfo(suggestedName: log.suggestedName(), allCount: log.songs(onlyRequests: false).count,
+                             requestCount: log.songs(onlyRequests: true).count, destination: catalog.playlistDestination)
+    }
+
+    /// Saves the songs that played as a playlist in the hub's account, crediting the guests who
+    /// queued them. A blank name gets the suggested one. Returns how many songs it saved.
+    @discardableResult
+    public func savePartyPlaylist(name: String, onlyRequests: Bool) async throws -> Int {
+        guard remote == nil else { throw PartySaveError.unsupported }
+        let log = state.log
+        let tracks = log.tracks(onlyRequests: onlyRequests)
+        guard !tracks.isEmpty else { throw PartySaveError.nothingToSave(onlyRequests: onlyRequests) }
+        var name = String(name.trimmingCharacters(in: .whitespacesAndNewlines).prefix(100))
+        if name.isEmpty { name = log.suggestedName().trimmingCharacters(in: .whitespaces) }
+        try await catalog.savePlaylist(name: name, description: log.playlistDescription(onlyRequests: onlyRequests), tracks: tracks)
+        return tracks.count
+    }
+
+    /// The player started `item`: it goes in the party log.
+    private func recordPlayed(_ item: QueueItem?) {
+        guard remote == nil, let item, state.recordPlayed(item) else { return }
+        scheduleSave()
+    }
+
     // MARK: Host actions
 
     /// Starts over with a new base playlist: stops playback and clears the queue and requests.
@@ -517,6 +549,7 @@ public final class PartySession {
             loadedItemID = nil
             throw error
         }
+        recordPlayed(item)
         isPlaying = engine.isPlaying
         broadcast()
         Task { await syncStaging() }
@@ -542,6 +575,7 @@ public final class PartySession {
             stagedItemID = nil
             mutate { $0.advance(to: id) }
             loadedItemID = state.current?.id
+            recordPlayed(state.current)
         case .reachedEnd:
             stagedItemID = nil
             loadedItemID = nil

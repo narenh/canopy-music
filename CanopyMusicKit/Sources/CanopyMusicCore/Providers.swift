@@ -9,10 +9,19 @@ public protocol MusicCatalog: Sendable {
     /// How the latest `tracks(in:)` for `playlist` went, including the songs it left out because
     /// they can't be played. nil when there's nothing to report.
     func loadReport(for playlist: PlaylistSummary) async -> PlaylistLoadReport?
+    /// Where `savePlaylist` saves, shown before saving: "Saves to your Apple Music library". nil
+    /// when this service can't save playlists.
+    var playlistDestination: String? { get }
+    /// Creates a playlist with `tracks`, in order, in the signed-in account.
+    func savePlaylist(name: String, description: String, tracks: [QueueTrack]) async throws
 }
 
 public extension MusicCatalog {
     func loadReport(for playlist: PlaylistSummary) async -> PlaylistLoadReport? { nil }
+    var playlistDestination: String? { nil }
+    func savePlaylist(name: String, description: String, tracks: [QueueTrack]) async throws {
+        throw PartySaveError.unsupported
+    }
 }
 
 public enum PlaybackEvent: Sendable, Equatable {

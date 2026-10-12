@@ -28,6 +28,10 @@ public struct QueueState: Codable, Equatable, Sendable {
     public private(set) var current: QueueItem?
     public private(set) var upNext: [QueueItem] = []
     public private(set) var history: [QueueItem] = []
+    /// Every song that played, uncapped (`history` keeps the last 100). Optional so queues saved
+    /// by earlier builds still load.
+    private var partyLog: PartyLog?
+    public var log: PartyLog { partyLog ?? PartyLog() }
     /// Set when the next item has been handed to a player that can't take it back.
     public private(set) var lockedNextID: UUID?
     public private(set) var version = 0
@@ -195,6 +199,15 @@ public struct QueueState: Codable, Equatable, Sendable {
     }
 
     // MARK: Playback progression
+
+    /// `item` started playing (see `PartyLog`). False if it was already logged.
+    @discardableResult
+    public mutating func recordPlayed(_ item: QueueItem, at date: Date = Date()) -> Bool {
+        var log = log
+        guard log.record(item, at: date) else { return false }
+        partyLog = log
+        return true
+    }
 
     /// Moves `current` into history and makes the next item current.
     /// Pass the id of the item the player actually advanced to, in case the list changed underneath it.

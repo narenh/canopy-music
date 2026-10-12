@@ -126,6 +126,7 @@
     <p class="settings-head">Music</p>
     <div class="setting-row"><span class="setting-label">Base playlist</span><span class="setting-value" id="settings-playlist">None yet</span><button type="button" class="pill-btn" id="settings-playlist-change">Change</button></div>
     <p class="small skipped-note" id="settings-playlist-skipped" hidden></p>
+    <div class="setting-row" id="settings-party-row" hidden><span class="setting-label">Save as playlist</span><span class="setting-value" id="settings-party"></span><button type="button" class="pill-btn" id="settings-party-save">Save</button></div>
     <p class="settings-head">Phones</p>
     <label class="setting-row"><span>Queue from phones</span><input type="checkbox" class="switch" id="settings-queue"></label>
     <label class="setting-row"><span>Reorder from phones</span><input type="checkbox" class="switch" id="settings-reorder"></label>
@@ -153,6 +154,26 @@
     <div class="modal-actions">
       <button type="button" class="text-btn" id="edit-cancel">Cancel</button>
       <button type="submit" class="primary-btn">Save</button>
+    </div>
+  </form>
+</div>
+
+<!-- Host: End (with "Save as playlist") or, from the settings sheet, save the party so far. -->
+<div id="party-modal" class="modal over" hidden>
+  <form class="modal-card" id="party-form">
+    <h2 id="party-title"></h2>
+    <p id="party-sub"></p>
+    <label class="setting-row" id="party-save-row"><span>Save as playlist</span><input type="checkbox" class="switch" id="party-save" checked></label>
+    <div id="party-fields">
+      <input id="party-name" class="party-name" maxlength="100" placeholder="Playlist name" autocomplete="off" autocorrect="off" enterkeyhint="done" data-1p-ignore data-lpignore="true">
+      <label class="setting-row"><span>Only songs guests added</span><input type="checkbox" class="switch" id="party-only" checked></label>
+      <p class="small" id="party-note"></p>
+    </div>
+    <p class="small party-error" id="party-error" hidden></p>
+    <div class="modal-actions">
+      <button type="button" class="text-btn danger-text" id="party-nosave" hidden>End without saving</button>
+      <button type="button" class="text-btn" id="party-cancel">Cancel</button>
+      <button type="submit" class="primary-btn" id="party-go"></button>
     </div>
   </form>
 </div>

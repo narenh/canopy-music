@@ -200,7 +200,24 @@ public final class PartyServer: Sendable {
         await server.appendRoute("GET /api/host/details") { request in
             guard await session.isHost(key: request.query["key"]) else { return HTTPResponse(statusCode: .forbidden) }
             let displays = await session.displays.filter { Date().timeIntervalSince($0.lastSeen) < 30 }
-            return try .json(HostDetails(wifi: await session.wifi, displays: displays.map { .init(name: $0.name, kind: $0.kind) }))
+            return try .json(HostDetails(wifi: await session.wifi, displays: displays.map { .init(name: $0.name, kind: $0.kind) },
+                                         party: await session.partySaveInfo))
+        }
+
+        // Saves the songs that played as a playlist in the hub's account (mid-party from the
+        // settings sheet, or just before ending). Failures say why, so the page can offer a retry.
+        await server.appendRoute("POST /api/host/save-playlist") { request in
+            let body = try JSONDecoder.api.decode(SavePlaylistBody.self, from: await request.bodyData)
+            guard await session.isHost(key: body.key) else { return HTTPResponse(statusCode: .forbidden) }
+            do {
+                let count = try await session.savePartyPlaylist(name: body.name, onlyRequests: body.onlyRequests)
+                return try .json(["saved": count])
+            } catch {
+                let status: HTTPStatusCode = error is PartySaveError ? .conflict : .badGateway
+                let message = (error as? LocalizedError)?.errorDescription ?? "Couldn't save the playlist."
+                return HTTPResponse(statusCode: status, headers: [.contentType: "application/json"],
+                                    body: (try? JSONEncoder().encode(["error": message])) ?? Data())
+            }
         }
 
         // Revokes Host Control from every other phone; this one gets the new key.
@@ -281,6 +298,14 @@ struct HostDetails: Encodable {
     struct Display: Encodable { var name: String; var kind: HubKind }
     var wifi: WifiDetails
     var displays: [Display]
+    /// For "Save as playlist": the suggested name, how many songs, and where it saves.
+    var party: PartySaveInfo
+}
+
+struct SavePlaylistBody: Decodable {
+    var key: String
+    var name: String
+    var onlyRequests: Bool
 }
 
 struct SettingsBody: Decodable {

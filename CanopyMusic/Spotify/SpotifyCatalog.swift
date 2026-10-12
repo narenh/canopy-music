@@ -64,6 +64,36 @@ struct SpotifyCatalog: MusicCatalog {
         await reports.report(for: playlist.id)
     }
 
+    var playlistDestination: String? { "Saves to your Spotify account" }
+
+    /// A private playlist in the signed-in account, songs added 100 at a time. Uses the 2026 API
+    /// (`/me/playlists`, `/items`) and falls back to the older paths where Spotify refuses them.
+    func savePlaylist(name: String, description: String, tracks: [QueueTrack]) async throws {
+        guard await api.auth.canSavePlaylists else { throw SpotifyError.needsPlaylistAccess }
+        struct Create: Encodable { var name: String; var description: String; var `public` = false }
+        struct Created: Decodable { var id: String }
+        struct Items: Encodable { var uris: [String] }
+        struct Me: Decodable { var id: String }
+        let create = Create(name: name, description: description)
+        let data: Data?
+        do {
+            data = try await api.send("POST", "/me/playlists", body: create)
+        } catch SpotifyError.badResponse(let status, _) where status == 404 || status == 405 {
+            guard let me = try await api.get("/me", as: Me.self) else { throw SpotifyError.badResponse(0, "") }
+            data = try await api.send("POST", "/users/\(me.id)/playlists", body: create)
+        }
+        guard let data, let playlist = try? JSONDecoder().decode(Created.self, from: data) else { throw SpotifyError.badResponse(0, "") }
+        let uris = tracks.map(\.id)
+        for start in stride(from: 0, to: uris.count, by: 100) {
+            let chunk = Items(uris: Array(uris[start..<min(start + 100, uris.count)]))
+            do {
+                try await api.send("POST", "/playlists/\(playlist.id)/items", body: chunk)
+            } catch SpotifyError.badResponse(let status, _) where status == 404 || status == 405 {
+                try await api.send("POST", "/playlists/\(playlist.id)/tracks", body: chunk)
+            }
+        }
+    }
+
     private struct PlaylistObject: Decodable, Sendable {
         struct Owner: Decodable, Sendable { var display_name: String? }
         var id: String

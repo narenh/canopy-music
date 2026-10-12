@@ -135,6 +135,9 @@ final class TVModel {
         guard !args.contains("-playTest"), !args.contains("-noRestore") else { return }
         #endif
         debugLog("restoring zone")
+        #if DEBUG
+        TVZoneListView.didAutoCreate = true // `-createZone` is for a launch that starts at the list
+        #endif
         openZone(fresh: false)
         Task {
             await startServer()
@@ -204,6 +207,24 @@ final class TVModel {
         session.end()
         zoneRecord.ended()
         closeZone()
+    }
+
+    /// Menu › End can save the party first. There's no typing on the TV, so the playlist is named
+    /// after the party's date and the zone ("2026-10-12 Attic"), with the songs guests added (as
+    /// the web page's defaults). A host can pick another name or every song from the web page.
+    var partyPlaylistName: String { session.partyLog.suggestedName() + zoneName }
+
+    /// What Menu › End offers to save: guests' songs, if any played and the service can save.
+    var canSaveParty: Bool { role == .hub && session.partySaveInfo.destination != nil && session.partySaveInfo.requestCount > 0 }
+
+    private(set) var isSavingParty = false
+
+    /// Saves the party, then ends the zone. On failure the zone keeps going and the error comes back.
+    func saveAndStopZone() async throws {
+        isSavingParty = true
+        defer { isSavingParty = false }
+        try await session.savePartyPlaylist(name: partyPlaylistName, onlyRequests: true)
+        stopZone()
     }
 
     /// Back to the zone list without touching the zone itself (`stopZone` ends it first).

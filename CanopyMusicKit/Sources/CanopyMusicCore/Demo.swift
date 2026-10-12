@@ -81,7 +81,9 @@ public struct DemoCatalog: MusicCatalog {
             PlaylistSummary(id: "demo-chill", name: "Sunday chill", subtitle: "12 songs", kind: .library),
             PlaylistSummary(id: "demo-big", name: "Big party", subtitle: "400 songs", kind: .library),
             PlaylistSummary(id: "demo-skips", name: "Road trip", subtitle: "34 songs, 4 can't play", kind: .library),
-        ] + (ProcessInfo.processInfo.arguments.contains("-manyPlaylists") ? Self.manyPlaylists : [])
+        ] + DemoSavedPlaylists.all().map { saved in
+            PlaylistSummary(id: saved.id, name: saved.name, subtitle: saved.description, kind: .library)
+        } + (ProcessInfo.processInfo.arguments.contains("-manyPlaylists") ? Self.manyPlaylists : [])
     }
 
     /// `-manyPlaylists`: a library the size of a big real one, for the web page's picker.
@@ -95,11 +97,22 @@ public struct DemoCatalog: MusicCatalog {
     }
 
     public func tracks(in playlist: PlaylistSummary) async throws -> [QueueTrack] {
-        switch playlist.id {
+        if let saved = DemoSavedPlaylists.all().first(where: { $0.id == playlist.id }) { return saved.tracks }
+        return switch playlist.id {
         case "demo-chill": Array(Self.allTracks.suffix(12))
         case "demo-big": Self.bigTracks
         default: Self.allTracks
         }
+    }
+
+    public var playlistDestination: String? { "Saves to the demo library" }
+
+    /// Saved playlists show up in the demo library (in the playlist pickers), with their
+    /// description as the subtitle. `-failSave` makes saving fail, to see the retry.
+    public func savePlaylist(name: String, description: String, tracks: [QueueTrack]) async throws {
+        try await Task.sleep(for: .milliseconds(800))
+        if ProcessInfo.processInfo.arguments.contains("-failSave") { throw DemoSaveError() }
+        DemoSavedPlaylists.add(.init(id: "demo-saved-\(UUID().uuidString)", name: name, description: description, tracks: tracks))
     }
 
     /// "Road trip" leaves out songs as a library playlist with uploads does, so the "not on
@@ -119,6 +132,31 @@ public struct DemoCatalog: MusicCatalog {
         QueueTrack(id: "demo-upload-3", title: "Paper Planes (Demo)", artist: "Juniper Row", album: "Demos 2009"),
         QueueTrack(id: "demo-upload-4", title: "Untitled 4", artist: "Unknown Artist", album: "Unknown Album"),
     ]
+}
+
+struct DemoSaveError: LocalizedError {
+    var errorDescription: String? { "The demo library didn't answer (-failSave)." }
+}
+
+/// Playlists saved to the demo library, kept between launches.
+enum DemoSavedPlaylists {
+    struct Saved: Codable {
+        var id: String
+        var name: String
+        var description: String
+        var tracks: [QueueTrack]
+    }
+
+    private static let key = "demoSavedPlaylists"
+
+    static func all() -> [Saved] {
+        UserDefaults.standard.data(forKey: key).flatMap { try? JSONDecoder().decode([Saved].self, from: $0) } ?? []
+    }
+
+    static func add(_ playlist: Saved) {
+        let next = [playlist] + all()
+        UserDefaults.standard.set(try? JSONEncoder().encode(next), forKey: key)
+    }
 }
 
 /// Timer-driven fake player. Tracks last `track.duration` seconds (30 in the demo catalog).

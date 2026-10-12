@@ -209,6 +209,11 @@
 
   // A link to …/#settings opens the zone settings once this phone is a host and the state has loaded.
   let settingsLinkPending = location.hash === "#settings";
+  // The same page opened again with #settings only changes the hash.
+  window.addEventListener("hashchange", () => {
+    settingsLinkPending = location.hash === "#settings";
+    openSettingsFromLink();
+  });
   function openSettingsFromLink() {
     if (!settingsLinkPending || !snap || !hosting()) return;
     settingsLinkPending = false;
@@ -845,7 +850,6 @@
     $("settings-hosts").textContent = hosts === 1 ? "1 phone" : `${hosts} phones`;
     $("settings-forget").hidden = hosts < 2;
     const stop = $("settings-stop");
-    stop.hidden = snap.hubKind !== "tv";
     stop.textContent = `Stop ${snap.zoneName || "this zone"}`;
     // Host-only details: the Wi‑Fi (never in the snapshot guests get) and connected displays.
     settingsWifiLoaded = false;
@@ -911,7 +915,8 @@
     } catch { toast("Couldn't save settings"); }
   });
   $("settings-stop").addEventListener("click", async () => {
-    if (!confirm(`Stop ${snap.zoneName || "this zone"}? The music stops and the TV goes back to its zone list.`)) return;
+    const device = snap.hubKind === "tv" ? "Apple TV" : "iPad";
+    if (!confirm(`Stop ${snap.zoneName || "this zone"}? The music stops for everyone, and the ${device} goes back to its zone list.`)) return;
     $("settings-modal").hidden = true;
     try { await api("/api/host/stop", { key: hostKey }); } catch { toast("Couldn't stop the zone"); }
   });

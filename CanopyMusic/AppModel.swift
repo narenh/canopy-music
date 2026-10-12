@@ -592,6 +592,8 @@ final class AppModel {
             if wifi.simpleQR != self.wifiSimpleQR { self.wifiSimpleQR = wifi.simpleQR }
         }
         session.onPINChanged = { [weak self] pin in self?.hostPIN = pin }
+        // A host stopped the zone from the web page (it asked them first): as Stop This Zone does here.
+        session.onStopRequested = { [weak self] in self?.stopHosting() }
     }
 
     #if DEBUG

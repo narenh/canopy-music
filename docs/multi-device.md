@@ -40,7 +40,7 @@ Status: built on the `tvos-spike` branch (see "Build status" at the end). Screen
 | Base playlist | iPad, web | web |
 | Unlock PIN | iPad, web | — (nothing to unlock) |
 | `.local` address | follows the zone name | follows the zone name |
-| Stop the zone | iPad host mode | Menu on the remote, web |
+| Stop the zone | iPad settings, web (both ask first) | Menu on the remote, web (web asks first) |
 | Resume after relaunch | Resume row | create again (the queue is restored) |
 | **Guests** | | |
 | Guest QR code on the party screen | ✓ | ✓ |
@@ -83,7 +83,7 @@ Status: built on the `tvos-spike` branch (see "Build status" at the end). Screen
   - `POST /api/host/playlist`: load a base playlist.
   - `POST /api/host/settings`: zone name, reorder, display controls, Wi‑Fi.
   - `GET /api/host/details`: the Wi‑Fi details and the connected displays. The Wi‑Fi password is never in the snapshots guests get.
-  - `POST /api/host/stop`: TV hubs.
+  - `POST /api/host/stop`: stops the zone (any hub). The page asks first.
   - `GET /api/host/invite.png`: the "Add another host" QR, rendered by the hub.
 - **Host keys are kept per hub:** snapshots carry the hub's device ID (`hubID`), and the page keeps one key per hub. A hub that refuses a key only drops its own, so a phone that's a host of two zones (or of a zone whose address another hub later takes) stays a host of both. Keys move along with the phone's ID and name when the page moves to the friendly address.
 - **If a hub disappears,** displays show "Lost connection to <zone>" and keep retrying. The queue is saved on the hub.

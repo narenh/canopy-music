@@ -106,7 +106,7 @@ public final class PartySession {
     public private(set) var displays: [ZoneDisplay] = []
     /// Called when a host changes settings from the web page, so the app can save them.
     @ObservationIgnored public var onSettingsChanged: (@MainActor () -> Void)?
-    /// Called when a host stops the zone from the web page (TV hubs).
+    /// Called when a host stops the zone from the web page (after the page asked them to confirm).
     @ObservationIgnored public var onStopRequested: (@MainActor () -> Void)?
     public let catalog: any MusicCatalog
     @ObservationIgnored public let engine: any PlaybackEngine

@@ -340,6 +340,7 @@ private struct SettingsSheet: View {
     /// Edited locally and applied on return or when the sheet closes, so the zone (and its
     /// `.local` address) isn't re-announced on every keystroke.
     @State private var zoneNameDraft = ""
+    @State private var confirmingStop = false
 
     private func commitZoneName() {
         let name = zoneNameDraft.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -455,16 +456,23 @@ private struct SettingsSheet: View {
                 }
                 .listRowBackground(Color.white.opacity(0.08))
                 Section {
-                    Button("Stop This Zone", role: .destructive) {
-                        dismiss()
-                        model.stopHosting()
-                    }
+                    Button("Stop This Zone", role: .destructive) { confirmingStop = true }
                 } footer: {
                     Text("Stops the music and the phone page here and goes back to the zone list, where you can join another zone or resume this one.")
                 }
                 .listRowBackground(Color.white.opacity(0.08))
             }
             .scrollContentBackground(.hidden)
+            // Stopping is destructive (and hosts can do it from the web page too, which also asks).
+            .alert("Stop \(model.zoneName)?", isPresented: $confirmingStop) {
+                Button("Stop", role: .destructive) {
+                    dismiss()
+                    model.stopHosting()
+                }
+                Button("Cancel", role: .cancel) {}
+            } message: {
+                Text("The music stops for everyone, and this iPad goes back to the zone list.")
+            }
             .onAppear { zoneNameDraft = model.zoneName }
             .onDisappear { commitZoneName() }
             .onChange(of: model.zoneName) { _, name in zoneNameDraft = name }

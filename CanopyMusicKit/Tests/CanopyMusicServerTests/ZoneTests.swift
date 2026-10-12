@@ -145,6 +145,24 @@ struct HostSettingsTests {
         #expect(display == 200)
     }
 
+    /// Any hub (iPad or TV) can be stopped from the web page, by hosts only.
+    @Test func onlyHostsStopTheZone() async throws {
+        let hub = PartySession(catalog: DemoCatalog(), engine: DemoPlaybackEngine())
+        hub.configureHub(kind: .ipad, id: "ipad-1", zoneName: "Upstairs", serviceName: "Demo")
+        hub.hostKey = "secret"
+        var stops = 0
+        hub.onStopRequested = { stops += 1 }
+        let (server, task) = try #require(await PartyServer.start(session: hub, ports: [18795]))
+        defer { task.cancel(); Task { await server.stop() } }
+
+        let (refused, _) = try await post(18795, "/api/host/stop", ["key": "nope"])
+        #expect(refused == 403)
+        #expect(stops == 0)
+        let (code, _) = try await post(18795, "/api/host/stop", ["key": "secret"])
+        #expect(code == 200)
+        #expect(stops == 1)
+    }
+
     @Test func pinOnlyOnHubsThatUseOne() async throws {
         let hub = PartySession(catalog: DemoCatalog(), engine: DemoPlaybackEngine())
         hub.hostKey = "secret"

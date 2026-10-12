@@ -34,6 +34,10 @@ struct TVRootView: View {
         .animation(.easeInOut(duration: 0.5), value: model.role)
         .onChange(of: current?.id) { model.advertise() }
         // Menu: a hub can only stop its zone, a display can only leave (no settings on the TV).
+        // The remote's Menu and Play/Pause only reach a view that has focus, and these screens have
+        // nothing else to focus; without this, Menu leaves the app.
+        .focusable(model.role != .choosing)
+        .focusEffectDisabled()
         .onExitCommand(perform: model.role == .choosing ? nil : { confirming = true })
         .onPlayPauseCommand(perform: model.role == .choosing ? nil : { model.playPause() })
         .alert(menuTitle, isPresented: $confirming) {

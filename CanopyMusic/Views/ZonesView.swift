@@ -69,9 +69,9 @@ struct ZoneListView: View {
         ForEach(zones) { zone in
             ZoneRow(
                 icon: zone.kind == .tv ? "appletv" : "ipad.landscape",
+                // The icon says what kind of device it is.
                 title: zone.name,
-                subtitle: [zone.kind == .tv ? "Apple TV" : "iPad", zone.nowPlaying.map { "Playing \($0)" }]
-                    .compactMap(\.self).joined(separator: " · ")
+                subtitle: zone.nowPlaying.map { "Playing \($0)" }
             ) {
                 model.join(zone)
             }
@@ -82,7 +82,7 @@ struct ZoneListView: View {
 private struct ZoneRow: View {
     let icon: String
     let title: String
-    let subtitle: String
+    let subtitle: String?
     let action: () -> Void
 
     var body: some View {
@@ -94,7 +94,9 @@ private struct ZoneRow: View {
                     .background(.white.opacity(0.12), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
                 VStack(alignment: .leading, spacing: 2) {
                     Text(title).font(.system(size: 17, weight: .medium))
-                    Text(subtitle).font(.system(size: 13)).foregroundStyle(.secondary).lineLimit(1)
+                    if let subtitle {
+                        Text(subtitle).font(.system(size: 13)).foregroundStyle(.secondary).lineLimit(1)
+                    }
                 }
                 Spacer(minLength: 8)
                 Image(systemName: "chevron.right")

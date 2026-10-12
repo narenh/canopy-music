@@ -74,9 +74,9 @@ struct TVZoneListView: View {
                     } label: {
                         TVZoneRow(
                             icon: zone.kind == .tv ? "appletv" : "ipad.landscape",
-                            title: "Show \(zone.name)",
-                            subtitle: [zone.kind == .tv ? "Apple TV" : "iPad", zone.nowPlaying.map { "Playing \($0)" }]
-                                .compactMap(\.self).joined(separator: " · ")
+                            // The icon says what kind of device it is.
+                            title: zone.name,
+                            subtitle: zone.nowPlaying.map { "Playing \($0)" }
                         )
                     }
                     .focused($focused, equals: zone.id)
@@ -122,7 +122,7 @@ struct TVZoneListView: View {
 private struct TVZoneRow: View {
     let icon: String
     let title: String
-    let subtitle: String
+    let subtitle: String?
 
     var body: some View {
         HStack(spacing: 24) {
@@ -131,7 +131,9 @@ private struct TVZoneRow: View {
                 .frame(width: 60)
             VStack(alignment: .leading, spacing: 4) {
                 Text(title).font(.system(size: 32, weight: .semibold))
-                Text(subtitle).font(.system(size: 22)).opacity(0.65).lineLimit(1)
+                if let subtitle {
+                    Text(subtitle).font(.system(size: 22)).opacity(0.65).lineLimit(1)
+                }
             }
             Spacer(minLength: 0)
         }

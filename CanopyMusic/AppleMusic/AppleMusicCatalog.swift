@@ -171,8 +171,18 @@ struct AppleMusicCatalog: MusicCatalog {
     private func catalogSongs(for resources: [LibrarySongResource]) async throws -> [Song] {
         enum Slot { case song(Song), pending(String) }
         let slots: [Slot] = resources.compactMap { resource in
+            #if os(tvOS)
+            // On tvOS the catalog song that comes with a library track can't start a fresh player:
+            // the player's first update then refers to the user's library, which the app can't
+            // open, so the player connection drops and polling it blocks the main thread. The same
+            // song fetched from the catalog plays, so fetch them all.
+            if let id = resource.relationships?.catalog?.data.first?.id.rawValue ?? resource.attributes?.playParams?.catalogId {
+                return .pending(id)
+            }
+            #else
             if let song = resource.relationships?.catalog?.data.first { return .song(song) }
             if let catalogID = resource.attributes?.playParams?.catalogId { return .pending(catalogID) }
+            #endif
             return nil
         }
 

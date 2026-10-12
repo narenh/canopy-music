@@ -156,7 +156,7 @@ public final class PartyServer: Sendable {
                 try await session.load(playlist: body.playlist)
                 if body.play == true { try await session.play() }
             } catch {
-                return HTTPResponse(statusCode: .badGateway)
+                return .serviceFailed(error)
             }
             return HTTPResponse(statusCode: .ok)
         }
@@ -279,7 +279,7 @@ extension PartyServer {
     static func playback(_ body: PlaybackBody, session: PartySession) async -> HTTPResponse {
         switch body.action {
         case "play":
-            do { try await session.play() } catch { return HTTPResponse(statusCode: .badGateway) }
+            do { try await session.play() } catch { return .serviceFailed(error) }
         case "pause": session.pause()
         case "next": await session.skip()
         case "previous": await session.previous()

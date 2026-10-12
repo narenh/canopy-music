@@ -171,6 +171,7 @@ final class TVModel {
         hostURL = guestURL.flatMap { URL(string: "\($0.absoluteString)/?host=\(hostKey)") }
         #if DEBUG
         print("[tv] host \(hostURL?.absoluteString ?? "-")")
+        debugLog("host \(hostURL?.absoluteString ?? "-")")
         #endif
         advertise()
     }

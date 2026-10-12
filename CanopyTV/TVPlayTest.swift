@@ -60,6 +60,27 @@ struct TVPlayTestView: View {
             return
         }
 
+        // 0. `-playTestEngineFirst`: the app's engine on a cold player, as in a real zone.
+        if ProcessInfo.processInfo.arguments.contains("-playTestEngineFirst") {
+            log("— app engine first, cold player —")
+            let cache = SongCache()
+            await cache.store([song])
+            let engine = AppleMusicEngine(cache: cache)
+            do {
+                try await engine.play(QueueTrack(song))
+                log("engine play returned")
+            } catch {
+                log("engine error: \(error)")
+            }
+            for _ in 0..<4 {
+                try? await Task.sleep(for: .seconds(2))
+                log("engine playing=\(engine.isPlaying) time=\(Int(engine.currentTime))")
+            }
+            engine.pause()
+            log("done")
+            return
+        }
+
         // 1. MusicKit's ApplicationMusicPlayer.
         log("— ApplicationMusicPlayer —")
         let player = ApplicationMusicPlayer.shared

@@ -70,7 +70,7 @@ struct ZoneListView: View {
             ZoneRow(
                 icon: zone.kind == .tv ? "appletv" : "ipad.landscape",
                 title: zone.name,
-                subtitle: [zone.kind == .tv ? "Apple TV" : "iPad", zone.nowPlaying.map { "playing \($0)" }]
+                subtitle: [zone.kind == .tv ? "Apple TV" : "iPad", zone.nowPlaying.map { "Playing \($0)" }]
                     .compactMap(\.self).joined(separator: " · ")
             ) {
                 model.join(zone)

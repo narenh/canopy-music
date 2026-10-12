@@ -86,7 +86,7 @@ public final class PartyServer: Sendable {
             do {
                 return try .json(try await session.catalog.searchSongs(term))
             } catch {
-                return HTTPResponse(statusCode: .badGateway)
+                return .serviceFailed(error)
             }
         }
 
@@ -139,7 +139,7 @@ public final class PartyServer: Sendable {
             do {
                 return try .json(try await session.catalog.libraryPlaylists())
             } catch {
-                return HTTPResponse(statusCode: .badGateway)
+                return .serviceFailed(error)
             }
         }
 
@@ -374,5 +374,17 @@ extension String {
     var cleanedName: String? {
         let trimmed = trimmingCharacters(in: .whitespacesAndNewlines)
         return trimmed.isEmpty ? nil : String(trimmed.prefix(24))
+    }
+}
+
+extension HTTPResponse {
+    /// The music service failed. Debug builds say why in the body, since the hub's own console is
+    /// hard to reach on an Apple TV.
+    static func serviceFailed(_ error: Error) -> HTTPResponse {
+        #if DEBUG
+        HTTPResponse(statusCode: .badGateway, body: Data(String(reflecting: error).utf8))
+        #else
+        HTTPResponse(statusCode: .badGateway)
+        #endif
     }
 }

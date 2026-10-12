@@ -225,13 +225,20 @@ struct TVStartView: View {
                 Text("Scan to host")
                     .font(.system(size: 76, weight: .bold))
                     .holdsRemoteFocus()
-                Text("Your phone becomes the remote: pick a playlist, play, pause, skip and reorder. iPads with Canopy Music on this Wi\u{2011}Fi can show this zone too.")
+                Text("Use your phone to set up this zone. Other devices on this network with Canopy Music can join it.")
                     .font(.system(size: 34))
                     .foregroundStyle(.white.opacity(0.7))
                     .frame(maxWidth: 820, alignment: .leading)
             }
-            TVQRCode(payload: model.hostURL?.absoluteString)
-                .frame(width: 440, height: 440)
+            // Big enough to carry a symbol through it (the iPad's Wi‑Fi code does the same).
+            Group {
+                if let host = model.hostURL?.absoluteString {
+                    HalftoneQRCode(payload: host, symbol: "music.note", symbolScale: 0.55, dotScale: 0.7)
+                } else {
+                    ProgressView()
+                }
+            }
+            .frame(width: 440, height: 440)
         }
         .foregroundStyle(.white)
     }

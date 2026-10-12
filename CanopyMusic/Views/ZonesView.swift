@@ -39,8 +39,12 @@ struct ZoneListView: View {
                 }
                 .listStyle(.insetGrouped)
                 .scrollContentBackground(.hidden)
+                // Only the rows' height: the insets aren't fixed. When the list is on its way out
+                // (e.g. to "Create a new zone") it gets a bottom inset as big as its empty space, so
+                // counting insets measured the list's own frame and the height chased itself
+                // forever, freezing the app.
                 .onScrollGeometryChange(for: CGFloat.self) { geometry in
-                    geometry.contentSize.height + geometry.contentInsets.top + geometry.contentInsets.bottom
+                    geometry.contentSize.height
                 } action: { _, height in
                     // Before the rows are laid out it reports nothing; collapsing then would stick.
                     if height > 1 { listHeight = height }

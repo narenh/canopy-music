@@ -32,6 +32,17 @@ public struct QueueState: Codable, Equatable, Sendable {
 
     public init() {}
 
+    /// A display's copy of its hub's queue. It has no playlist, so it never refills on its own;
+    /// the next snapshot from the hub replaces it.
+    public init(mirroring snapshot: PartySnapshot) {
+        playlistName = snapshot.playlistName
+        current = snapshot.current
+        upNext = snapshot.upNext
+        history = snapshot.history ?? []
+        lockedNextID = snapshot.lockedNextID
+        version = snapshot.version
+    }
+
     // MARK: Playlist
 
     /// Starts over with a new base playlist in its original order: clears now playing, requests,
@@ -95,7 +106,7 @@ public struct QueueState: Codable, Equatable, Sendable {
     }
 
     @discardableResult
-    public mutating func addRequest(_ track: QueueTrack, by requester: Requester, at date: Date = Date()) -> AddResult {
+    public mutating func addRequest(_ track: QueueTrack, by requester: Requester, at date: Date = Date(), id: UUID = UUID()) -> AddResult {
         if current?.track.id == track.id { return .nowPlaying }
         if let index = upNext.firstIndex(where: { $0.isRequest && $0.track.id == track.id }) {
             return .alreadyQueued(upNext[index], index: index)
@@ -109,7 +120,7 @@ public struct QueueState: Codable, Equatable, Sendable {
             skipPositions.insert(pos)
         }
 
-        let item = QueueItem(track: track, requester: requester, addedAt: date)
+        let item = QueueItem(id: id, track: track, requester: requester, addedAt: date)
         let index = requestInsertionIndex
         upNext.insert(item, at: index)
         refill()

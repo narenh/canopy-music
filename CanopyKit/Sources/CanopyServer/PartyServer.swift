@@ -1,6 +1,10 @@
 import CanopyCore
+import CoreImage
+import CoreImage.CIFilterBuiltins
 import FlyingFox
 import Foundation
+import ImageIO
+import UniformTypeIdentifiers
 
 /// LAN web server that lets guests queue from their phones. Serves the web app, a small JSON API,
 /// and a WebSocket that pushes a `PartySnapshot` after every change.
@@ -87,8 +91,14 @@ public final class PartyServer: Sendable {
 
         await server.appendRoute("POST /api/add") { request in
             let body = try JSONDecoder.api.decode(AddBody.self, from: await request.bodyData)
-            let requester = Requester(name: body.name?.cleanedName, clientID: body.clientId, origin: .phone)
-            let result = await session.add(body.track, by: requester)
+            // Displays (Canopy devices showing this zone) add as "iPad" requests with their own name
+            // and pick the item ID, so their optimistic copy matches.
+            let requester = Requester(name: body.name?.cleanedName, clientID: body.clientId, origin: body.origin == "ipad" ? .ipad : .phone)
+            let result = if let itemId = body.itemId {
+                await session.add(body.track, by: requester, id: itemId)
+            } else {
+                await session.add(body.track, by: requester)
+            }
             return try .json(AddReply(result))
         }
 
@@ -109,6 +119,68 @@ public final class PartyServer: Sendable {
             return HTTPResponse(statusCode: ok ? .ok : .forbidden)
         }
 
+        // Displays: other Canopy devices showing this zone.
+        await server.appendRoute("POST /api/display/hello") { request in
+            let body = try JSONDecoder.api.decode(DisplayHello.self, from: await request.bodyData)
+            await session.noteDisplay(ZoneDisplay(id: body.clientId, name: body.name, kind: body.kind))
+            return HTTPResponse(statusCode: .ok)
+        }
+
+        await server.appendRoute("POST /api/display/playback") { request in
+            let body = try JSONDecoder.api.decode(PlaybackBody.self, from: await request.bodyData)
+            guard await session.displaysCanControl else { return HTTPResponse(statusCode: .forbidden) }
+            return await Self.playback(body, session: session)
+        }
+
+        // Hosts on the web page (with the Host Control key).
+        await server.appendRoute("GET /api/host/playlists") { request in
+            guard await session.isHost(key: request.query["key"]) else { return HTTPResponse(statusCode: .forbidden) }
+            do {
+                return try .json(try await session.catalog.libraryPlaylists())
+            } catch {
+                return HTTPResponse(statusCode: .badGateway)
+            }
+        }
+
+        await server.appendRoute("POST /api/host/playlist") { request in
+            let body = try JSONDecoder.api.decode(PlaylistBody.self, from: await request.bodyData)
+            guard await session.isHost(key: body.key) else { return HTTPResponse(statusCode: .forbidden) }
+            do {
+                try await session.load(playlist: body.playlist)
+                if body.play == true { try await session.play() }
+            } catch {
+                return HTTPResponse(statusCode: .badGateway)
+            }
+            return HTTPResponse(statusCode: .ok)
+        }
+
+        await server.appendRoute("POST /api/host/settings") { request in
+            let body = try JSONDecoder.api.decode(SettingsBody.self, from: await request.bodyData)
+            guard await session.isHost(key: body.key) else { return HTTPResponse(statusCode: .forbidden) }
+            await session.applyHostSettings(
+                zoneName: body.zoneName?.trimmingCharacters(in: .whitespacesAndNewlines).prefix(40).description,
+                phonesCanReorder: body.phonesCanReorder,
+                displaysCanControl: body.displaysCanControl
+            )
+            return HTTPResponse(statusCode: .ok)
+        }
+
+        await server.appendRoute("POST /api/host/stop") { request in
+            let body = try JSONDecoder.api.decode(HostBody.self, from: await request.bodyData)
+            guard await session.isHost(key: body.key) else { return HTTPResponse(statusCode: .forbidden) }
+            await session.requestStop()
+            return HTTPResponse(statusCode: .ok)
+        }
+
+        // "Add another host": the hub renders the QR code, so the page needs no QR library.
+        await server.appendRoute("GET /api/host/invite.png") { request in
+            let key = request.query["key"]
+            guard await session.isHost(key: key), let key else { return HTTPResponse(statusCode: .forbidden) }
+            let address = await session.lanAddress ?? request.headers[.host] ?? ""
+            guard let png = Self.qrPNG("http://\(address)/?host=\(key)") else { return HTTPResponse(statusCode: .internalServerError) }
+            return HTTPResponse(statusCode: .ok, headers: [.contentType: "image/png", .cacheControl: "no-store"], body: png)
+        }
+
         // Host control: a phone that scanned the iPad's Host Control QR code.
         await server.appendRoute("POST /api/host/check") { request in
             let body = try JSONDecoder.api.decode(HostBody.self, from: await request.bodyData)
@@ -118,15 +190,7 @@ public final class PartyServer: Sendable {
         await server.appendRoute("POST /api/host/playback") { request in
             let body = try JSONDecoder.api.decode(HostBody.self, from: await request.bodyData)
             guard await session.isHost(key: body.key) else { return HTTPResponse(statusCode: .forbidden) }
-            switch body.action {
-            case "play":
-                do { try await session.play() } catch { return HTTPResponse(statusCode: .badGateway) }
-            case "pause": await session.pause()
-            case "next": await session.skip()
-            case "previous": await session.previous()
-            default: return HTTPResponse(statusCode: .badRequest)
-            }
-            return HTTPResponse(statusCode: .ok)
+            return await Self.playback(PlaybackBody(action: body.action ?? "", time: body.time), session: session)
         }
 
         await server.appendRoute("GET /ws", to: .webSocket(SnapshotSocket(session: session)))
@@ -139,6 +203,32 @@ struct AddBody: Decodable {
     var track: QueueTrack
     var name: String?
     var clientId: String
+    var itemId: UUID?
+    var origin: String?
+}
+
+struct DisplayHello: Decodable {
+    var clientId: String
+    var name: String
+    var kind: HubKind
+}
+
+struct PlaybackBody: Decodable {
+    var action: String
+    var time: TimeInterval?
+}
+
+struct PlaylistBody: Decodable {
+    var key: String
+    var playlist: PlaylistSummary
+    var play: Bool?
+}
+
+struct SettingsBody: Decodable {
+    var key: String
+    var zoneName: String?
+    var phonesCanReorder: Bool?
+    var displaysCanControl: Bool?
 }
 
 struct AddReply: Encodable {
@@ -174,6 +264,39 @@ struct HostBody: Decodable {
     var key: String
     var clientId: String?
     var action: String?
+    var time: TimeInterval?
+}
+
+extension PartyServer {
+    @MainActor
+    static func playback(_ body: PlaybackBody, session: PartySession) async -> HTTPResponse {
+        switch body.action {
+        case "play":
+            do { try await session.play() } catch { return HTTPResponse(statusCode: .badGateway) }
+        case "pause": session.pause()
+        case "next": await session.skip()
+        case "previous": await session.previous()
+        case "seek":
+            guard let time = body.time else { return HTTPResponse(statusCode: .badRequest) }
+            session.seek(to: time)
+        default: return HTTPResponse(statusCode: .badRequest)
+        }
+        return HTTPResponse(statusCode: .ok)
+    }
+
+    /// A QR code as a crisp PNG (each module scaled up without smoothing).
+    static func qrPNG(_ payload: String) -> Data? {
+        let filter = CIFilter.qrCodeGenerator()
+        filter.message = Data(payload.utf8)
+        filter.correctionLevel = "M"
+        guard let output = filter.outputImage?.samplingNearest().transformed(by: CGAffineTransform(scaleX: 12, y: 12)),
+              let image = CIContext().createCGImage(output, from: output.extent) else { return nil }
+        let data = NSMutableData()
+        guard let destination = CGImageDestinationCreateWithData(data, UTType.png.identifier as CFString, 1, nil) else { return nil }
+        CGImageDestinationAddImage(destination, image, nil)
+        guard CGImageDestinationFinalize(destination) else { return nil }
+        return data as Data
+    }
 }
 
 // MARK: - Helpers

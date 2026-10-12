@@ -1,0 +1,289 @@
+import CanopyCore
+import dnssd
+import Foundation
+import Network
+import Observation
+
+// Zones: one hub per zone advertises `_canopy._tcp`; other Canopy devices browse for it and join
+// as displays (docs/multi-device.md).
+
+public enum ZoneService {
+    public static let type = "_canopy._tcp"
+}
+
+/// A zone found on the network.
+public struct ZoneListing: Identifiable, Hashable, Sendable {
+    /// The Bonjour instance name (unique on the network).
+    public var id: String
+    public var name: String
+    public var kind: HubKind
+    /// The hub's guest address by IP (`10.0.1.5` or `10.0.1.5:8080`).
+    public var address: String
+    /// Identifies the hub device, so a device can tell its own zone apart.
+    public var hubID: String?
+    public var nowPlaying: String?
+
+    public var baseURL: URL? { URL(string: "http://\(address)") }
+}
+
+// MARK: - Hub: advertise
+
+/// Advertises this device's zone. The TXT record carries the zone name, hub kind, address and
+/// what's playing; `update` refreshes it without re-registering.
+public final class ZoneAdvertiser: @unchecked Sendable {
+    private var service: DNSServiceRef?
+    private let queue = DispatchQueue(label: "canopy.zone-advertiser")
+    private var registeredName: String?
+
+    public init() {}
+
+    public func advertise(name: String, port: UInt16, txt: [String: String]) {
+        let record = Self.txtRecord(txt)
+        if service != nil, registeredName == name {
+            record.withUnsafeBytes { bytes in
+                _ = DNSServiceUpdateRecord(service, nil, 0, UInt16(bytes.count), bytes.baseAddress, 0)
+            }
+            return
+        }
+        stop()
+        var ref: DNSServiceRef?
+        let status = record.withUnsafeBytes { bytes in
+            // No flags: if the name is taken, mDNS picks "Name (2)" and so on by itself.
+            DNSServiceRegister(&ref, 0, 0, name, ZoneService.type, nil, nil, port.bigEndian,
+                               UInt16(bytes.count), bytes.baseAddress, nil, nil)
+        }
+        guard status == kDNSServiceErr_NoError, let ref else { return }
+        DNSServiceSetDispatchQueue(ref, queue)
+        service = ref
+        registeredName = name
+    }
+
+    public func stop() {
+        if let service { DNSServiceRefDeallocate(service) }
+        service = nil
+        registeredName = nil
+    }
+
+    deinit { stop() }
+
+    /// DNS TXT format: each entry is a length byte then `key=value` (at most 255 bytes).
+    static func txtRecord(_ entries: [String: String]) -> Data {
+        var data = Data()
+        for (key, value) in entries.sorted(by: { $0.key < $1.key }) {
+            var entry = Data("\(key)=\(value)".utf8)
+            if entry.count > 255 { entry = entry.prefix(255) }
+            data.append(UInt8(entry.count))
+            data.append(entry)
+        }
+        return data.isEmpty ? Data([0]) : data
+    }
+}
+
+// MARK: - Displays: browse
+
+/// Live list of zones on the network.
+@MainActor
+@Observable
+public final class ZoneBrowser {
+    public private(set) var zones: [ZoneListing] = []
+    /// True once the first browse results (or a definite "nothing") have come in.
+    public private(set) var hasSearched = false
+    @ObservationIgnored private var browser: NWBrowser?
+
+    public init() {}
+
+    public func start() {
+        guard browser == nil else { return }
+        let browser = NWBrowser(for: .bonjourWithTXTRecord(type: ZoneService.type, domain: nil), using: .tcp)
+        browser.browseResultsChangedHandler = { [weak self] results, _ in
+            let zones = results.compactMap(Self.listing(from:)).sorted { $0.name.localizedStandardCompare($1.name) == .orderedAscending }
+            Task { @MainActor in
+                self?.zones = zones
+                self?.hasSearched = true
+            }
+        }
+        browser.stateUpdateHandler = { [weak self] state in
+            if case .ready = state {
+                Task { @MainActor in
+                    // Nothing on the network shows as "ready" with no results; give it a moment.
+                    try? await Task.sleep(for: .milliseconds(900))
+                    self?.hasSearched = true
+                }
+            }
+        }
+        browser.start(queue: .main)
+        self.browser = browser
+    }
+
+    public func stop() {
+        browser?.cancel()
+        browser = nil
+    }
+
+    nonisolated static func listing(from result: NWBrowser.Result) -> ZoneListing? {
+        guard case .service(let instance, _, _, _) = result.endpoint,
+              case .bonjour(let record) = result.metadata else { return nil }
+        let txt = record.dictionary
+        guard let address = txt["addr"], !address.isEmpty else { return nil }
+        return ZoneListing(
+            id: instance,
+            name: txt["name"] ?? instance,
+            kind: HubKind(rawValue: txt["kind"] ?? "") ?? .ipad,
+            address: address,
+            hubID: txt["hub"],
+            nowPlaying: txt["playing"].flatMap { $0.isEmpty ? nil : $0 }
+        )
+    }
+}
+
+// MARK: - Displays: connect
+
+/// A display's connection to its hub: mirrors the hub's queue into a `PartySession` over the
+/// same WebSocket the guest page uses, and sends edits over the JSON API.
+@MainActor
+@Observable
+public final class ZoneConnection: ZoneRemote {
+    public let baseURL: URL
+    public private(set) var isConnected = false
+    /// True once a snapshot has arrived (so the UI can wait before showing the party screen).
+    public private(set) var hasSnapshot = false
+
+    @ObservationIgnored private let clientID: String
+    @ObservationIgnored private let name: String
+    @ObservationIgnored private let kind: HubKind
+    @ObservationIgnored private weak var session: PartySession?
+    @ObservationIgnored private var loop: Task<Void, Never>?
+    @ObservationIgnored private var heartbeat: Task<Void, Never>?
+    @ObservationIgnored private let urlSession: URLSession = {
+        let config = URLSessionConfiguration.ephemeral
+        config.timeoutIntervalForRequest = 8
+        config.waitsForConnectivity = false
+        return URLSession(configuration: config)
+    }()
+
+    public init(baseURL: URL, clientID: String, name: String, kind: HubKind) {
+        self.baseURL = baseURL
+        self.clientID = clientID
+        self.name = name
+        self.kind = kind
+    }
+
+    public func start(session: PartySession) {
+        self.session = session
+        loop?.cancel()
+        loop = Task { [weak self] in await self?.run() }
+        heartbeat?.cancel()
+        heartbeat = Task { [weak self] in
+            while !Task.isCancelled {
+                await self?.sayHello()
+                try? await Task.sleep(for: .seconds(10))
+            }
+        }
+    }
+
+    public func stop() {
+        loop?.cancel()
+        heartbeat?.cancel()
+        loop = nil
+        heartbeat = nil
+        isConnected = false
+    }
+
+    private func run() async {
+        var attempt = 0
+        while !Task.isCancelled {
+            guard let url = Self.webSocketURL(baseURL) else { return }
+            let socket = urlSession.webSocketTask(with: url)
+            socket.resume()
+            do {
+                while !Task.isCancelled {
+                    let message = try await socket.receive()
+                    guard case .string(let text) = message,
+                          let snapshot = try? JSONDecoder.api.decode(PartySnapshot.self, from: Data(text.utf8)) else { continue }
+                    session?.apply(snapshot)
+                    hasSnapshot = true
+                    isConnected = true
+                    attempt = 0
+                }
+            } catch {
+                socket.cancel(with: .goingAway, reason: nil)
+            }
+            isConnected = false
+            attempt += 1
+            try? await Task.sleep(for: .seconds(min(Double(attempt), 5)))
+        }
+    }
+
+    private func sayHello() async {
+        struct Hello: Encodable { var clientId: String; var name: String; var kind: HubKind }
+        _ = try? await post("/api/display/hello", Hello(clientId: clientID, name: name, kind: kind))
+    }
+
+    // MARK: ZoneRemote
+
+    public func send(_ command: ZoneCommand) async throws {
+        do {
+            switch command {
+            case .add(let track, let itemID):
+                struct Add: Encodable { var track: QueueTrack; var name: String; var clientId: String; var itemId: UUID; var origin: String }
+                try await post("/api/add", Add(track: track, name: name, clientId: clientID, itemId: itemID, origin: "ipad"))
+            case .move(let id, let after):
+                struct Move: Encodable { var id: UUID; var after: UUID? }
+                try await post("/api/move", Move(id: id, after: after))
+            case .play, .pause, .next, .previous, .seek:
+                struct Playback: Encodable { var clientId: String; var action: String; var time: TimeInterval? }
+                let (action, time): (String, TimeInterval?) = switch command {
+                case .play: ("play", nil)
+                case .pause: ("pause", nil)
+                case .next: ("next", nil)
+                case .previous: ("previous", nil)
+                case .seek(let t): ("seek", t)
+                default: ("", nil)
+                }
+                try await post("/api/display/playback", Playback(clientId: clientID, action: action, time: time))
+            }
+        } catch {
+            // Refused or failed: drop the optimistic edit by taking the hub's state as is.
+            await refresh()
+            throw error
+        }
+    }
+
+    public func search(_ term: String) async throws -> [QueueTrack] {
+        var components = URLComponents(url: baseURL.appending(path: "api/search"), resolvingAgainstBaseURL: false)!
+        components.queryItems = [URLQueryItem(name: "q", value: term)]
+        let (data, response) = try await urlSession.data(from: components.url!)
+        try Self.check(response)
+        return try JSONDecoder.api.decode([QueueTrack].self, from: data)
+    }
+
+    private func refresh() async {
+        guard let (data, _) = try? await urlSession.data(from: baseURL.appending(path: "api/state")),
+              let snapshot = try? JSONDecoder.api.decode(PartySnapshot.self, from: data) else { return }
+        session?.apply(snapshot, force: true)
+    }
+
+    @discardableResult
+    private func post(_ path: String, _ body: some Encodable) async throws -> Data {
+        var request = URLRequest(url: baseURL.appending(path: String(path.dropFirst())))
+        request.httpMethod = "POST"
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.httpBody = try JSONEncoder.api.encode(body)
+        let (data, response) = try await urlSession.data(for: request)
+        try Self.check(response)
+        return data
+    }
+
+    nonisolated static func check(_ response: URLResponse) throws {
+        guard let http = response as? HTTPURLResponse, (200..<300).contains(http.statusCode) else {
+            throw URLError(.badServerResponse)
+        }
+    }
+
+    nonisolated static func webSocketURL(_ base: URL) -> URL? {
+        guard var components = URLComponents(url: base, resolvingAgainstBaseURL: false) else { return nil }
+        components.scheme = "ws"
+        components.path = "/ws"
+        return components.url
+    }
+}

@@ -19,6 +19,18 @@ public struct PartySnapshot: Codable, Equatable, Sendable {
     public var canReorder: Bool
     /// The friendly address (e.g. `music.local`), which the page moves to when the phone can reach it.
     public var address: String?
+
+    // Zones (docs/multi-device.md). Optional so older pages and clients still decode.
+    /// The hub's address by IP (`10.0.1.5` or `10.0.1.5:8080`), which every phone can open.
+    public var lanAddress: String?
+    public var zoneName: String?
+    public var hubKind: HubKind?
+    /// The hub's music service, e.g. "Apple Music", for search placeholders on displays.
+    public var service: String?
+    /// Whether displays get play/pause, skip and scrubbing.
+    public var displaysCanControl: Bool?
+    /// Recently played songs, newest first, for displays' Up next history.
+    public var history: [QueueItem]?
 }
 
 /// Owns the queue and keeps the player in step with it. Both the iPad UI and the phone server
@@ -31,6 +43,27 @@ public final class PartySession {
 
     public private(set) var state: QueueState
     public private(set) var isPlaying = false
+    /// Set when this session mirrors another device's zone (display mode).
+    @ObservationIgnored public let remote: (any ZoneRemote)?
+    /// Zone details from the hub, for a display; this device's own, for a hub.
+    public private(set) var hubKind: HubKind?
+    public var zoneName: String? {
+        didSet { if zoneName != oldValue, remote == nil { broadcast() } }
+    }
+    /// The hub's music service title, e.g. "Apple Music".
+    public var serviceName: String?
+    /// Whether displays get play/pause, skip and scrubbing (a hub setting, on by default).
+    public var displaysCanControl = true {
+        didSet { if displaysCanControl != oldValue, remote == nil { broadcast() } }
+    }
+    /// The hub's guest address by IP, from the hub (display) or set by the app (hub).
+    public var lanAddress: String?
+    /// Displays that have checked in recently (hub only).
+    public private(set) var displays: [ZoneDisplay] = []
+    /// Called when a host changes settings from the web page, so the app can save them.
+    @ObservationIgnored public var onSettingsChanged: (@MainActor () -> Void)?
+    /// Called when a host stops the zone from the web page (TV hubs).
+    @ObservationIgnored public var onStopRequested: (@MainActor () -> Void)?
     public let catalog: any MusicCatalog
     @ObservationIgnored public let engine: any PlaybackEngine
 
@@ -50,6 +83,7 @@ public final class PartySession {
         self.catalog = catalog
         self.engine = engine
         self.storeURL = storeURL
+        self.remote = nil
         if let storeURL, let data = try? Data(contentsOf: storeURL),
            var restored = try? JSONDecoder().decode(QueueState.self, from: data) {
             // Nothing is staged in a fresh player.
@@ -62,6 +96,66 @@ public final class PartySession {
         if !engine.canReplaceStaged { startLateStagingTicker() }
     }
 
+    /// A display's session: mirrors the hub's queue from snapshots and sends edits to the hub.
+    public init(remote: any ZoneRemote) {
+        self.remote = remote
+        self.catalog = RemoteCatalog { [weak remote] term in
+            guard let remote else { return [] }
+            return try await remote.search(term)
+        }
+        self.engine = MirrorEngine()
+        self.storeURL = nil
+        state = QueueState()
+    }
+
+    /// The hub's latest snapshot (display mode). A snapshot older than an optimistic local edit
+    /// is skipped, so the edit doesn't flicker back; `force` takes it anyway (after a refused edit).
+    public func apply(_ snapshot: PartySnapshot, force: Bool = false) {
+        guard remote != nil else { return }
+        if force || snapshot.version >= state.version {
+            state = QueueState(mirroring: snapshot)
+        }
+        var playback = snapshot.playback
+        // The hub's clock may differ from ours; time it from when it arrived.
+        playback.capturedAt = Date()
+        (engine as? MirrorEngine)?.playback = playback
+        isPlaying = playback.isPlaying
+        hubKind = snapshot.hubKind
+        zoneName = snapshot.zoneName
+        serviceName = snapshot.service
+        phonesCanReorder = snapshot.canReorder
+        displaysCanControl = snapshot.displaysCanControl ?? true
+        guestAddress = snapshot.address
+        lanAddress = snapshot.lanAddress
+    }
+
+    /// This device's own zone (hub).
+    public func configureHub(kind: HubKind, zoneName: String, serviceName: String?) {
+        hubKind = kind
+        self.zoneName = zoneName
+        self.serviceName = serviceName
+        broadcast()
+    }
+
+    /// A display checked in. Displays not heard from for 30 s drop off the list.
+    public func noteDisplay(_ display: ZoneDisplay) {
+        displays.removeAll { $0.id == display.id || Date().timeIntervalSince($0.lastSeen) > 30 }
+        displays.append(display)
+        displays.sort { $0.name < $1.name }
+    }
+
+    /// Applies settings sent by a host from the web page.
+    public func applyHostSettings(zoneName: String?, phonesCanReorder: Bool?, displaysCanControl: Bool?) {
+        if let zoneName, !zoneName.isEmpty { self.zoneName = zoneName }
+        if let phonesCanReorder { self.phonesCanReorder = phonesCanReorder }
+        if let displaysCanControl { self.displaysCanControl = displaysCanControl }
+        onSettingsChanged?()
+    }
+
+    public func requestStop() {
+        onStopRequested?()
+    }
+
     public var hasParty: Bool { state.current != nil || !state.upNext.isEmpty }
 
     // MARK: Host actions
@@ -69,6 +163,7 @@ public final class PartySession {
     /// Starts over with a new base playlist: stops playback and clears the queue and requests.
     /// Nothing plays until `play()`.
     public func load(playlist: PlaylistSummary) async throws {
+        guard remote == nil else { return }
         let tracks = try await catalog.tracks(in: playlist)
         if engine.isPlaying { engine.pause() }
         stagedItemID = nil
@@ -78,11 +173,17 @@ public final class PartySession {
     }
 
     public func shufflePlaylist() {
+        guard remote == nil else { return }
         mutate { $0.shufflePlaylist() }
     }
 
     /// Plays the current song, loading it into the engine first if needed (e.g. after a relaunch).
     public func play() async throws {
+        if let remote {
+            isPlaying = true
+            try await remote.send(.play)
+            return
+        }
         let result: Result<Void, any Error> = await serially {
             do {
                 try await self.playNow()
@@ -107,13 +208,18 @@ public final class PartySession {
     }
 
     public func pause() {
+        if let remote {
+            isPlaying = false
+            Task { try? await remote.send(.pause) }
+            return
+        }
         engine.pause()
         isPlaying = engine.isPlaying
         broadcast()
     }
 
     public func togglePlayPause() async {
-        if engine.isPlaying {
+        if engine.isPlaying || (remote != nil && isPlaying) {
             pause()
         } else {
             try? await play()
@@ -123,6 +229,10 @@ public final class PartySession {
     /// Like the Music app: restarts the song if it's more than a few seconds in, otherwise goes
     /// to the previous song (and keeps playing or paused as it was).
     public func previous() async {
+        if let remote {
+            try? await remote.send(.previous)
+            return
+        }
         await serially { await self.previousNow() }
     }
 
@@ -143,11 +253,22 @@ public final class PartySession {
     }
 
     public func seek(to time: TimeInterval) {
+        if let remote {
+            if let mirror = engine as? MirrorEngine {
+                mirror.playback = PlaybackSnapshot(isPlaying: mirror.isPlaying, position: max(0, time), capturedAt: Date())
+            }
+            Task { try? await remote.send(.seek(max(0, time))) }
+            return
+        }
         engine.seek(to: max(0, time))
         broadcast()
     }
 
     public func skip() async {
+        if let remote {
+            try? await remote.send(.next)
+            return
+        }
         await serially { await self.skipNow() }
     }
 
@@ -170,22 +291,50 @@ public final class PartySession {
 
     @discardableResult
     public func add(_ track: QueueTrack, by requester: Requester) -> AddResult {
-        mutate { $0.addRequest(track, by: requester) }
+        if let remote {
+            // Show it right away (with the ID the hub will use), then send it.
+            let id = UUID()
+            let result = state.addRequest(track, by: requester, id: id)
+            if case .added = result { Task { try? await remote.send(.add(track, itemID: id)) } }
+            return result
+        }
+        return mutate { $0.addRequest(track, by: requester) }
+    }
+
+    /// Adds a request with an ID chosen by a display, so its optimistic copy matches.
+    @discardableResult
+    public func add(_ track: QueueTrack, by requester: Requester, id: UUID) -> AddResult {
+        mutate { $0.addRequest(track, by: requester, id: id) }
     }
 
     @discardableResult
     public func move(_ id: UUID, to index: Int) -> Bool {
-        mutate { $0.move(id, to: index) }
+        if remote != nil {
+            // Displays send moves as "after this item", like the web page.
+            guard let from = state.upNext.firstIndex(where: { $0.id == id }) else { return false }
+            var others = state.upNext.map(\.id)
+            others.remove(at: from)
+            let to = min(max(index, 0), others.count)
+            return move(id, after: to == 0 ? nil : others[to - 1])
+        }
+        return mutate { $0.move(id, to: index) }
     }
 
     @discardableResult
     public func move(_ id: UUID, after anchor: UUID?) -> Bool {
-        mutate { $0.move(id, after: anchor) }
+        if let remote {
+            let ok = state.move(id, after: anchor)
+            if ok { Task { try? await remote.send(.move(id, after: anchor)) } }
+            return ok
+        }
+        return mutate { $0.move(id, after: anchor) }
     }
 
     /// Removes an item. When `clientID` is given (a phone), only that phone's own requests can be removed.
     @discardableResult
     public func remove(_ id: UUID, asClient clientID: String? = nil) -> Bool {
+        // Displays can't delete.
+        guard remote == nil else { return false }
         if let clientID {
             guard let item = state.upNext.first(where: { $0.id == id }),
                   item.requester?.clientID == clientID else { return false }
@@ -224,7 +373,13 @@ public final class PartySession {
             lockedNextID: state.lockedNextID,
             playback: PlaybackSnapshot(isPlaying: engine.isPlaying, position: engine.currentTime, capturedAt: Date()),
             canReorder: phonesCanReorder,
-            address: guestAddress
+            address: guestAddress,
+            lanAddress: lanAddress,
+            zoneName: zoneName,
+            hubKind: hubKind,
+            service: serviceName,
+            displaysCanControl: displaysCanControl,
+            history: Array(state.history.prefix(20))
         )
     }
 

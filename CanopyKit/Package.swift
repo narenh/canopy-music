@@ -20,5 +20,6 @@ let package = Package(
         ),
         .executableTarget(name: "CanopyDevServer", dependencies: ["CanopyCore", "CanopyServer"]),
         .testTarget(name: "CanopyCoreTests", dependencies: ["CanopyCore"]),
+        .testTarget(name: "CanopyServerTests", dependencies: ["CanopyCore", "CanopyServer"]),
     ]
 )

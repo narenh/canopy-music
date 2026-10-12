@@ -8,6 +8,8 @@ struct ZoneListView: View {
     /// The list's content height, so it's only as tall as its rows and the whole screen can be
     /// centered (a List otherwise takes all the height it's offered).
     @State private var listHeight: CGFloat = 300
+    /// "Create a new zone" while this iPad still has a zone: it would end it, so ask first.
+    @State private var confirmingCreate = false
 
     var body: some View {
         let zones = model.zoneBrowser.zones.filter { $0.hubID != model.deviceID }
@@ -33,7 +35,7 @@ struct ZoneListView: View {
                     }
                     Section {
                         ZoneRow(icon: "plus", title: "Create a new zone", subtitle: "Music plays from this iPad") {
-                            model.beginCreatingZone()
+                            if model.canResumeZone { confirmingCreate = true } else { model.beginCreatingZone() }
                         }
                     }
                 }
@@ -56,6 +58,27 @@ struct ZoneListView: View {
             }
         }
         .environment(\.colorScheme, .dark)
+        // The old zone is ended once the new one is created, so Cancel on the next screen keeps it.
+        .alert("Create a new zone?", isPresented: $confirmingCreate) {
+            Button("Create", role: .destructive) { model.beginCreatingZone() }
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text("This ends \(model.zoneName) and clears its queue.")
+        }
+        #if DEBUG
+        // `-confirmCreate`: asks that question at launch (the simulator can't be tapped from here).
+        // With `-autoCreate <name>`, presses Create 8 s later and creates <name> without a PIN.
+        .task {
+            let args = ProcessInfo.processInfo.arguments
+            guard args.contains("-confirmCreate"), model.canResumeZone else { return }
+            confirmingCreate = true
+            guard let i = args.firstIndex(of: "-autoCreate"), i + 1 < args.count else { return }
+            try? await Task.sleep(for: .seconds(8))
+            confirmingCreate = false
+            model.beginCreatingZone()
+            model.finishCreatingZone(name: args[i + 1], pin: nil)
+        }
+        #endif
         .animation(.easeInOut(duration: 0.25), value: zones.map(\.id))
         .onAppear { model.zoneBrowser.start() }
         #if DEBUG

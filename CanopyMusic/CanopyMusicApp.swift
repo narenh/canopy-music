@@ -153,7 +153,7 @@ struct RootView: View {
         }
         .environment(model)
         .task {
-            await model.startServerIfNeeded()
+            await model.startOnLaunch()
             #if DEBUG
             if ProcessInfo.processInfo.arguments.contains("-diagnoseMusicKit") {
                 await model.diagnoseMusicKit()

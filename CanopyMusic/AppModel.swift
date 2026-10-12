@@ -94,7 +94,11 @@ final class AppModel {
     private(set) var session: PartySession
     /// Last fetched "Your playlists", so reopening the picker shows them at once while it refreshes.
     @ObservationIgnored var libraryPlaylistsCache: [PlaylistSummary] = []
-    private(set) var isLocked = false
+    /// The party screen is showing and host mode is behind press and hold (and the PIN). A hub
+    /// remembers it, so after a crash it comes back locked.
+    private(set) var isLocked = false {
+        didSet { if zoneRole == .hub { zoneRecord.wasLocked = isLocked } }
+    }
     private(set) var authorization: MusicAuthorization.Status = MusicAuthorization.currentStatus
     /// Apple Music playback needs a subscription; search works without one. Kept current by
     /// `MusicSubscription.subscriptionUpdates` once authorized.
@@ -192,19 +196,31 @@ final class AppModel {
         }
         zoneName = UserDefaults.standard.string(forKey: "zoneName") ?? UIDevice.current.name
         displaysCanControl = UserDefaults.standard.object(forKey: "displaysCanControl") as? Bool ?? true
-        // Every launch starts at the zone list, except debug launches that go straight to a party.
+        // Launches start at the zone list, unless this iPad was hosting a zone that wasn't ended
+        // (a crash, or a quit by the system): then it goes straight back in, locked if it was.
         var role = ZoneRole.choosing
+        var locked = false
+        let record = ZoneRecord()
+        if record.restoresOnLaunch, let provider, Self.canRestore(provider, spotifyAuth: spotifyAuth) {
+            role = .hub
+            locked = record.wasLocked
+            isRestoringZone = true
+        }
         #if DEBUG
+        // Debug launches that go straight to a party.
         let debugFlags = ["-autoParty", "-autoSearch", "-autoLoad", "-autoResume", "-autoPrevious", "-autoStress", "-showSettings",
                           "-showPicker", "-appleMusicState", "-qrGallery", "-backgroundFor", "-screenshotParty", "-onboarding",
                           "-onboardingSpotify", "-onboardingNetwork", "-easterEggPreview", "-diagnoseMusicKit", "-benchAppleMusic", "-autoLoadPlaylist", "-confirmEnd"]
         if ProcessInfo.processInfo.arguments.contains(where: debugFlags.contains) {
             role = .hub
-            // Running a zone, as `becomeHub()` records, so ending it and relaunching can be tested.
-            defaults.set(true, forKey: "wasHub")
+            locked = false
+            isRestoringZone = false
+            // Hosting, as `becomeHub()` records, so ending it and relaunching can be tested.
+            record.hosting(fresh: true)
         }
         #endif
         zoneRole = role
+        isLocked = locked
         crossfade = defaults.bool(forKey: "crossfade")
         crossfadeSeconds = defaults.double(forKey: "crossfadeSeconds")
         wifiSSID = defaults.string(forKey: "wifiSSID") ?? ""
@@ -239,6 +255,24 @@ final class AppModel {
 
         // Long-form audio is what lets the AirPlay picker select several AirPlay 2 speakers at once.
         try? AVAudioSession.sharedInstance().setCategory(.playback, mode: .default, policy: .longFormAudio)
+    }
+
+    /// Whether a zone that was running can come back by itself at launch: the service is still
+    /// signed in, and there's a network to announce it on. Otherwise the list offers Resume.
+    private static func canRestore(_ provider: Provider, spotifyAuth: SpotifyAuth) -> Bool {
+        guard LocalNetwork.lanAddress() != nil else { return false }
+        #if DEBUG
+        // `-noRestore`: as if it couldn't (e.g. no network), to test falling back to Resume.
+        if ProcessInfo.processInfo.arguments.contains("-noRestore") { return false }
+        #endif
+        switch provider {
+        case .none: return false
+        case .appleMusic: return MusicAuthorization.currentStatus == .authorized
+        case .spotify: return spotifyAuth.isSignedIn
+        #if DEBUG
+        case .demo: return true
+        #endif
+        }
     }
 
     /// Where each service's queue is saved between launches.
@@ -472,11 +506,15 @@ final class AppModel {
     private(set) var displayedZone: ZoneListing?
     @ObservationIgnored let deviceID: String
     @ObservationIgnored private let zoneAdvertiser = ZoneAdvertiser()
+    /// Whether this iPad has a zone, and how to come back into it (shared with the Apple TV app).
+    @ObservationIgnored private let zoneRecord = ZoneRecord()
+    /// Launching straight back into the zone; `startOnLaunch()` falls back to the list if it can't.
+    @ObservationIgnored private var isRestoringZone = false
     @ObservationIgnored private var advertisedPlaying: String?
 
-    /// This iPad was running a zone when the app last quit (or crashed) without ending it, so the
-    /// list offers to resume it. Ending the zone clears it.
-    var canResumeZone: Bool { defaults.bool(forKey: "wasHub") && provider != .none }
+    /// This iPad has a zone that wasn't ended (and didn't come back by itself at launch), so the
+    /// list offers to resume it, and creating a new zone asks first. Ending the zone clears it.
+    var canResumeZone: Bool { zoneRecord.hasZone && provider != .none }
 
     /// The guest page shown in QR codes: this hub's, or the hub a display is showing.
     var guestURL: URL? {
@@ -495,21 +533,25 @@ final class AppModel {
         zoneRole = .choosing
     }
 
+    /// A new zone always starts empty: a zone this iPad still had is ended first (the list asked).
     func finishCreatingZone(name: String, pin: String?) {
+        clearZone()
         let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
         zoneName = trimmed.isEmpty ? UIDevice.current.name : String(trimmed.prefix(40))
         hostPIN = pin ?? ""
-        becomeHub()
+        becomeHub(fresh: true)
     }
 
+    /// Back into the zone this iPad had, locked if it was: host mode stays behind the PIN.
     func resumeZone() {
-        becomeHub()
+        becomeHub(fresh: false)
     }
 
-    private func becomeHub() {
+    private func becomeHub(fresh: Bool) {
+        let locked = !fresh && zoneRecord.wasLocked
         zoneRole = .hub
-        defaults.set(true, forKey: "wasHub")
-        isLocked = false
+        zoneRecord.hosting(fresh: fresh)
+        if locked { lock() } else { isLocked = false }
         if provider == .none {
             needsOnboarding = true
         } else {
@@ -517,20 +559,40 @@ final class AppModel {
         }
     }
 
+    /// Launch: starts the phone server, and if this launch went straight back into the zone but it
+    /// can't be announced, falls back to the zone list (which offers Resume), keeping the zone.
+    func startOnLaunch() async {
+        if isRestoringZone, isLocked { lock() } // keeps the screen awake, as locking does
+        await startServerIfNeeded()
+        guard isRestoringZone else { return }
+        isRestoringZone = false
+        if zoneRole == .hub, server == nil || session.lanAddress == nil {
+            zoneRole = .choosing
+            isLocked = false
+            UIApplication.shared.isIdleTimerDisabled = false
+            await stopServer()
+        }
+    }
+
     /// Ends this zone and goes back to the zone list: stops the music, the server, the Bonjour
     /// announcement and the `.local` name, and clears the queue, history, base playlist and saved
     /// queue, so there's nothing to resume and the next zone starts empty. Settings stay.
     func endZone() {
+        clearZone()
+        zoneRole = .choosing
+        isLocked = false
+        UIApplication.shared.isIdleTimerDisabled = false
+        Task { await stopServer() }
+    }
+
+    /// Empties the queue and its saved copies and forgets the zone, so there's nothing to resume.
+    private func clearZone() {
         session.end()
         // Queues saved under another service (from before a service change) would come back too.
         for other in Self.allProviders where other != provider {
             try? FileManager.default.removeItem(at: Self.storeURL(other))
         }
-        defaults.removeObject(forKey: "wasHub")
-        zoneRole = .choosing
-        isLocked = false
-        UIApplication.shared.isIdleTimerDisabled = false
-        Task { await stopServer() }
+        zoneRecord.ended()
     }
 
     /// Shows another device's zone. Displays don't run a server or play anything.
@@ -545,6 +607,8 @@ final class AppModel {
         displayConnection = connection
         displayedZone = zone
         zoneRole = .display
+        // A display starts at the zone list next time; this iPad's own zone stays resumable.
+        zoneRecord.stoppedHosting()
         lock()
     }
 

@@ -94,6 +94,22 @@ let base = PlaylistSummary(id: "p", name: "Base", kind: .library)
         #expect(engine.staged?.id == "b")
     }
 
+    /// A hub coming back after a crash has its queue but stays paused until someone presses play.
+    @Test func aRestoredQueueStaysPaused() async throws {
+        let url = FileManager.default.temporaryDirectory.appendingPathComponent("canopy-\(UUID()).json")
+        defer { try? FileManager.default.removeItem(at: url) }
+        let first = PartySession(catalog: StubCatalog(ids: ["a", "b"]), engine: FakeEngine(), storeURL: url)
+        try await first.load(playlist: base)
+        try await first.play()
+        try await Task.sleep(for: .milliseconds(800))
+        let engine = FakeEngine()
+        let restored = PartySession(catalog: StubCatalog(ids: []), engine: engine, storeURL: url)
+        await settle()
+        #expect(restored.state.current?.track.id == "a")
+        #expect(!restored.isPlaying)
+        #expect(engine.playing == nil)
+    }
+
     @Test func startPlaysAndStagesNext() async throws {
         let engine = FakeEngine()
         let session = PartySession(catalog: StubCatalog(ids: ["a", "b", "c"]), engine: engine)

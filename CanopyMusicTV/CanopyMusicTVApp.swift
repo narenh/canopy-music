@@ -5,9 +5,10 @@ import Security
 import SwiftUI
 import UIKit
 
-/// Canopy Music on Apple TV. Every launch shows the zone list. "Create a new zone" makes this TV
-/// the hub (Apple Music), run entirely from hosts' phones; choosing a zone shows it as a display.
-/// See docs/multi-device.md.
+/// Canopy Music on Apple TV. Launches show the zone list, unless this TV was hosting a zone that
+/// wasn't ended (a crash, or a quit by the system): then it goes straight back in. "Create a new
+/// zone" makes this TV the hub (Apple Music), run entirely from hosts' phones; choosing a zone
+/// shows it as a display. See docs/multi-device.md.
 @main
 struct CanopyMusicTVApp: App {
     @State private var model = TVModel()
@@ -69,6 +70,8 @@ final class TVModel {
     @ObservationIgnored private let advertiser = ZoneAdvertiser()
     /// The Host Control key and the phones that have used it (shared with the iPad app).
     let hostControl = HostControl()
+    /// Whether this TV has a zone, and how to come back into it (shared with the iPad app).
+    @ObservationIgnored private let zoneRecord = ZoneRecord()
     @ObservationIgnored private let defaults = UserDefaults.standard
 
     var zoneName: String {
@@ -93,6 +96,7 @@ final class TVModel {
             UserDefaults.standard.set(deviceID, forKey: "deviceID")
         }
         session = PartySession(catalog: DemoOrEmptyCatalog(), engine: SilentEngine())
+        restoreZoneIfNeeded()
     }
 
     // MARK: Hub
@@ -100,13 +104,56 @@ final class TVModel {
     /// The hub's queue, kept between launches until the zone is ended.
     private static var storeURL: URL { URL.applicationSupportDirectory.appending(path: "tv-party.json") }
 
+    /// This TV has a zone that wasn't ended (and didn't come back by itself at launch): the list
+    /// offers to resume it, and creating a new zone asks first.
+    var canResumeZone: Bool { zoneRecord.hasZone }
+
+    /// Creates a new, empty zone. A zone this TV still had is ended first (the list asked).
     func createZone() async {
         debugLog("createZone")
-        if !usesDemo {
-            let status = await MusicAuthorization.request()
-            authorizationDenied = status != .authorized
-            guard status == .authorized else { return }
+        guard await authorize() else { return }
+        openZone(fresh: true)
+        // Not tied to the caller: the zone list (and any task it started) goes away right here.
+        await Task { await self.startServer() }.value
+    }
+
+    /// Back into the zone this TV had.
+    func resumeZone() async {
+        debugLog("resumeZone")
+        guard await authorize() else { return }
+        openZone(fresh: false)
+        await Task { await self.startServer() }.value
+    }
+
+    /// Launch: straight back into the zone if this TV was hosting it when the app quit or crashed.
+    /// Music stays paused. If it can't (no Apple Music access, no network), the list offers Resume.
+    private func restoreZoneIfNeeded() {
+        guard zoneRecord.restoresOnLaunch, LocalNetwork.lanAddress() != nil,
+              usesDemo || MusicAuthorization.currentStatus == .authorized else { return }
+        #if DEBUG
+        let args = ProcessInfo.processInfo.arguments
+        guard !args.contains("-playTest"), !args.contains("-noRestore") else { return }
+        #endif
+        debugLog("restoring zone")
+        openZone(fresh: false)
+        Task {
+            await startServer()
+            if role == .hub, server == nil || guestURL == nil {
+                debugLog("restore failed; back to the zone list")
+                closeZone()
+            }
         }
+    }
+
+    private func authorize() async -> Bool {
+        guard !usesDemo else { return true }
+        let status = await MusicAuthorization.request()
+        authorizationDenied = status != .authorized
+        return status == .authorized
+    }
+
+    /// Makes this TV the hub of its zone: a new, empty one, or the one it had (from the saved queue).
+    private func openZone(fresh: Bool) {
         let store = Self.storeURL
         try? FileManager.default.createDirectory(at: .applicationSupportDirectory, withIntermediateDirectories: true)
         if usesDemo {
@@ -117,7 +164,10 @@ final class TVModel {
             let cache = SongCache()
             session = PartySession(catalog: AppleMusicCatalog(cache: cache), engine: AppleMusicEngine(cache: cache), storeURL: store)
         }
-        hostJoined = false
+        if fresh { session.end() } // the same clearing as End
+        zoneRecord.hosting(fresh: fresh)
+        // A zone that had a host (or a playlist) is past "Scan to host".
+        hostJoined = !fresh && (zoneRecord.hostJoined || session.hasParty || session.state.playlistName != nil)
         hostname.rename(to: FriendlyHostname.localName(forZone: zoneName))
         session.configureHub(kind: .tv, id: deviceID, zoneName: zoneName, serviceName: usesDemo ? "Demo" : "Apple Music")
         // Same settings, saved under the same names, as an iPad hub.
@@ -128,6 +178,7 @@ final class TVModel {
                                    simpleQR: defaults.bool(forKey: "wifiSimpleQR"))
         hostControl.attach(to: session) { [weak self] _ in
             guard let self, !self.hostJoined else { return }
+            self.zoneRecord.hostJoined = true
             withAnimation(.easeInOut(duration: 0.8)) { self.hostJoined = true }
         }
         session.onSettingsChanged = { [weak self] in
@@ -143,10 +194,7 @@ final class TVModel {
             self.advertise()
         }
         session.onStopRequested = { [weak self] in self?.stopZone() }
-        UIApplication.shared.isIdleTimerDisabled = true
         role = .hub
-        // Not tied to the caller: the zone list (and any task it started) goes away right here.
-        await Task { await self.startServer() }.value
     }
 
     /// Ends the zone (Menu › End, or a host on the web page) and goes back to the zone list: stops
@@ -154,6 +202,13 @@ final class TVModel {
     /// and the saved queue, so the next zone starts empty. Settings and Host Control stay.
     func stopZone() {
         session.end()
+        zoneRecord.ended()
+        closeZone()
+    }
+
+    /// Back to the zone list without touching the zone itself (`stopZone` ends it first).
+    private func closeZone() {
+        if session.engine.isPlaying { session.engine.pause() }
         session = PartySession(catalog: DemoOrEmptyCatalog(), engine: SilentEngine())
         serverTask?.cancel()
         serverTask = nil
@@ -166,7 +221,6 @@ final class TVModel {
         friendlyURL = nil
         hostJoined = false
         role = .choosing
-        UIApplication.shared.isIdleTimerDisabled = false
     }
 
     /// A renamed zone announces its new `.local` name, handed out once it's confirmed.
@@ -229,7 +283,8 @@ final class TVModel {
         self.connection = connection
         shownZone = zone
         role = .display
-        UIApplication.shared.isIdleTimerDisabled = true
+        // A display starts at the zone list next time; this TV's own zone stays resumable.
+        zoneRecord.stoppedHosting()
     }
 
     func leave() {
@@ -238,7 +293,6 @@ final class TVModel {
         shownZone = nil
         session = PartySession(catalog: DemoOrEmptyCatalog(), engine: SilentEngine())
         role = .choosing
-        UIApplication.shared.isIdleTimerDisabled = false
     }
 
     /// The "Join Wi‑Fi" code next to the guest QR: this hub's Wi‑Fi, set by a host on the web page.

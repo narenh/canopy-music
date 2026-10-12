@@ -41,7 +41,7 @@ Status: built on the `tvos-spike` branch (see "Build status" at the end). Screen
 | Unlock PIN | iPad settings (only on the iPad, not the web) | — |
 | `.local` address | follows the zone name | follows the zone name |
 | End the zone | iPad host mode (top, and in settings), web (both ask first) | Menu on the remote, web (web asks first) |
-| Resume after a relaunch or crash without End | Resume row | create again (the queue is restored) |
+| Back after a crash or a quit by the system (no End) | by itself, locked if it was | by itself |
 | **Guests** | | |
 | Guest QR code on the party screen | ✓ | ✓ |
 | Queue from phones | iPad, web | web |
@@ -62,12 +62,14 @@ Status: built on the `tvos-spike` branch (see "Build status" at the end). Screen
 | Lock the party screen | press and hold the logo (+ Guided Access) | — |
 | Keeps the screen awake | ✓ | ✓ |
 
-## Launch flow (every device, every time)
+## Launch flow
 
-1. **The zone list:** "Zones on this Wi‑Fi". It always shows, even with one zone or none (with none, the heading hides). There's no auto-join.
+0. **A hub whose zone wasn't ended** (the app crashed, or the system quit it) goes straight back into its zone: the queue, the guest server, the Bonjour announcement and the `.local` name come back, so displays and phones reconnect by themselves. The music stays paused until someone presses play. An iPad comes back in the mode it was in: locked if the party screen was locked (so host mode stays behind the PIN), host mode if it was in host mode. An Apple TV comes back to its party screen if a host had joined or a playlist was loaded, otherwise to Scan to host, with the same Host Control key. A device that was showing someone else's zone starts at the zone list. If the zone can't come back (no Apple Music access, Spotify signed out, no network), the zone list shows it as a Resume row.
+1. **The zone list:** "Zones on this Wi‑Fi". It always shows otherwise, even with one zone or none (with none, the heading hides). There's no auto-join.
 2. **Choosing a zone** opens it as a display, straight to the party screen. No PIN: a display can't do anything a guest's phone can't.
 3. **Create a new zone** makes this device the hub:
    - **iPad:** name the zone (defaults to the device name), set an optional host PIN ("Skip" allowed), then choose the service if one isn't set up yet, then host mode as today.
+   - A new zone always starts empty. If this device still has a zone (the Resume row), it asks first ("This ends Upstairs and clears its queue."), and ends it, as End does, once the new zone is created. Resume is the way back to the old one.
    - **Apple TV:** straight to **Scan to host**. The first phone to scan gets Host Control and sets the zone up on the web page: name and base playlist. A TV hub has no settings screens; Menu only offers **End <zone>**. Apple Music only.
 
 ## Network
@@ -91,7 +93,7 @@ Status: built on the `tvos-spike` branch (see "Build status" at the end). Screen
 
 ## Decisions taken while building (review)
 
-- **"Resume" row:** an iPad whose zone was still running when the app quit or crashed shows it first in the list ("Resume Upstairs"), so getting it back is one tap. Ending the zone removes the row.
+- **"Resume" row:** a hub whose zone wasn't ended but didn't come back by itself (see Launch flow, or it was left to show another zone) shows it first in the list ("Resume on this iPad", "Resume on this TV"). Resume comes back locked if the iPad was locked. Ending the zone removes the row. The Apple TV has the row too, so creating over its zone has something to point back to.
 - **Ending a zone** (iPad, TV or web, all the same) stops the music, the guest server, the Bonjour announcement and the `.local` name, so the zone leaves every device's list at once. It clears the queue, history and base playlist and deletes the saved queue, so the next zone on that device starts empty. Settings stay: zone name, Wi‑Fi, the toggles, Host Control and its phones, and the service sign-in.
 - **"Queue from phones" isn't offered on a TV hub,** since the web page is how a TV zone is run.
 - **Displays add songs as "<zone display name>"** (e.g. "Kitchen iPad"), so the requester pill shows where a song came from. Displays can't delete, including songs they added.
@@ -106,7 +108,8 @@ Status: built on the `tvos-spike` branch (see "Build status" at the end). Screen
 - **iPad:** the zone list; an iPad hub announcing its zone; another iPad joining as a display, with the hub's live queue and progress, prev/play/next without AirPlay or crossfade, and its QR pointing at the hub.
 - **Apple TV:** the zone list finding the iPad's zone; showing it as a display with the zone badge; creating a zone; "Scan to host"; first-host setup from the web API (name and playlist), after which the TV plays and announces the renamed zone.
 - **Web:** the host page with the base playlist row; the invite QR (rendered by the hub); the playlists endpoint.
-- **Ending a zone** (simulators, 12 Oct 2026): from the iPad's End alert, the web endpoint on an iPad hub and on a TV hub, the zone leaves `dns-sd -B _canopymusic._tcp`, the server and `.local` name go, the saved queue is deleted, there's no Resume row, and a relaunch starts empty. A quit without End still offers Resume with the queue.
+- **Ending a zone** (simulators, 12 Oct 2026): from the iPad's End alert, the web endpoint on an iPad hub and on a TV hub, the zone leaves `dns-sd -B _canopymusic._tcp`, the server and `.local` name go, the saved queue is deleted, there's no Resume row, and a relaunch starts empty.
+- **Coming back after a crash** (simulators, 12 Oct 2026, killed while hosting, relaunched without debug flags): an iPad comes back locked when it was locked and in host mode when it wasn't, paused, announced, and `/api/state` has the queue; an Apple TV comes back to its party screen (with a playlist) or Scan to host (without), with the same Host Control key. With the restore made to fail (`-noRestore`), the list shows the Resume row and nothing is announced. An iPad killed while showing another zone starts at the list. "Create a new zone" with a zone to resume asks first and starts empty (iPad and TV, via `-confirmCreate -autoCreate`).
 - **Package tests:** display mirroring, adding with the display's ID, refused moves undone, display controls following the hub setting, port fallback.
 
 **Not tested yet:**

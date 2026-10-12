@@ -1,4 +1,5 @@
 import CanopyMusicCore
+import CanopyMusicServer
 import CoreImage
 import CoreImage.CIFilterBuiltins
 import SwiftUI
@@ -36,6 +37,8 @@ struct TVRootView: View {
         }
         .animation(.easeInOut(duration: 1.2), value: current?.id)
         .animation(.easeInOut(duration: 0.5), value: model.role)
+        // A zone (hub or display) keeps the screen awake; the zone list doesn't.
+        .onChange(of: model.role, initial: true) { UIApplication.shared.isIdleTimerDisabled = model.role != .choosing }
         .onChange(of: current?.id) { model.advertise() }
         .overlay {
             if let (item, lines) = takeover {
@@ -97,14 +100,30 @@ struct TVZoneListView: View {
     @MainActor static var didAutoCreate = false
     #endif
     @Environment(TVModel.self) private var model
-    /// A zone's id, or "create".
+    /// A zone's id, "resume" or "create".
     @FocusState private var focused: String?
+    /// "Create a new zone" while this TV still has a zone: it would end it, so ask first.
+    @State private var confirmingCreate = false
+
+    /// Where focus starts: this TV's own zone, else the first zone (joining is the usual case).
+    private func firstFocus(_ zones: [ZoneListing]) -> String {
+        model.canResumeZone ? "resume" : zones.first?.id ?? "create"
+    }
 
     var body: some View {
         let zones = model.browser.zones.filter { $0.hubID != model.deviceID }
         VStack(spacing: 34) {
             Image("CanopyLogo").resizable().scaledToFit().frame(height: 70)
             VStack(spacing: 16) {
+                // This TV's own zone from last time comes first.
+                if model.canResumeZone {
+                    Button {
+                        Task { await model.resumeZone() }
+                    } label: {
+                        TVZoneRow(icon: "appletv", title: model.zoneName, subtitle: "Resume on this TV")
+                    }
+                    .focused($focused, equals: "resume")
+                }
                 ForEach(zones) { zone in
                     Button {
                         model.show(zone)
@@ -119,7 +138,7 @@ struct TVZoneListView: View {
                     .focused($focused, equals: zone.id)
                 }
                 Button {
-                    Task { await model.createZone() }
+                    if model.canResumeZone { confirmingCreate = true } else { Task { await model.createZone() } }
                 } label: {
                     TVZoneRow(icon: "plus", title: "Create a new zone", subtitle: "Music plays from this TV")
                 }
@@ -138,13 +157,17 @@ struct TVZoneListView: View {
         // Coming back from a zone, focus doesn't find its way here by itself.
         .task {
             try? await Task.sleep(for: .milliseconds(150))
-            if focused == nil { focused = zones.first?.id ?? "create" }
+            if focused == nil { focused = firstFocus(zones) }
         }
         // Joining is the usual case (a second zone in one house is rare), so start on the first
         // zone. Zones turn up a moment after launch, when focus is already on Create.
-        .defaultFocus($focused, zones.first?.id ?? "create")
+        .defaultFocus($focused, firstFocus(zones))
         .onChange(of: zones.isEmpty) { wasEmpty, isEmpty in
-            if wasEmpty, !isEmpty, focused == "create" || focused == nil { focused = zones.first?.id }
+            if wasEmpty, !isEmpty, focused == "create" || focused == nil { focused = firstFocus(zones) }
+        }
+        .confirmationDialog("This ends \(model.zoneName) and clears its queue.", isPresented: $confirmingCreate, titleVisibility: .visible) {
+            Button("Create a new zone", role: .destructive) { Task { await model.createZone() } }
+            Button("Cancel", role: .cancel) {}
         }
         #if DEBUG
         // `-createZone` / `-showZone <name>`: act without the remote, for the simulator. Once per
@@ -152,6 +175,18 @@ struct TVZoneListView: View {
         .task {
             guard !Self.didAutoCreate, ProcessInfo.processInfo.arguments.contains("-createZone") else { return }
             Self.didAutoCreate = true
+            await model.createZone()
+        }
+        // `-confirmCreate`: asks before creating over this TV's zone; with `-autoCreate`, presses
+        // Create 8 s later.
+        .task {
+            let args = ProcessInfo.processInfo.arguments
+            guard !Self.didAutoCreate, args.contains("-confirmCreate"), model.canResumeZone else { return }
+            Self.didAutoCreate = true
+            confirmingCreate = true
+            guard args.contains("-autoCreate") else { return }
+            try? await Task.sleep(for: .seconds(8))
+            confirmingCreate = false
             await model.createZone()
         }
         .onChange(of: zones.map(\.id), initial: true) {

@@ -181,8 +181,8 @@
     lock: '<svg viewBox="0 0 24 24" aria-hidden="true"><rect x="5" y="11" width="14" height="10" rx="2"/><path d="M8 11V7a4 4 0 0 1 8 0v4"/></svg>',
     check: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="m5 12 5 5 9-10"/></svg>',
     person: '<svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="8" r="4"/><path d="M4 21c1.5-4 4.5-6 8-6s6.5 2 8 6"/></svg>',
-    play: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M8 5v14l11-7z"/></svg>',
-    pause: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M7 5h4v14H7zM13 5h4v14h-4z"/></svg>',
+    play: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M8 5.5v13l10.5-6.5z" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"/></svg>',
+    pause: '<svg viewBox="0 0 24 24" aria-hidden="true"><rect x="6.5" y="5" width="4" height="14" rx="1.2"/><rect x="13.5" y="5" width="4" height="14" rx="1.2"/></svg>',
   };
 
   function fillRow(li, item) {
@@ -461,14 +461,28 @@
     $("search").hidden = true;
     document.body.style.overflow = "";
     $("search-input").blur();
+    // Back to the top of the queue, unless a song added while searching would be out of sight.
+    window.scrollTo({ top: 0 });
     const first = addedWhileSearching.map((id) => rowEls.get(id)).find(Boolean);
-    if (first) first.scrollIntoView({ block: "center", behavior: "smooth" });
+    if (first && first.getBoundingClientRect().bottom > window.innerHeight) {
+      first.scrollIntoView({ block: "center", behavior: "smooth" });
+    }
     addedWhileSearching.splice(0).forEach((id) => setTimeout(() => flash(id), 250));
   }
   $("search-trigger").addEventListener("click", openSearch);
   $("search-cancel").addEventListener("click", closeSearch);
+  // Inside the field's <label>: stop the click from also focusing through the label.
+  $("search-clear").addEventListener("click", (event) => {
+    event.preventDefault();
+    clearTimeout(searchTimer);
+    $("search-input").value = "";
+    $("search-clear").hidden = true;
+    runSearch();
+    $("search-input").focus();
+  });
 
   $("search-input").addEventListener("input", () => {
+    $("search-clear").hidden = !$("search-input").value;
     clearTimeout(searchTimer);
     searchTimer = setTimeout(runSearch, 280);
   });

@@ -113,6 +113,11 @@ svg { width: 18px; height: 18px; fill: none; stroke: currentColor; stroke-width:
 @keyframes sheet-in { from { opacity: 0; transform: translateY(14px); } }
 .search-bar { display: flex; gap: 12px; align-items: center; position: sticky; top: 0; padding-bottom: 12px; background: var(--base); z-index: 1; }
 .search-field input { flex: 1; min-width: 0; background: none; border: 0; outline: none; color: var(--text); font: inherit; }
+/* Our own clear button; hide the browser's. */
+.search-field input::-webkit-search-cancel-button { -webkit-appearance: none; display: none; }
+.search-clear { flex: none; display: grid; place-items: center; width: 20px; height: 20px; margin: -4px -2px -4px 0; border-radius: 50%; background: var(--text-3); color: var(--base); }
+.search-clear[hidden] { display: none; }
+.search-clear svg { width: 12px; height: 12px; stroke-width: 3; }
 .text-btn { color: var(--accent); font-weight: 600; padding: 8px 4px; }
 
 .add-btn { font-size: 14px; font-weight: 600; padding: 7px 14px; border-radius: 999px; background: var(--surface-2); color: var(--text); flex: none; min-width: 64px; transition: background-color .2s, color .2s; }

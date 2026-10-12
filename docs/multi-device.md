@@ -58,13 +58,14 @@ Status: built on the `tvos-spike` branch (see "Build status" at the end). Screen
 ## Build status
 
 **Working and checked (two iPad simulators, an Apple TV simulator, an iPhone simulator's Safari):**
-- **iPad:** the zone list; an iPad hub announcing its zone; another iPad joining as a display, with the live queue and controls following the hub's settings; Leave; the lost-connection overlay.
+- **iPad:** the zone list; an iPad hub announcing its zone; another iPad joining as a display, with the hub's live queue and progress, prev/play/next without AirPlay or crossfade, and its QR pointing at the hub.
 - **Apple TV:** the zone list finding the iPad's zone; showing it as a display with the zone badge; creating a zone; "Scan to host"; first-host setup from the web API (name and playlist), after which the TV plays and announces the renamed zone.
 - **Web:** the host page with the base playlist row; the invite QR (rendered by the hub); the playlists endpoint.
 - **Package tests:** display mirroring, adding with the display's ID, refused moves undone, display controls following the hub setting, port fallback.
 
 **Not tested yet:**
 - **The iPad's "Create a new zone" screens** (name, PIN): built, but not tapped through. The simulator can't be tapped from here.
+- **Leaving a zone and the lost-connection overlay** (iPad and TV): built, but not seen.
 - **Moving to `music-2.local` on a name clash:** simulators share the Mac's IP address, which mDNS doesn't treat as a clash. Needs two real devices.
 - **Real Apple Music on an Apple TV.**
 - **Pressing Menu and Play/Pause on the Siri Remote.**

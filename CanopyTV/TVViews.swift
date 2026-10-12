@@ -261,6 +261,7 @@ struct TVPartyView: View {
                                 TVQueueRow(item: item)
                             }
                         }
+                        .animation(.easeInOut(duration: 0.4), value: session.state.upNext.map(\.id))
                         .frame(width: geo.size.width, height: geo.size.height, alignment: .top)
                         .clipped()
                     }

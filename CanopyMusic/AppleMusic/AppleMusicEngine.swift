@@ -140,6 +140,10 @@ final class AppleMusicEngine: PlaybackEngine {
     private func poll() {
         guard !isReplacingQueue else { return }
         let entry = player.queue.currentEntry
+        let status = player.state.playbackStatus
+        let time = player.playbackTime
+        // Before any event: the session snapshots the time as it handles them.
+        cache(playing: status == .playing, time: time)
         if entry?.id != currentEntryID {
             let previous = currentEntryID
             currentEntryID = entry?.id
@@ -156,9 +160,6 @@ final class AppleMusicEngine: PlaybackEngine {
             }
         }
 
-        let status = player.state.playbackStatus
-        let time = player.playbackTime
-        cache(playing: status == .playing, time: time)
         if status == .playing { sawPlaying = true }
         if status != lastStatus {
             log("status \(String(describing: lastStatus)) -> \(status) t=\(Int(time))")

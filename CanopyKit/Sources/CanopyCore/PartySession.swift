@@ -78,6 +78,11 @@ public final class PartySession {
     @ObservationIgnored private let storeURL: URL?
     @ObservationIgnored private var saveTask: Task<Void, Never>?
     @ObservationIgnored private var tickTask: Task<Void, Never>?
+    /// Playback as last sent to listeners, and the loop that resends it if the player drifts.
+    @ObservationIgnored private var lastSentPlayback: PlaybackSnapshot?
+    @ObservationIgnored private var driftTask: Task<Void, Never>?
+    /// How far listeners' idea of the playback time may be off before it's resent.
+    static let driftTolerance: TimeInterval = 1
 
     public init(catalog: any MusicCatalog, engine: any PlaybackEngine, storeURL: URL? = nil) {
         self.catalog = catalog
@@ -388,7 +393,10 @@ public final class PartySession {
         let (stream, continuation) = AsyncStream.makeStream(of: PartySnapshot.self, bufferingPolicy: .bufferingNewest(1))
         let id = UUID()
         listeners[id] = continuation
-        continuation.yield(snapshot())
+        let snap = snapshot()
+        lastSentPlayback = snap.playback
+        continuation.yield(snap)
+        if remote == nil { startDriftCheck() }
         continuation.onTermination = { [weak self] _ in
             Task { @MainActor in self?.listeners[id] = nil }
         }
@@ -498,7 +506,26 @@ public final class PartySession {
     private func broadcast() {
         guard !listeners.isEmpty else { return }
         let snap = snapshot()
+        lastSentPlayback = snap.playback
         for continuation in listeners.values { continuation.yield(snap) }
+    }
+
+    /// Listeners work out the playback time from the last snapshot, but the player's time also
+    /// moves without an event: a song starts only once it has buffered, a seek lands late, or the
+    /// system seeks. So while anyone is listening, resend when the real time has drifted.
+    private func startDriftCheck() {
+        guard driftTask == nil else { return }
+        driftTask = Task { [weak self] in
+            while !Task.isCancelled {
+                try? await Task.sleep(for: .seconds(2))
+                guard let self else { return }
+                guard !self.listeners.isEmpty, let sent = self.lastSentPlayback else { continue }
+                let expected = sent.isPlaying ? sent.position + Date().timeIntervalSince(sent.capturedAt) : sent.position
+                if sent.isPlaying != self.engine.isPlaying || abs(self.engine.currentTime - expected) > Self.driftTolerance {
+                    self.broadcast()
+                }
+            }
+        }
     }
 
     private func scheduleSave() {

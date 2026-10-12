@@ -215,3 +215,23 @@ let base = PlaylistSummary(id: "p", name: "Base", kind: .library)
         #expect(next!.version > first!.version)
     }
 }
+
+@MainActor
+@Suite struct PlaybackSyncTests {
+    /// The player's time moved with no event (a late seek, buffering): listeners get it resent.
+    @Test func driftIsResent() async throws {
+        let engine = FakeEngine()
+        let session = PartySession(catalog: StubCatalog(ids: ["a", "b"]), engine: engine)
+        try await session.load(playlist: base)
+        try await session.play()
+        engine.currentTime = 10
+        var snapshots = session.snapshots().makeAsyncIterator()
+        let first = try #require(await snapshots.next())
+        #expect(abs(first.playback.position - 10) < 0.01)
+        // FakeEngine's time doesn't advance by itself, so a playing listener's estimate runs
+        // ahead; jump it further to make the drift unambiguous.
+        engine.currentTime = 95
+        let next = try #require(await snapshots.next())
+        #expect(abs(next.playback.position - 95) < 0.01)
+    }
+}

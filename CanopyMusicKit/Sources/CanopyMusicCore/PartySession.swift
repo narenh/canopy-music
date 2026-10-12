@@ -52,6 +52,8 @@ public struct PartySnapshot: Codable, Equatable, Sendable {
     public var hasPIN: Bool?
     /// How many phones have Host Control.
     public var hostPhones: Int?
+    /// The hub's device ID, so a phone keeps one host key per hub whatever address it used.
+    public var hubID: String?
 }
 
 /// Owns the queue and keeps the player in step with it. Both the iPad UI and the phone server
@@ -68,6 +70,8 @@ public final class PartySession {
     @ObservationIgnored public let remote: (any ZoneRemote)?
     /// Zone details from the hub, for a display; this device's own, for a hub.
     public private(set) var hubKind: HubKind?
+    /// The hub device's ID (stable across launches and renames).
+    public private(set) var hubID: String?
     public var zoneName: String? {
         didSet { if zoneName != oldValue, remote == nil { broadcast() } }
     }
@@ -166,6 +170,7 @@ public final class PartySession {
         (engine as? MirrorEngine)?.playback = playback
         isPlaying = playback.isPlaying
         hubKind = snapshot.hubKind
+        hubID = snapshot.hubID
         zoneName = snapshot.zoneName
         serviceName = snapshot.service
         phonesCanReorder = snapshot.canReorder
@@ -176,8 +181,9 @@ public final class PartySession {
     }
 
     /// This device's own zone (hub).
-    public func configureHub(kind: HubKind, zoneName: String, serviceName: String?) {
+    public func configureHub(kind: HubKind, id: String? = nil, zoneName: String, serviceName: String?) {
         hubKind = kind
+        hubID = id
         self.zoneName = zoneName
         self.serviceName = serviceName
         broadcast()
@@ -440,7 +446,8 @@ public final class PartySession {
             history: Array(state.history.prefix(20)),
             canQueue: phonesCanQueue,
             hasPIN: hasPIN,
-            hostPhones: hostPhoneCount
+            hostPhones: hostPhoneCount,
+            hubID: hubID
         )
     }
 

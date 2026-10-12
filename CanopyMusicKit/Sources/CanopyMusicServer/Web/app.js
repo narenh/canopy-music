@@ -27,25 +27,43 @@
   // Saved data (name, phone ID, host key) is per address. QR codes use the IP, which every phone
   // can open; if this phone can also reach the friendly address (music.local), continue there
   // before saving anything, so everything lives under that one address.
+  let initial = null;
+  try { initial = await (await fetch("/api/state")).json(); } catch {}
+  // Which hub this is (older hubs don't say), for keeping host keys per hub.
+  const hubID = (initial && initial.hubID) || null;
   await (async () => {
-    let address = null, lan = null;
-    try { ({ address, lanAddress: lan } = await (await fetch("/api/state")).json()); } catch {}
+    const address = initial && initial.address, lan = initial && initial.lanAddress;
     if (!address || !lan || address === location.host) return;
     // Only if that name reaches this same hub: another zone can answer at music.local too.
     if (!(await reachable(address, lan))) return;
-    moveTo(address, params, location.hash);
+    moveTo(address, params, savedHostKey(), location.hash);
     await new Promise(() => {}); // stop here while the browser navigates
   })();
 
+  // Host keys, one per hub (by its device ID), so being a host of one zone never costs the key
+  // of another that answered at the same address. `canopymusic.hostKey` is the old single key.
+  function hostKeys() {
+    try { return JSON.parse(store.get("canopymusic.hostKeys") || "{}") || {}; } catch { return {}; }
+  }
+  function saveHostKey(key) {
+    if (!hubID) { if (key) store.set("canopymusic.hostKey", key); else store.remove("canopymusic.hostKey"); return; }
+    const keys = hostKeys();
+    if (key) keys[hubID] = key; else delete keys[hubID];
+    store.set("canopymusic.hostKeys", JSON.stringify(keys));
+  }
+  /** This hub's key; else the old single key, which may be this hub's (checked on load). */
+  function savedHostKey() {
+    return (hubID && hostKeys()[hubID]) || store.get("canopymusic.hostKey");
+  }
+
   // Continues at another address of this hub, taking this phone's ID, name and host key along
   // (each address has its own storage).
-  function moveTo(address, params, hash = "") {
+  function moveTo(address, params, key, hash = "") {
     const next = new URLSearchParams(params);
     const existing = store.get("canopymusic.clientId");
     if (existing && !next.get("cid")) next.set("cid", existing);
     // An empty name means this phone was asked and skipped it.
     if (store.get("canopymusic.nameAsked") && !next.has("name")) next.set("name", store.get("canopymusic.name") || "");
-    const key = store.get("canopymusic.hostKey");
     if (key && !next.get("host")) next.set("host", key);
     location.replace(`http://${address}/${next.toString() ? `?${next}` : ""}${hash}`);
   }
@@ -86,14 +104,14 @@
   if (params.get("host")) {
     // A new key means a new pairing, so start in host view; the same key (carried along from
     // another address) keeps the view this phone chose.
-    if (params.get("host") !== store.get("canopymusic.hostKey")) store.set("canopymusic.hostMode", "host");
-    store.set("canopymusic.hostKey", params.get("host"));
+    if (params.get("host") !== savedHostKey()) store.set("canopymusic.hostMode", "host");
+    saveHostKey(params.get("host").slice(0, 64));
   }
   if (params.has("host") || params.has("cid") || params.has("name")) {
     ["host", "cid", "name"].forEach((key) => params.delete(key));
     history.replaceState(null, "", location.pathname + (params.toString() ? `?${params}` : "") + location.hash);
   }
-  let hostKey = store.get("canopymusic.hostKey");
+  let hostKey = savedHostKey();
   let hostPaired = false;
   let hostMode = store.get("canopymusic.hostMode") !== "guest";
   const hosting = () => hostPaired && hostMode;
@@ -167,6 +185,9 @@
 
   function applySnapshot(next) {
     if (dragging) { pendingSnap = next; return; }
+    // A different hub now answers at this address (the old one left and another took the name):
+    // start over, so this hub gets its own host key, not the other's.
+    if (hubID && next.hubID && next.hubID !== hubID) { location.reload(); return; }
     if (snap && next.version < snap.version) return;
     snap = next;
     render();
@@ -183,7 +204,7 @@
     if (!location.hostname.endsWith(".local")) return; // on the IP address, which still works
     followedAddress = address;
     if (!(await reachable(address, snap.lanAddress))) return;
-    moveTo(address, new URLSearchParams(location.search));
+    moveTo(address, new URLSearchParams(location.search), hostPaired ? hostKey : null);
   }
 
   // A link to …/#settings opens the zone settings once this phone is a host and the state has loaded.
@@ -863,7 +884,7 @@
     try {
       const reply = await api("/api/host/forget", { key: hostKey });
       hostKey = reply.key;
-      store.set("canopymusic.hostKey", hostKey);
+      saveHostKey(hostKey);
       $("settings-hosts").textContent = "1 phone";
       $("settings-forget").hidden = true;
     } catch { toast("Couldn't forget the other hosts"); }
@@ -930,13 +951,20 @@
     api("/api/host/check", { key: hostKey, clientId })
       .then(() => {
         hostPaired = true;
+        // The old single key turned out to be this hub's: keep it under this hub from now on.
+        if (hubID && !hostKeys()[hubID]) { saveHostKey(hostKey); store.remove("canopymusic.hostKey"); }
         updateNameChip();
         if (snap) render();
         openSettingsFromLink();
       })
       .catch((error) => {
         // Only a refusal means the key was revoked; a network hiccup keeps it.
-        if (error.message === "403") { store.remove("canopymusic.hostKey"); hostKey = null; }
+        // Only this hub's key goes; an old single key it refused may be another hub's, so it stays.
+        if (error.message === "403") {
+          if (hubID && hostKeys()[hubID] === hostKey) saveHostKey(null);
+          else if (!hubID) store.remove("canopymusic.hostKey");
+          hostKey = null;
+        }
       });
   }
   api("/api/state").then(applySnapshot).catch(() => {});

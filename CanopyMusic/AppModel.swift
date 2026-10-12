@@ -538,7 +538,7 @@ final class AppModel {
     }
 
     private func configureHubSession() {
-        session.configureHub(kind: .ipad, zoneName: zoneName, serviceName: provider == .none ? nil : provider.title)
+        session.configureHub(kind: .ipad, id: deviceID, zoneName: zoneName, serviceName: provider == .none ? nil : provider.title)
         session.displaysCanControl = displaysCanControl
         session.phonesCanQueue = phoneQueueEnabled
         session.hasPIN = !hostPIN.isEmpty

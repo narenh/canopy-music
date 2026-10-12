@@ -107,7 +107,7 @@ final class TVModel {
         }
         hostJoined = false
         hostname.rename(to: FriendlyHostname.localName(forZone: zoneName))
-        session.configureHub(kind: .tv, zoneName: zoneName, serviceName: usesDemo ? "Demo" : "Apple Music")
+        session.configureHub(kind: .tv, id: deviceID, zoneName: zoneName, serviceName: usesDemo ? "Demo" : "Apple Music")
         // Same settings, saved under the same names, as an iPad hub.
         session.phonesCanQueue = defaults.object(forKey: "phoneQueueEnabled") as? Bool ?? true
         session.phonesCanReorder = defaults.object(forKey: "phoneReorderEnabled") as? Bool ?? true

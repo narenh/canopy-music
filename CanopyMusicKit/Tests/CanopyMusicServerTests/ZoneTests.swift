@@ -9,7 +9,7 @@ import Testing
 struct ZoneTests {
     func makeHub(port: UInt16) async throws -> (PartySession, PartyServer, Task<Void, Error>) {
         let hub = PartySession(catalog: DemoCatalog(), engine: DemoPlaybackEngine())
-        hub.configureHub(kind: .tv, zoneName: "Living Room", serviceName: "Demo")
+        hub.configureHub(kind: .tv, id: "tv-1", zoneName: "Living Room", serviceName: "Demo")
         let playlist = try #require(try await DemoCatalog().libraryPlaylists().first)
         try await hub.load(playlist: playlist)
         try await hub.play()
@@ -38,6 +38,7 @@ struct ZoneTests {
         #expect(await waitFor { display.state.current?.id == hub.state.current?.id && display.state.current != nil })
         #expect(display.zoneName == "Living Room")
         #expect(display.hubKind == .tv)
+        #expect(display.hubID == "tv-1") // pages keep host keys per hub by this
         #expect(display.state.upNext.map(\.id) == hub.state.upNext.map(\.id))
 
         // Adding on the display shows at once and lands on the hub with the same ID.

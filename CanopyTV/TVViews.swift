@@ -17,9 +17,9 @@ struct TVRootView: View {
                     .transition(.opacity)
             case .hub:
                 if model.hostJoined {
-                    TVPartyView().transition(.opacity)
+                    TVPartyView().remoteTarget().transition(.opacity)
                 } else {
-                    TVStartView().transition(.opacity)
+                    TVStartView().remoteTarget().transition(.opacity)
                 }
             case .display:
                 TVPartyView()
@@ -27,6 +27,7 @@ struct TVRootView: View {
                     .blur(radius: model.isWaitingForHub ? 28 : 0)
                     .overlay { TVConnectionOverlay() }
                     .animation(.easeInOut(duration: 0.4), value: model.isWaitingForHub)
+                    .remoteTarget()
                     .transition(.opacity)
             }
         }
@@ -34,28 +35,33 @@ struct TVRootView: View {
         .animation(.easeInOut(duration: 0.5), value: model.role)
         .onChange(of: current?.id) { model.advertise() }
         // Menu: a hub can only stop its zone, a display can only leave (no settings on the TV).
-        // The remote's Menu and Play/Pause only reach a view that has focus, and these screens have
-        // nothing else to focus; without this, Menu leaves the app.
-        .focusable(model.role != .choosing)
-        .focusEffectDisabled()
         .onExitCommand(perform: model.role == .choosing ? nil : { confirming = true })
         .onPlayPauseCommand(perform: model.role == .choosing ? nil : { model.playPause() })
-        .alert(menuTitle, isPresented: $confirming) {
+        .confirmationDialog("", isPresented: $confirming, titleVisibility: .hidden) {
             if model.role == .hub {
                 Button("Stop \(model.zoneName)", role: .destructive) { model.stopZone() }
             } else {
                 Button("Leave \(model.shownZone?.name ?? "zone")", role: .destructive) { model.leave() }
             }
             Button("Cancel", role: .cancel) {}
-        } message: {
-            Text(model.role == .hub
-                 ? "This TV is playing the music. Settings are on your phone's host page."
-                 : "Showing \(model.shownZone?.kind == .tv ? "another Apple TV's" : "an iPad's") zone.")
         }
+        #if DEBUG
+        // `-autoLeave`: leaves a shown zone after 6 s (testing the way back without a remote).
+        .task(id: model.role) {
+            guard model.role == .display, ProcessInfo.processInfo.arguments.contains("-autoLeave") else { return }
+            try? await Task.sleep(for: .seconds(6))
+            model.leave()
+        }
+        #endif
     }
 
-    private var menuTitle: String {
-        model.role == .hub ? model.zoneName : (model.shownZone?.name ?? "Zone")
+}
+
+private extension View {
+    /// The remote's Menu and Play/Pause only reach a view that has focus. The party and start
+    /// screens have nothing else to focus; without this, Menu leaves the app.
+    func remoteTarget() -> some View {
+        focusable().focusEffectDisabled()
     }
 }
 
@@ -63,6 +69,9 @@ struct TVRootView: View {
 
 /// Every launch starts here (docs/multi-device.md).
 struct TVZoneListView: View {
+    #if DEBUG
+    @MainActor static var didAutoShow = false
+    #endif
     @Environment(TVModel.self) private var model
     /// A zone's id, or "create".
     @FocusState private var focused: String?
@@ -102,6 +111,11 @@ struct TVZoneListView: View {
         }
         // No forced white here: a focused button turns light and needs its dark text.
         .onAppear { model.browser.start() }
+        // Coming back from a zone, focus doesn't find its way here by itself.
+        .task {
+            try? await Task.sleep(for: .milliseconds(150))
+            if focused == nil { focused = zones.first?.id ?? "create" }
+        }
         // Joining is the usual case (a second zone in one house is rare), so start on the first
         // zone. Zones turn up a moment after launch, when focus is already on Create.
         .defaultFocus($focused, zones.first?.id ?? "create")
@@ -115,8 +129,9 @@ struct TVZoneListView: View {
         }
         .onChange(of: zones.map(\.id), initial: true) {
             let args = ProcessInfo.processInfo.arguments
-            guard let i = args.firstIndex(of: "-showZone"), i + 1 < args.count,
+            guard !Self.didAutoShow, let i = args.firstIndex(of: "-showZone"), i + 1 < args.count,
                   let zone = zones.first(where: { $0.name == args[i + 1] }) else { return }
+            Self.didAutoShow = true
             model.show(zone)
         }
         #endif

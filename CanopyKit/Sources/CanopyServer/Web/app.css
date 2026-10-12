@@ -46,7 +46,6 @@ main, .sheet {
 .brand-line > span:last-child { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .brand-icon, .brand-icon svg { flex: none; width: 14px; height: 14px; display: grid; place-items: center; }
 .brand-icon svg { stroke-width: 1.8; }
-.brand-icon.note { fill: currentColor; stroke: none; }
 .chips { display: flex; flex: none; max-width: 60%; border-radius: 999px; background: var(--surface); overflow: hidden; }
 .chips .name-chip { background: none; max-width: none; min-width: 0; }
 .mode-chip svg, .name-chip svg { width: 14px; height: 14px; stroke-width: 2.2; }

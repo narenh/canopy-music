@@ -76,7 +76,7 @@
 </section>
 
 <!-- Host: choose the base playlist. -->
-<section id="playlists" class="sheet" hidden>
+<section id="playlists" class="sheet over" hidden>
   <div class="search-bar">
     <h2 class="sheet-title" style="flex:1;margin:0">Base playlist</h2>
     <button class="text-btn" id="playlists-done" type="button">Done</button>
@@ -87,7 +87,7 @@
 </section>
 
 <!-- Host: add another host. -->
-<div id="invite-modal" class="modal" hidden>
+<div id="invite-modal" class="modal over" hidden>
   <div class="modal-card centered">
     <h2>Add another host</h2>
     <p>Scan with the other phone's camera.</p>
@@ -97,39 +97,42 @@
   </div>
 </div>
 
-<!-- Host: zone settings. -->
+<!-- Host: zone settings. Everything saves as it changes; text values open the edit dialog. -->
 <div id="settings-modal" class="modal" hidden>
-  <form class="modal-card settings-card" id="settings-form">
+  <div class="modal-card settings-card">
     <h2>Zone settings</h2>
-    <p class="settings-head">Zone name</p>
-    <input class="text-input" id="settings-name" maxlength="40" autocomplete="off" enterkeyhint="done">
-    <p class="small" id="settings-address" hidden></p>
-    <div id="settings-pin-block" hidden>
-      <p class="settings-head">Unlock PIN</p>
-      <input class="text-input" id="settings-pin" type="password" inputmode="numeric" pattern="[0-9]*" maxlength="8" autocomplete="off" data-1p-ignore data-lpignore="true">
-      <p class="small">Asked for when you press and hold the logo on the iPad.</p>
-      <button type="button" class="text-btn" id="settings-pin-remove" hidden>Remove PIN</button>
-    </div>
-    <p class="settings-head">Base playlist</p>
-    <div class="setting-row"><span class="setting-value" id="settings-playlist">None yet</span><button type="button" class="pill-btn" id="settings-playlist-change">Change</button></div>
+    <p class="settings-head">Zone</p>
+    <div class="setting-row"><span class="setting-label">Name</span><span class="setting-value" id="settings-name"></span><button type="button" class="pill-btn" data-edit="name">Change</button></div>
+    <div class="setting-row" id="settings-address-row"><span class="setting-label">Address</span><span class="setting-value" id="settings-address"></span></div>
+    <p class="settings-head">Music</p>
+    <div class="setting-row"><span class="setting-label">Base playlist</span><span class="setting-value" id="settings-playlist">None yet</span><button type="button" class="pill-btn" id="settings-playlist-change">Change</button></div>
     <p class="settings-head">Phones</p>
     <label class="setting-row"><span>Queue from phones</span><input type="checkbox" class="switch" id="settings-queue"></label>
     <label class="setting-row"><span>Reorder from phones</span><input type="checkbox" class="switch" id="settings-reorder"></label>
     <p class="settings-head">Wi&#8209;Fi information</p>
-    <input class="text-input" id="settings-wifi-ssid" maxlength="32" placeholder="Network name" autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck="false" data-1p-ignore data-lpignore="true">
-    <input class="text-input settings-gap" id="settings-wifi-password" maxlength="63" placeholder="Password" autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck="false" data-1p-ignore data-lpignore="true">
+    <div class="setting-row"><span class="setting-label">Network name</span><span class="setting-value" id="settings-wifi-ssid"></span><button type="button" class="pill-btn" data-edit="ssid" id="settings-wifi-ssid-btn">Change</button></div>
+    <div class="setting-row"><span class="setting-label">Password</span><span class="setting-value" id="settings-wifi-password"></span><button type="button" class="pill-btn" data-edit="password" id="settings-wifi-password-btn">Change</button></div>
     <label class="setting-row"><span>Simple QR code</span><input type="checkbox" class="switch" id="settings-wifi-simple"></label>
     <p class="small">Shows a “Join Wi&#8209;Fi” QR code next to the guest one. Turn on Simple QR code if a phone has trouble scanning it.</p>
     <p class="settings-head">Displays</p>
     <ul class="settings-displays" id="settings-display-list"></ul>
     <label class="setting-row"><span>Playback controls on displays</span><input type="checkbox" class="switch" id="settings-displays"></label>
     <p class="settings-head">Host Control</p>
-    <div class="setting-row"><span class="setting-value" id="settings-hosts"></span><button type="button" class="pill-btn" id="settings-invite">Add another host</button></div>
+    <div class="setting-row"><span class="setting-label" id="settings-hosts"></span><button type="button" class="pill-btn" id="settings-invite">Add another host</button></div>
     <button type="button" class="danger-btn" id="settings-forget">Forget other hosts</button>
     <button type="button" class="danger-btn" id="settings-stop"></button>
+    <div class="modal-actions"><button type="button" class="primary-btn" id="settings-done">Done</button></div>
+  </div>
+</div>
+
+<!-- Host: edits one settings value, on top of the settings sheet. -->
+<div id="edit-modal" class="modal over" hidden>
+  <form class="modal-card" id="edit-form">
+    <h2 id="edit-title"></h2>
+    <input id="edit-input" autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck="false" enterkeyhint="done" data-1p-ignore data-lpignore="true">
     <div class="modal-actions">
-      <button type="button" class="text-btn" id="settings-cancel">Cancel</button>
-      <button type="submit" class="primary-btn">Done</button>
+      <button type="button" class="text-btn" id="edit-cancel">Cancel</button>
+      <button type="submit" class="primary-btn">Save</button>
     </div>
   </form>
 </div>

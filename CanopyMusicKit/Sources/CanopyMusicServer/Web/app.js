@@ -204,7 +204,7 @@
     if (!location.hostname.endsWith(".local")) return; // on the IP address, which still works
     followedAddress = address;
     if (!(await reachable(address, snap.lanAddress))) return;
-    moveTo(address, new URLSearchParams(location.search), hostPaired ? hostKey : null);
+    moveTo(address, new URLSearchParams(location.search), hostPaired ? hostKey : null, settingsOpen() ? "#settings" : "");
   }
 
   // A link to …/#settings opens the zone settings once this phone is a host and the state has loaded.
@@ -231,6 +231,7 @@
     $("search-trigger").hidden = queueOff;
     $("queue-off").hidden = !queueOff;
     renderHost();
+    if (settingsOpen()) fillSettings();
     const playing = !!(current && snap.playback.isPlaying);
     $("t-play").innerHTML = playing ? icons.pause : icons.play;
     $("t-play").setAttribute("aria-label", playing ? "Pause" : "Play");
@@ -732,7 +733,7 @@
   function renderHost() {
     const on = hosting();
     $("settings-btn").hidden = !on;
-    if (!on) { $("setup").hidden = true; $("settings-modal").hidden = true; return; }
+    if (!on) { for (const id of ["setup", "settings-modal", "edit-modal", "invite-modal", "playlists"]) $(id).hidden = true; return; }
     // A TV zone has no screens of its own for setup: the first host does it here.
     const needsSetup = snap.hubKind === "tv" && !snap.playlistName && !setupDismissed;
     if (needsSetup && $("setup").hidden) openSetup();
@@ -776,8 +777,7 @@
 
   // Changing the base playlist from the host page.
   $("settings-playlist-change").addEventListener("click", async () => {
-    $("settings-modal").hidden = true;
-    $("playlists").hidden = false;
+    $("playlists").hidden = false; // on top of the settings sheet
     $("playlists-empty").hidden = false;
     $("playlists-empty").textContent = "Loading playlists…";
     try {
@@ -830,18 +830,17 @@
   });
   $("invite-done").addEventListener("click", () => { $("invite-modal").hidden = true; });
 
-  // Zone settings: the admin view for every hub (an Apple TV has no settings screens).
-  $("settings-btn").addEventListener("click", () => {
-    $("settings-name").value = snap.zoneName || "";
-    // The `.local` address follows the zone name.
-    $("settings-address").hidden = !snap.address;
-    $("settings-address").textContent = `Phones can also go to ${snap.address}. It follows the zone name.`;
-    // Only hubs with something to unlock (iPads) have a PIN. It's never sent here, only whether it's set.
-    const pinBlock = $("settings-pin-block");
-    pinBlock.hidden = snap.hasPIN == null;
-    $("settings-pin").value = "";
-    $("settings-pin").placeholder = snap.hasPIN ? "Set (type a new one to change it)" : "Not set";
-    $("settings-pin-remove").hidden = !snap.hasPIN;
+  // Zone settings: the admin view for every hub (an Apple TV has no settings screens). Everything
+  // saves as it changes: switches at once, text values from the edit dialog on top of the sheet.
+  let wifiDetails = null; // host-only (never in snapshots); loaded when the sheet opens
+  const settingsOpen = () => !$("settings-modal").hidden;
+
+  /** Shows the hub's current settings (again on every snapshot while the sheet is open). */
+  function fillSettings() {
+    $("settings-name").textContent = snap.zoneName || "";
+    // The `.local` address follows the zone name (briefly missing while a new one is checked).
+    $("settings-address-row").hidden = !snap.address;
+    $("settings-address").textContent = snap.address || "";
     $("settings-playlist").textContent = snap.playlistName || "None yet";
     $("settings-queue").checked = snap.canQueue !== false;
     $("settings-reorder").checked = snap.canReorder !== false;
@@ -849,19 +848,29 @@
     const hosts = snap.hostPhones || 0;
     $("settings-hosts").textContent = hosts === 1 ? "1 phone" : `${hosts} phones`;
     $("settings-forget").hidden = hosts < 2;
-    const stop = $("settings-stop");
-    stop.textContent = `Stop ${snap.zoneName || "this zone"}`;
-    // Host-only details: the Wi‑Fi (never in the snapshot guests get) and connected displays.
-    settingsWifiLoaded = false;
-    for (const id of ["settings-wifi-ssid", "settings-wifi-password"]) { $(id).value = ""; $(id).disabled = true; }
+    $("settings-stop").textContent = `Stop ${snap.zoneName || "this zone"}`;
+    fillWifi();
+  }
+
+  function fillWifi() {
+    const w = wifiDetails;
+    $("settings-wifi-ssid").textContent = !w ? "" : w.ssid || "Not set";
+    $("settings-wifi-password").textContent = !w ? "" : w.password ? "••••" : "Not set";
+    $("settings-wifi-ssid-btn").textContent = w && w.ssid ? "Change" : "Set";
+    $("settings-wifi-password-btn").textContent = w && w.password ? "Change" : "Set";
+    // Until they've loaded, so a save can't blank the others.
+    for (const id of ["settings-wifi-ssid-btn", "settings-wifi-password-btn", "settings-wifi-simple"]) $(id).disabled = !w;
+    if (w) $("settings-wifi-simple").checked = w.simpleQR;
+  }
+
+  $("settings-btn").addEventListener("click", () => {
+    wifiDetails = null;
+    fillSettings();
     const list = $("settings-display-list");
     list.innerHTML = "";
     api(`/api/host/details?${keyQuery()}`).then((details) => {
-      $("settings-wifi-ssid").value = details.wifi.ssid;
-      $("settings-wifi-password").value = details.wifi.password;
-      $("settings-wifi-simple").checked = details.wifi.simpleQR;
-      for (const id of ["settings-wifi-ssid", "settings-wifi-password"]) $(id).disabled = false;
-      settingsWifiLoaded = true;
+      wifiDetails = details.wifi;
+      fillWifi();
       for (const d of details.displays) {
         const li = document.createElement("li");
         li.innerHTML = d.kind === "tv" ? icons.tv : icons.ipad;
@@ -877,12 +886,62 @@
     }).catch(() => {});
     $("settings-modal").hidden = false;
   });
-  let settingsWifiLoaded = false;
-  $("settings-pin-remove").addEventListener("click", async () => {
-    if (!confirm("Remove the unlock PIN?")) return;
-    try { await api("/api/host/settings", { key: hostKey, pin: "" }); $("settings-pin-remove").hidden = true; $("settings-pin").placeholder = "Not set"; }
-    catch { toast("Couldn't remove the PIN"); }
+  $("settings-done").addEventListener("click", () => { $("settings-modal").hidden = true; });
+
+  /** Sends one change; false (after a toast) if the hub didn't take it. */
+  async function saveSetting(change) {
+    try { await api("/api/host/settings", { key: hostKey, ...change }); return true; }
+    catch { toast("Couldn't save that"); return false; }
+  }
+
+  // Switches apply as they're flipped, and flip back if the hub didn't take it.
+  for (const [id, field] of [["settings-queue", "phonesCanQueue"], ["settings-reorder", "phonesCanReorder"], ["settings-displays", "displaysCanControl"]]) {
+    $(id).addEventListener("change", async (event) => {
+      const on = event.target.checked;
+      if (!(await saveSetting({ [field]: on }))) event.target.checked = !on;
+    });
+  }
+  $("settings-wifi-simple").addEventListener("change", async (event) => {
+    const next = { ...wifiDetails, simpleQR: event.target.checked };
+    if (await saveSetting({ wifi: next })) wifiDetails = next; else event.target.checked = !next.simpleQR;
   });
+
+  // The edit dialog: one value at a time, on top of the sheet.
+  const editors = {
+    name: {
+      title: "Zone name", max: 40, value: () => snap.zoneName || "",
+      save: (v) => v ? saveSetting({ zoneName: v }) : true,
+    },
+    ssid: {
+      title: "Network name", max: 32, value: () => wifiDetails.ssid,
+      save: async (v) => { const next = { ...wifiDetails, ssid: v }; if (await saveSetting({ wifi: next })) { wifiDetails = next; return true; } return false; },
+    },
+    password: {
+      title: "Wi‑Fi password", max: 63, value: () => wifiDetails.password, trim: false,
+      save: async (v) => { const next = { ...wifiDetails, password: v }; if (await saveSetting({ wifi: next })) { wifiDetails = next; return true; } return false; },
+    },
+  };
+  let editing = null;
+  document.querySelectorAll("[data-edit]").forEach((button) => button.addEventListener("click", () => {
+    editing = editors[button.dataset.edit];
+    const input = $("edit-input");
+    $("edit-title").textContent = editing.title;
+    input.maxLength = editing.max;
+    input.value = editing.value();
+    $("edit-modal").hidden = false;
+    setTimeout(() => input.focus(), 50);
+  }));
+  $("edit-cancel").addEventListener("click", () => { $("edit-modal").hidden = true; });
+  $("edit-form").addEventListener("submit", async (event) => {
+    event.preventDefault();
+    const raw = $("edit-input").value;
+    const value = editing.trim === false ? raw : raw.trim();
+    if (await editing.save(value)) {
+      $("edit-modal").hidden = true;
+      fillWifi();
+    }
+  });
+
   $("settings-forget").addEventListener("click", async () => {
     if (!confirm("Forget every other host? Their phones go back to guest view. This phone stays a host.")) return;
     try {
@@ -892,27 +951,6 @@
       $("settings-hosts").textContent = "1 phone";
       $("settings-forget").hidden = true;
     } catch { toast("Couldn't forget the other hosts"); }
-  });
-  $("settings-cancel").addEventListener("click", () => { $("settings-modal").hidden = true; });
-  $("settings-form").addEventListener("submit", async (event) => {
-    event.preventDefault();
-    $("settings-modal").hidden = true;
-    try {
-      await api("/api/host/settings", {
-        key: hostKey,
-        zoneName: $("settings-name").value.trim() || undefined,
-        pin: $("settings-pin").value.trim() || undefined,
-        // Only if the current values loaded, so a slow load can't blank the Wi‑Fi.
-        wifi: settingsWifiLoaded ? {
-          ssid: $("settings-wifi-ssid").value.trim(),
-          password: $("settings-wifi-password").value,
-          simpleQR: $("settings-wifi-simple").checked,
-        } : undefined,
-        phonesCanQueue: $("settings-queue").checked,
-        phonesCanReorder: $("settings-reorder").checked,
-        displaysCanControl: $("settings-displays").checked,
-      });
-    } catch { toast("Couldn't save settings"); }
   });
   $("settings-stop").addEventListener("click", async () => {
     const device = snap.hubKind === "tv" ? "Apple TV" : "iPad";

@@ -173,7 +173,6 @@ public final class PartyServer: Sendable {
                 phonesCanQueue: body.phonesCanQueue,
                 phonesCanReorder: body.phonesCanReorder,
                 displaysCanControl: body.displaysCanControl,
-                pin: body.pin.map { String($0.filter(\.isNumber).prefix(8)) },
                 wifi: body.wifi.map { WifiDetails(ssid: String($0.ssid.prefix(32)), password: String($0.password.prefix(63)), simpleQR: $0.simpleQR) }
             )
             return HTTPResponse(statusCode: .ok)
@@ -266,8 +265,6 @@ struct SettingsBody: Decodable {
     var key: String
     var zoneName: String?
     var phonesCanQueue: Bool?
-    /// A new unlock PIN (digits), or "" to remove it. iPad hubs only.
-    var pin: String?
     var phonesCanReorder: Bool?
     var displaysCanControl: Bool?
 }

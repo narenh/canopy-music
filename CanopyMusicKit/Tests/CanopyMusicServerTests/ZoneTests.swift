@@ -163,25 +163,6 @@ struct HostSettingsTests {
         #expect(stops == 1)
     }
 
-    @Test func pinOnlyOnHubsThatUseOne() async throws {
-        let hub = PartySession(catalog: DemoCatalog(), engine: DemoPlaybackEngine())
-        hub.hostKey = "secret"
-        var pins: [String] = []
-        hub.onPINChanged = { pins.append($0) }
-        let (server, task) = try #require(await PartyServer.start(session: hub, ports: [18792]))
-        defer { task.cancel(); Task { await server.stop() } }
-
-        // A TV hub (hasPIN nil) has nothing to unlock: ignored.
-        _ = try await post(18792, "/api/host/settings", ["key": "secret", "pin": "1234"])
-        #expect(pins.isEmpty)
-        // An iPad hub takes digits only; "" removes it.
-        hub.hasPIN = false
-        _ = try await post(18792, "/api/host/settings", ["key": "secret", "pin": "12a34"])
-        _ = try await post(18792, "/api/host/settings", ["key": "secret", "pin": ""])
-        #expect(pins == ["1234", ""])
-        #expect(hub.snapshot().hasPIN == false)
-    }
-
     @Test func wifiIsHostOnly() async throws {
         let hub = PartySession(catalog: DemoCatalog(), engine: DemoPlaybackEngine())
         hub.hostKey = "secret"

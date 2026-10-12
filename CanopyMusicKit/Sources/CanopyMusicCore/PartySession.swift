@@ -48,8 +48,6 @@ public struct PartySnapshot: Codable, Equatable, Sendable {
     public var history: [QueueItem]?
     /// False when the host has turned off queueing from guests' phones (hosts and displays still can).
     public var canQueue: Bool?
-    /// Whether the hub has an unlock PIN (iPad hubs; nil elsewhere). The PIN itself never leaves it.
-    public var hasPIN: Bool?
     /// How many phones have Host Control.
     public var hostPhones: Int?
     /// The hub's device ID, so a phone keeps one host key per hub whatever address it used.
@@ -86,18 +84,12 @@ public final class PartySession {
     public var phonesCanQueue = true {
         didSet { if phonesCanQueue != oldValue, remote == nil { broadcast() } }
     }
-    /// Whether the hub has an unlock PIN (set by an iPad hub; nil on a TV, which has nothing to unlock).
-    public var hasPIN: Bool? {
-        didSet { if hasPIN != oldValue, remote == nil { broadcast() } }
-    }
     /// Phones with Host Control (set by the hub).
     public var hostPhoneCount = 0 {
         didSet { if hostPhoneCount != oldValue, remote == nil { broadcast() } }
     }
     /// The hub's guest Wi‑Fi (hub only; not in snapshots).
     public var wifi = WifiDetails()
-    /// A host set (non-empty) or removed (empty) the unlock PIN from the web page.
-    @ObservationIgnored public var onPINChanged: (@MainActor (String) -> Void)?
     /// A host revoked every other phone's Host Control; returns the new key for that host.
     @ObservationIgnored public var onForgetHostPhones: (@MainActor () -> String?)?
     /// The hub's guest address by IP, from the hub (display) or set by the app (hub).
@@ -196,15 +188,15 @@ public final class PartySession {
         displays.sort { $0.name < $1.name }
     }
 
-    /// Applies settings sent by a host from the web page. `pin`: a new PIN, or "" to remove it.
+    /// Applies settings sent by a host from the web page. (The iPad's unlock PIN isn't one: it's
+    /// set only on the iPad.)
     public func applyHostSettings(zoneName: String?, phonesCanQueue: Bool? = nil, phonesCanReorder: Bool?,
-                                  displaysCanControl: Bool?, pin: String? = nil, wifi: WifiDetails? = nil) {
+                                  displaysCanControl: Bool?, wifi: WifiDetails? = nil) {
         if let wifi { self.wifi = wifi }
         if let zoneName, !zoneName.isEmpty { self.zoneName = zoneName }
         if let phonesCanQueue { self.phonesCanQueue = phonesCanQueue }
         if let phonesCanReorder { self.phonesCanReorder = phonesCanReorder }
         if let displaysCanControl { self.displaysCanControl = displaysCanControl }
-        if let pin, hasPIN != nil { onPINChanged?(pin) }
         onSettingsChanged?()
     }
 
@@ -445,7 +437,6 @@ public final class PartySession {
             displaysCanControl: displaysCanControl,
             history: Array(state.history.prefix(20)),
             canQueue: phonesCanQueue,
-            hasPIN: hasPIN,
             hostPhones: hostPhoneCount,
             hubID: hubID
         )

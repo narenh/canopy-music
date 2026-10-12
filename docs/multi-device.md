@@ -38,7 +38,7 @@ Status: built on the `tvos-spike` branch (see "Build status" at the end). Screen
 | Create a zone | iPad: name, PIN, service | TV: Scan to host, then web: name, playlist |
 | Zone name | iPad, web | web |
 | Base playlist | iPad, web | web |
-| Unlock PIN | iPad, web | — (nothing to unlock) |
+| Unlock PIN | iPad settings (only on the iPad, not the web) | — |
 | `.local` address | follows the zone name | follows the zone name |
 | Stop the zone | iPad settings, web (both ask first) | Menu on the remote, web (web asks first) |
 | Resume after relaunch | Resume row | create again (the queue is restored) |
@@ -81,7 +81,7 @@ Status: built on the `tvos-spike` branch (see "Build status" at the end). Screen
 - **Hosts on the web** get new endpoints, all requiring the host key:
   - `GET /api/host/playlists`: the hub's library.
   - `POST /api/host/playlist`: load a base playlist.
-  - `POST /api/host/settings`: zone name, reorder, display controls, Wi‑Fi.
+  - `POST /api/host/settings`: zone name, queue and reorder from phones, display controls, Wi‑Fi; any subset (the web sheet saves each change as it's made). Not the iPad's unlock PIN, which is set only on the iPad.
   - `GET /api/host/details`: the Wi‑Fi details and the connected displays. The Wi‑Fi password is never in the snapshots guests get.
   - `POST /api/host/stop`: stops the zone (any hub). The page asks first.
   - `GET /api/host/invite.png`: the "Add another host" QR, rendered by the hub.

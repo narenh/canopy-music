@@ -115,7 +115,6 @@ final class AppModel {
     var hostPIN: String {
         didSet {
             defaults.set(hostPIN, forKey: "hostPIN")
-            session.hasPIN = !hostPIN.isEmpty
         }
     }
     var crossfade: Bool {
@@ -541,7 +540,6 @@ final class AppModel {
         session.configureHub(kind: .ipad, id: deviceID, zoneName: zoneName, serviceName: provider == .none ? nil : provider.title)
         session.displaysCanControl = displaysCanControl
         session.phonesCanQueue = phoneQueueEnabled
-        session.hasPIN = !hostPIN.isEmpty
         session.wifi = WifiDetails(ssid: wifiSSID, password: wifiPassword, simpleQR: wifiSimpleQR)
     }
 
@@ -591,7 +589,6 @@ final class AppModel {
             if wifi.password != self.wifiPassword { self.wifiPassword = wifi.password }
             if wifi.simpleQR != self.wifiSimpleQR { self.wifiSimpleQR = wifi.simpleQR }
         }
-        session.onPINChanged = { [weak self] pin in self?.hostPIN = pin }
         // A host stopped the zone from the web page (it asked them first): as Stop This Zone does here.
         session.onStopRequested = { [weak self] in self?.stopHosting() }
     }

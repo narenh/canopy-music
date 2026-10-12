@@ -17,12 +17,16 @@ final class AppleMusicEngine: PlaybackEngine {
     private var player: ApplicationMusicPlayer {
         if let _player { return _player }
         let player = ApplicationMusicPlayer.shared
+        #if !os(tvOS) // tvOS has no crossfade
         player.transition = transition
+        #endif
         _player = player
         startPolling()
         return player
     }
+    #if !os(tvOS)
     private var transition: MusicPlayer.Transition = .none
+    #endif
     private let cache: SongCache
     private var stagedTrackID: String?
     private var currentEntryID: String?
@@ -127,8 +131,10 @@ final class AppleMusicEngine: PlaybackEngine {
     }
 
     func setCrossfade(enabled: Bool, duration: TimeInterval?) {
+        #if !os(tvOS)
         transition = enabled ? .crossfade(duration: duration) : .none
         _player?.transition = transition
+        #endif
     }
 
     private func poll() {

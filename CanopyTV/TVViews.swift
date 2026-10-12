@@ -5,20 +5,177 @@ import SwiftUI
 
 struct TVRootView: View {
     @Environment(TVModel.self) private var model
+    @State private var confirming = false
 
     var body: some View {
         let current = model.session.state.current
         ZStack {
             TVBackground(track: current?.track, theme: ArtworkTheme(current?.track.colors))
-            if model.hostJoined {
-                TVPartyView()
+            switch model.role {
+            case .choosing:
+                TVZoneListView()
                     .transition(.opacity)
-            } else {
-                TVStartView()
+            case .hub:
+                if model.hostJoined {
+                    TVPartyView().transition(.opacity)
+                } else {
+                    TVStartView().transition(.opacity)
+                }
+            case .display:
+                TVPartyView()
+                    .overlay(alignment: .bottomLeading) { TVZoneBadge() }
+                    .overlay { TVConnectionOverlay() }
                     .transition(.opacity)
             }
         }
         .animation(.easeInOut(duration: 1.2), value: current?.id)
+        .animation(.easeInOut(duration: 0.5), value: model.role)
+        .onChange(of: current?.id) { model.advertise() }
+        // Menu: a hub can only stop its zone, a display can only leave (no settings on the TV).
+        .onExitCommand(perform: model.role == .choosing ? nil : { confirming = true })
+        .onPlayPauseCommand(perform: model.role == .choosing ? nil : { model.playPause() })
+        .alert(menuTitle, isPresented: $confirming) {
+            if model.role == .hub {
+                Button("Stop \(model.zoneName)", role: .destructive) { model.stopZone() }
+            } else {
+                Button("Leave \(model.shownZone?.name ?? "zone")", role: .destructive) { model.leave() }
+            }
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text(model.role == .hub
+                 ? "This TV is playing the music. Settings are on your phone's host page."
+                 : "Showing \(model.shownZone?.kind == .tv ? "another Apple TV's" : "an iPad's") zone.")
+        }
+    }
+
+    private var menuTitle: String {
+        model.role == .hub ? model.zoneName : (model.shownZone?.name ?? "Zone")
+    }
+}
+
+// MARK: - Zone list
+
+/// Every launch starts here (docs/multi-device.md).
+struct TVZoneListView: View {
+    @Environment(TVModel.self) private var model
+
+    var body: some View {
+        let zones = model.browser.zones.filter { $0.hubID != model.deviceID }
+        VStack(spacing: 34) {
+            Image("CanopyLogo").resizable().scaledToFit().frame(height: 70)
+            if zones.isEmpty {
+                Text(model.browser.hasSearched ? "No zones playing yet." : "Looking for zones…")
+                    .font(.system(size: 30))
+                    .foregroundStyle(.white.opacity(0.6))
+            } else {
+                Text("Zones on this Wi\u{2011}Fi")
+                    .font(.system(size: 52, weight: .bold))
+            }
+            VStack(spacing: 16) {
+                ForEach(zones) { zone in
+                    Button {
+                        model.show(zone)
+                    } label: {
+                        TVZoneRow(
+                            icon: zone.kind == .tv ? "appletv" : "ipad.landscape",
+                            title: "Show \(zone.name)",
+                            subtitle: [zone.kind == .tv ? "Apple TV" : "iPad", zone.nowPlaying.map { "playing \($0)" }]
+                                .compactMap(\.self).joined(separator: " · ")
+                        )
+                    }
+                }
+                Button {
+                    Task { await model.createZone() }
+                } label: {
+                    TVZoneRow(icon: "plus", title: "Create a new zone", subtitle: "This TV plays the music")
+                }
+            }
+            .frame(width: 900)
+            if model.authorizationDenied {
+                Text("Canopy Music needs Apple Music access to play here. Turn it on in Settings › Apps › Canopy Music.")
+                    .font(.system(size: 24))
+                    .foregroundStyle(.orange)
+                    .frame(width: 900)
+            }
+        }
+        .foregroundStyle(.white)
+        .onAppear { model.browser.start() }
+        #if DEBUG
+        // `-createZone` / `-showZone <name>`: act without the remote, for the simulator.
+        .task {
+            if ProcessInfo.processInfo.arguments.contains("-createZone") { await model.createZone() }
+        }
+        .onChange(of: zones.map(\.id), initial: true) {
+            let args = ProcessInfo.processInfo.arguments
+            guard let i = args.firstIndex(of: "-showZone"), i + 1 < args.count,
+                  let zone = zones.first(where: { $0.name == args[i + 1] }) else { return }
+            model.show(zone)
+        }
+        #endif
+    }
+}
+
+private struct TVZoneRow: View {
+    let icon: String
+    let title: String
+    let subtitle: String
+
+    var body: some View {
+        HStack(spacing: 24) {
+            Image(systemName: icon)
+                .font(.system(size: 30, weight: .medium))
+                .frame(width: 60)
+            VStack(alignment: .leading, spacing: 4) {
+                Text(title).font(.system(size: 32, weight: .semibold))
+                Text(subtitle).font(.system(size: 22)).opacity(0.65).lineLimit(1)
+            }
+            Spacer(minLength: 0)
+        }
+        .padding(.horizontal, 20)
+        .padding(.vertical, 10)
+    }
+}
+
+/// Which zone a display is showing.
+struct TVZoneBadge: View {
+    @Environment(TVModel.self) private var model
+
+    var body: some View {
+        if let zone = model.shownZone {
+            Label(zone.name, systemImage: zone.kind == .tv ? "appletv" : "ipad.landscape")
+                .font(.system(size: 22, weight: .semibold))
+                .padding(.horizontal, 18)
+                .padding(.vertical, 9)
+                .background(.white.opacity(0.14), in: Capsule())
+                .foregroundStyle(.white.opacity(0.85))
+        }
+    }
+}
+
+/// "Connecting…" until the hub's first update; "Lost connection" if it drops.
+struct TVConnectionOverlay: View {
+    @Environment(TVModel.self) private var model
+
+    var body: some View {
+        if let connection = model.connection, !connection.isConnected {
+            let name = model.shownZone?.name ?? "the zone"
+            ZStack {
+                Rectangle().fill(.black.opacity(connection.hasSnapshot ? 0.6 : 0.9)).ignoresSafeArea()
+                VStack(spacing: 22) {
+                    ProgressView()
+                    Text(connection.hasSnapshot ? "Lost connection to \(name)" : "Connecting to \(name)…")
+                        .font(.system(size: 40, weight: .bold))
+                    if connection.hasSnapshot {
+                        Text("Trying again. Make sure \(model.shownZone?.kind == .tv ? "the Apple TV is on" : "the iPad is awake") and Canopy is open. Press Menu to leave.")
+                            .font(.system(size: 26))
+                            .foregroundStyle(.white.opacity(0.7))
+                            .multilineTextAlignment(.center)
+                            .frame(width: 900)
+                    }
+                }
+                .foregroundStyle(.white)
+            }
+        }
     }
 }
 
@@ -38,7 +195,7 @@ struct TVStartView: View {
                     .frame(height: 70)
                 Text("Scan to host")
                     .font(.system(size: 76, weight: .bold))
-                Text("Your phone becomes the remote: pick the playlist, play, pause, skip and reorder. Guests can join after.")
+                Text("Your phone becomes the remote: pick a playlist, play, pause, skip and reorder. iPads with Canopy on this Wi\u{2011}Fi can show this zone too.")
                     .font(.system(size: 34))
                     .foregroundStyle(.white.opacity(0.7))
                     .frame(maxWidth: 820, alignment: .leading)
@@ -149,7 +306,7 @@ struct TVJoinCard: View {
 
     var body: some View {
         HStack(spacing: 30) {
-            TVQRCode(payload: model.guestURL?.absoluteString)
+            TVQRCode(payload: model.shownGuestURL?.absoluteString)
                 .frame(width: 170, height: 170)
             VStack(alignment: .leading, spacing: 8) {
                 Text("Queue from your phone")
@@ -157,7 +314,7 @@ struct TVJoinCard: View {
                 Text("Scan with your camera, or go to")
                     .font(.system(size: 26))
                     .foregroundStyle(.white.opacity(0.6))
-                Text(Self.display(model.friendlyURL ?? model.guestURL))
+                Text(Self.display(model.shownFriendlyURL ?? model.shownGuestURL))
                     .font(.system(size: 30, weight: .semibold).monospaced())
             }
             Spacer(minLength: 0)

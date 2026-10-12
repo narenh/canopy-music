@@ -174,6 +174,7 @@ struct RootView: View {
                 try? await session.load(playlist: PlaylistSummary(id: "screenshot", name: "2026 June", kind: .library))
                 try? await session.play()
                 model.installScreenshotSession(session)
+                ScreenshotHub.pose(model)
             }
             // `-autoLoad` loads the first demo playlist without playing, for host-screen screenshots.
             if ProcessInfo.processInfo.arguments.contains("-autoLoad"), model.isDemo,

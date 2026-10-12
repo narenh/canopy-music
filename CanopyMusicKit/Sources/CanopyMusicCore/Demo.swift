@@ -176,10 +176,15 @@ public final class DemoPlaybackEngine: PlaybackEngine {
     private func startTicker() {
         ticker?.cancel()
         ticker = Task { [weak self] in
+            // Real elapsed time, not 0.25 per tick: a sleep runs a little long, which made the
+            // demo's clock run a few percent slow, so displays (timing it from snapshots) ran ahead.
+            var last = Date()
             while !Task.isCancelled {
                 try? await Task.sleep(for: .milliseconds(250))
                 guard let self, self.isPlaying else { return }
-                self.currentTime += 0.25
+                let now = Date()
+                self.currentTime += now.timeIntervalSince(last)
+                last = now
                 if self.currentTime >= (self.current?.duration ?? 30) { self.moveToStaged() }
             }
         }

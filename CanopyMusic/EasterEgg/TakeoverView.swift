@@ -7,6 +7,8 @@ struct TakeoverView: View {
     let lines: [LyricsEasterEgg.Line]
     let track: QueueTrack
     let session: PartySession
+    /// Bigger words on a TV, read from across the room.
+    var scale: CGFloat = 1
     let onDismiss: () -> Void
 
     var body: some View {
@@ -26,7 +28,7 @@ struct TakeoverView: View {
                 flood
                 Color.black.opacity(0.25 + 0.2 * beat)
                 if let line, !words.isEmpty {
-                    WordStack(words: words, revealed: revealed)
+                    WordStack(words: words, revealed: revealed, scale: scale)
                         .id(line.time)
                         .transition(.asymmetric(insertion: .opacity, removal: .scale(scale: 1.15).combined(with: .opacity)))
                 }
@@ -43,6 +45,11 @@ struct TakeoverView: View {
             .accessibilityAction(named: "Close lyrics", onDismiss)
         }
         .ignoresSafeArea()
+    }
+
+    /// Whether the takeover is on screen at `time` (it hides for the intro and outro).
+    static func isShowing(_ lines: [LyricsEasterEgg.Line], at time: TimeInterval) -> Bool {
+        lyricWindow(lines).contains(time)
     }
 
     /// From just before the first sung line to the end of the last one (the next timestamp, often
@@ -79,9 +86,10 @@ struct TakeoverView: View {
 private struct WordStack: View {
     let words: [String]
     let revealed: Int
+    var scale: CGFloat = 1
 
     var body: some View {
-        let size = Self.fontSize(for: words.joined(separator: " ").count)
+        let size = Self.fontSize(for: words.joined(separator: " ").count) * scale
         FlowLayout(spacing: size * 0.22, lineSpacing: -size * 0.08) {
             ForEach(Array(words.enumerated()), id: \.offset) { index, word in
                 Text(word.uppercased())
@@ -92,7 +100,7 @@ private struct WordStack: View {
                     .opacity(index < revealed ? 1 : 0)
             }
         }
-        .padding(.horizontal, 60)
+        .padding(.horizontal, 60 * scale)
     }
 
     static func fontSize(for characters: Int) -> CGFloat {

@@ -117,11 +117,7 @@ struct RootView: View {
 
     var body: some View {
         let current = model.session.state.current
-        let takeover = current.flatMap { item -> (QueueItem, [LyricsEasterEgg.Line])? in
-            guard !Capture.isOn, easterEgg.matches(item.track), easterEgg.dismissedItemID != item.id,
-                  let lines = easterEgg.lines else { return nil }
-            return (item, lines)
-        }
+        let takeover = Capture.isOn ? nil : easterEgg.takeover(for: current)
         Group {
             switch model.zoneRole {
             case .choosing:
@@ -150,7 +146,7 @@ struct RootView: View {
                 .transition(.opacity)
             }
         }
-        .animation(.easeInOut(duration: 0.6), value: takeover?.0.id)
+        .animation(.easeInOut(duration: 0.6), value: takeover?.item.id)
         .task(id: current?.id) {
             model.zoneSongChanged()
             if let current, easterEgg.matches(current.track) { await easterEgg.loadIfNeeded() }

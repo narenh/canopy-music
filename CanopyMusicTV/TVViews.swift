@@ -6,9 +6,13 @@ import SwiftUI
 struct TVRootView: View {
     @Environment(TVModel.self) private var model
     @State private var confirming = false
+    @State private var easterEgg = LyricsEasterEgg()
 
     var body: some View {
         let current = model.session.state.current
+        // The same takeover as the iPad's, as a hub or a display (a display's time comes from
+        // its hub's snapshots).
+        let takeover = model.role == .choosing ? nil : easterEgg.takeover(for: current)
         ZStack {
             TVBackground(track: current?.track, theme: ArtworkTheme(current?.track.colors))
             switch model.role {
@@ -33,8 +37,27 @@ struct TVRootView: View {
         .animation(.easeInOut(duration: 1.2), value: current?.id)
         .animation(.easeInOut(duration: 0.5), value: model.role)
         .onChange(of: current?.id) { model.advertise() }
-        // Menu: a hub can only stop its zone, a display can only leave (no settings on the TV).
-        .onExitCommand(perform: model.role == .choosing ? nil : { confirming = true })
+        .overlay {
+            if let (item, lines) = takeover {
+                TakeoverView(lines: lines, track: item.track, session: model.session, scale: 1.4) {
+                    easterEgg.dismissedItemID = item.id
+                }
+                .transition(.opacity)
+            }
+        }
+        .animation(.easeInOut(duration: 0.6), value: takeover?.item.id)
+        .task(id: current?.id) {
+            if let current, easterEgg.matches(current.track) { await easterEgg.loadIfNeeded() }
+        }
+        // Menu: closes the takeover while it's showing (for this play, as press and hold does on
+        // the iPad); otherwise a hub can only stop its zone and a display can only leave.
+        .onExitCommand(perform: model.role == .choosing ? nil : {
+            if let (item, lines) = takeover, TakeoverView.isShowing(lines, at: model.session.engine.currentTime) {
+                easterEgg.dismissedItemID = item.id
+            } else {
+                confirming = true
+            }
+        })
         .onPlayPauseCommand(perform: model.role == .choosing ? nil : { model.playPause() })
         .confirmationDialog("", isPresented: $confirming, titleVisibility: .hidden) {
             if model.role == .hub {

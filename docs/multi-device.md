@@ -60,7 +60,6 @@ Status: built on the `tvos-spike` branch (see "Build status" at the end). Screen
 | List of connected displays | iPad host mode, web | web |
 | **Other** | | |
 | Lock the party screen | press and hold the logo (+ Guided Access) | — |
-| Lyrics takeover (easter egg) | ✓ | — |
 | Keeps the screen awake | ✓ | ✓ |
 
 ## Launch flow (every device, every time)

@@ -29,6 +29,13 @@ final class LyricsEasterEgg {
         return track.title.lowercased().hasPrefix("big stick") && track.artist.lowercased().contains("muna")
     }
 
+    /// The takeover to show for the current song, if it's the one and its lyrics are loaded and it
+    /// wasn't dismissed for this play. (iPad and Apple TV.)
+    func takeover(for item: QueueItem?) -> (item: QueueItem, lines: [Line])? {
+        guard let item, matches(item.track), dismissedItemID != item.id, let lines else { return nil }
+        return (item, lines)
+    }
+
     func loadIfNeeded() async {
         guard lines == nil, !isLoading else { return }
         isLoading = true

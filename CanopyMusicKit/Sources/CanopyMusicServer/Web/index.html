@@ -72,20 +72,28 @@
   <p class="muted-label">Zone name</p>
   <input class="text-input" id="setup-name" maxlength="40" autocomplete="off" enterkeyhint="done">
   <p class="muted-label" style="margin-top:18px">Base playlist</p>
+  <div class="picker-search"><label class="search-field"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg><input id="setup-search" type="search" placeholder="Find a playlist" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false" enterkeyhint="search"></label></div>
   <ul class="playlists" id="setup-playlists"></ul>
   <p class="empty" id="setup-empty" hidden>Loading playlists…</p>
+  <p class="muted-label picker-catalog-head" id="setup-catalog-head" hidden></p>
+  <ul class="playlists" id="setup-catalog"></ul>
   <button class="primary-btn wide" id="setup-start" type="button" disabled>Start the music</button>
 </section>
 
 <!-- Host: choose the base playlist. -->
 <section id="playlists" class="sheet over" hidden>
-  <div class="search-bar">
-    <h2 class="sheet-title" style="flex:1;margin:0">Base playlist</h2>
-    <button class="text-btn" id="playlists-done" type="button">Done</button>
+  <div class="sheet-head">
+    <div class="search-bar">
+      <h2 class="sheet-title" style="flex:1;margin:0">Base playlist</h2>
+      <button class="text-btn" id="playlists-done" type="button">Done</button>
+    </div>
+    <label class="search-field"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg><input id="playlists-search" type="search" placeholder="Find a playlist" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false" enterkeyhint="search"></label>
   </div>
   <p class="sheet-sub">Changing it starts the queue over; requests are cleared.</p>
   <ul class="playlists" id="playlist-list"></ul>
   <p class="empty" id="playlists-empty" hidden>Loading playlists…</p>
+  <p class="muted-label picker-catalog-head" id="playlists-catalog-head" hidden></p>
+  <ul class="playlists" id="playlists-catalog"></ul>
 </section>
 
 <!-- Host: add another host. -->

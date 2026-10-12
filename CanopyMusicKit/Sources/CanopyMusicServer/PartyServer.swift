@@ -151,13 +151,22 @@ public final class PartyServer: Sendable {
         }
 
         // Hosts on the web page (with the Host Control key).
-        await server.appendRoute("GET /api/host/playlists") { request in
-            guard await session.isHost(key: request.query["key"]) else { return HTTPResponse(statusCode: .forbidden) }
-            do {
-                return try .json(try await session.catalog.libraryPlaylists())
-            } catch {
-                return .serviceFailed(error)
+        // Playlists for hosts choosing the base playlist: the hub's library, or (while they type) a
+        // search of its music service, as the iPad's own picker offers.
+        func hostPlaylists(_ route: HTTPRoute, _ load: @escaping @Sendable (any MusicCatalog, HTTPRequest) async throws -> [PlaylistSummary]) async {
+            await server.appendRoute(route) { request in
+                guard await session.isHost(key: request.query["key"]) else { return HTTPResponse(statusCode: .forbidden) }
+                do {
+                    return try .json(try await load(await session.catalog, request))
+                } catch {
+                    return .serviceFailed(error)
+                }
             }
+        }
+        await hostPlaylists("GET /api/host/playlists") { catalog, _ in try await catalog.libraryPlaylists() }
+        await hostPlaylists("GET /api/host/playlists/search") { catalog, request in
+            let term = request.query["q"]?.trimmingCharacters(in: .whitespaces) ?? ""
+            return term.isEmpty ? [] : try await catalog.searchPlaylists(String(term.prefix(100)))
         }
 
         await server.appendRoute("POST /api/host/playlist") { request in

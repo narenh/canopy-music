@@ -689,6 +689,13 @@
   $("queue").addEventListener("pointerup", endDrag);
   $("queue").addEventListener("pointercancel", endDrag);
 
+  // While a sheet is open, it scrolls and the page behind it doesn't (iOS Safari otherwise can
+  // hand the scroll to the page underneath).
+  const sheets = [...document.querySelectorAll(".sheet")];
+  const syncPageLock = () => document.documentElement.classList.toggle("sheet-open", sheets.some((sheet) => !sheet.hidden));
+  const sheetWatcher = new MutationObserver(syncPageLock);
+  for (const sheet of sheets) sheetWatcher.observe(sheet, { attributes: true, attributeFilter: ["hidden"] });
+
   // MARK: Search
 
   let results = [];
@@ -898,52 +905,119 @@
     return playlistsCache;
   }
 
-  function fillPlaylists(list, emptyEl, playlists, selectedId, onPick) {
-    list.innerHTML = "";
-    emptyEl.hidden = playlists.length > 0;
-    emptyEl.textContent = "No playlists in this library.";
-    for (const p of playlists) {
-      const li = document.createElement("li");
-      li.className = "playlist-row" + (p.id === selectedId ? " selected" : "");
-      const art = document.createElement("div");
-      art.className = "art";
-      setArt(art, { thumbnailURL: p.artworkURL }, false);
-      const meta = document.createElement("div");
-      const title = document.createElement("p");
-      title.textContent = p.name;
-      const sub = document.createElement("p");
-      sub.className = "row-sub";
-      sub.textContent = p.subtitle || "";
-      meta.append(title, sub);
-      li.append(art, meta);
-      if (p.id === selectedId) {
-        const check = document.createElement("span");
-        check.className = "check";
-        check.innerHTML = icons.check;
-        li.append(check);
-      }
-      li.addEventListener("click", () => onPick(p));
-      list.append(li);
-    }
+  // A searchable playlist list (Change base playlist, and a TV zone's first setup). Typing filters
+  // the library (ignoring case and accents) and, as on the iPad, searches the music service's
+  // playlists, shown below. Rows are built once per load; filtering only hides them.
+  const fold = (text) => (text || "").normalize("NFD").replace(/\p{Diacritic}/gu, "").toLowerCase();
+
+  function playlistRow(p, onPick) {
+    const li = document.createElement("li");
+    li.className = "playlist-row";
+    li.dataset.id = p.id;
+    const art = document.createElement("div");
+    art.className = "art";
+    setArt(art, { thumbnailURL: p.artworkURL }, false);
+    const meta = document.createElement("div");
+    const title = document.createElement("p");
+    title.textContent = p.name;
+    const sub = document.createElement("p");
+    sub.className = "row-sub";
+    sub.textContent = p.subtitle || "";
+    meta.append(title, sub);
+    li.append(art, meta);
+    li.addEventListener("click", () => onPick(p));
+    return li;
   }
 
-  // Changing the base playlist from the host page.
-  $("settings-playlist-change").addEventListener("click", async () => {
-    $("playlists").hidden = false; // on top of the settings sheet
-    $("playlists-empty").hidden = false;
-    $("playlists-empty").textContent = "Loading playlists…";
-    try {
-      const playlists = await loadPlaylists();
-      fillPlaylists($("playlist-list"), $("playlists-empty"), playlists, null, async (p) => {
-        if (!confirm(`Switch to "${p.name}"? The queue starts over and requests are cleared.`)) return;
-        $("playlists").hidden = true;
-        try {
-          await api("/api/host/playlist", { key: hostKey, playlist: p, play: !!(snap && snap.playback.isPlaying) });
-        } catch { toast("Couldn't change the playlist"); }
-      });
-    } catch {
-      $("playlists-empty").textContent = "Couldn't load playlists.";
+  function playlistPicker(prefix, listId, emptyId, onPick) {
+    const list = $(listId), empty = $(emptyId), search = $(`${prefix}-search`);
+    const catalogList = $(`${prefix}-catalog`), catalogHead = $(`${prefix}-catalog-head`);
+    let rows = [], loaded = false, timer = null, generation = 0;
+
+    function showEmpty(text) { empty.hidden = !text; empty.textContent = text || ""; }
+
+    function filter() {
+      const term = fold(search.value.trim());
+      let shown = 0;
+      for (const li of rows) {
+        const hit = !term || li.dataset.name.includes(term);
+        if (li.hidden === hit) li.hidden = !hit;
+        if (hit) shown++;
+      }
+      if (loaded) showEmpty(shown ? "" : rows.length ? "No matches in your playlists." : "No playlists in this library.");
+      clearTimeout(timer);
+      timer = setTimeout(searchCatalog, 300);
     }
+
+    // Spotify's catalog playlists aren't offered (as on the iPad): its Development Mode can't read
+    // songs from playlists you don't own.
+    async function searchCatalog() {
+      const term = search.value.trim();
+      const run = ++generation;
+      if (!term || (snap && snap.service === "Spotify")) { catalogList.innerHTML = ""; catalogHead.hidden = true; return; }
+      try {
+        const found = await api(`/api/host/playlists/search?${keyQuery()}&q=${encodeURIComponent(term)}`);
+        if (run !== generation) return;
+        catalogList.innerHTML = "";
+        for (const p of found) catalogList.append(playlistRow(p, onPick));
+        catalogHead.hidden = !found.length;
+        catalogHead.textContent = `${snap && snap.service ? snap.service : "More"} playlists`;
+      } catch {}
+    }
+    search.addEventListener("input", () => {
+      filter();
+      // Back to the first match (the picker sheet scrolls as a whole under its search field).
+      if (prefix === "playlists") $("playlists").scrollTop = 0;
+    });
+
+    return {
+      async open() {
+        search.value = "";
+        catalogList.innerHTML = "";
+        catalogHead.hidden = true;
+        if (!loaded) showEmpty("Loading playlists…");
+        try {
+          const playlists = await loadPlaylists();
+          if (!loaded) {
+            list.innerHTML = "";
+            rows = playlists.map((p) => {
+              const li = playlistRow(p, onPick);
+              li.dataset.name = fold(p.name);
+              return li;
+            });
+            list.append(...rows);
+            loaded = true;
+          }
+          filter();
+        } catch {
+          showEmpty("Couldn't load playlists.");
+        }
+      },
+      /** Checks the chosen row (setup). */
+      select(id) {
+        for (const li of [...rows, ...catalogList.children]) {
+          const on = li.dataset.id === id;
+          li.classList.toggle("selected", on);
+          const check = li.querySelector(".check");
+          if (on && !check) { const c = document.createElement("span"); c.className = "check"; c.innerHTML = icons.check; li.append(c); }
+          if (!on && check) check.remove();
+        }
+      },
+    };
+  }
+
+  // Changing the base playlist from the host page (on top of the settings sheet).
+  const changePicker = playlistPicker("playlists", "playlist-list", "playlists-empty", async (p) => {
+    if (!confirm(`Switch to "${p.name}"? The queue starts over and requests are cleared.`)) return;
+    $("playlists").hidden = true;
+    try {
+      await api("/api/host/playlist", { key: hostKey, playlist: p, play: !!(snap && snap.playback.isPlaying) });
+    } catch { toast("Couldn't change the playlist"); }
+  });
+  $("settings-playlist-change").addEventListener("click", () => {
+    $("playlists").hidden = false;
+    $("playlists").scrollTop = 0;
+    changePicker.open();
   });
   $("playlists-done").addEventListener("click", () => { $("playlists").hidden = true; });
 
@@ -951,15 +1025,14 @@
     $("setup").hidden = false;
     $("setup-name").value = snap.zoneName || "";
     $("setup-sub").textContent = `You're hosting ${snap.hubKind === "tv" ? "the Apple TV" : "this zone"}. Guests can join once music is playing.`;
-    $("setup-empty").hidden = false;
-    $("setup-empty").textContent = "Loading playlists…";
-    const redraw = (playlists) => fillPlaylists($("setup-playlists"), $("setup-empty"), playlists, setupPick && setupPick.id, (p) => {
-      setupPick = p;
-      $("setup-start").disabled = false;
-      redraw(playlists);
-    });
-    try { redraw(await loadPlaylists()); } catch { $("setup-empty").textContent = "Couldn't load playlists."; }
+    await setupPicker.open();
+    if (setupPick) setupPicker.select(setupPick.id);
   }
+  const setupPicker = playlistPicker("setup", "setup-playlists", "setup-empty", (p) => {
+    setupPick = p;
+    $("setup-start").disabled = false;
+    setupPicker.select(p.id);
+  });
   $("setup-start").addEventListener("click", async () => {
     if (!setupPick) return;
     $("setup-start").disabled = true;

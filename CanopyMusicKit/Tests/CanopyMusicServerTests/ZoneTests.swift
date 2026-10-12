@@ -174,6 +174,23 @@ struct HostSettingsTests {
         #expect(remote.rows.map(\.trackID) == page.rows[50..<100].map(\.trackID))
     }
 
+    /// Hosts can list the library and search the service's playlists; guests can't.
+    @Test func hostPlaylistSearch() async throws {
+        let hub = PartySession(catalog: DemoCatalog(), engine: DemoPlaybackEngine())
+        hub.hostKey = "secret"
+        let (server, task) = try #require(await PartyServer.start(session: hub, ports: [18797]))
+        defer { task.cancel(); Task { await server.stop() } }
+
+        let base = "http://127.0.0.1:18797/api/host/playlists"
+        let (_, refused) = try await URLSession.shared.data(from: URL(string: "\(base)/search?key=nope&q=disco")!)
+        #expect((refused as? HTTPURLResponse)?.statusCode == 403)
+        let (data, _) = try await URLSession.shared.data(from: URL(string: "\(base)/search?key=secret&q=disco")!)
+        let found = try JSONDecoder.api.decode([PlaylistSummary].self, from: data)
+        #expect(found.first?.name == "disco mix")
+        let (library, _) = try await URLSession.shared.data(from: URL(string: "\(base)?key=secret")!)
+        #expect(try JSONDecoder.api.decode([PlaylistSummary].self, from: library).contains { $0.id == "demo-big" })
+    }
+
     /// Any hub (iPad or TV) can be stopped from the web page, by hosts only.
     @Test func onlyHostsStopTheZone() async throws {
         let hub = PartySession(catalog: DemoCatalog(), engine: DemoPlaybackEngine())

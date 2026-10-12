@@ -135,7 +135,17 @@ svg { width: 18px; height: 18px; fill: none; stroke: currentColor; stroke-width:
 
 .empty { color: var(--text-2); font-size: 14px; text-align: center; padding: 32px 12px; }
 
-.sheet { position: fixed; inset: 0; overflow-y: auto; background: var(--base); z-index: 10; animation: sheet-in 0.28s var(--ease); }
+.sheet { position: fixed; inset: 0; overflow-y: auto; overscroll-behavior: contain; -webkit-overflow-scrolling: touch; background: var(--base); z-index: 10; animation: sheet-in 0.28s var(--ease); }
+html.sheet-open, html.sheet-open body { overflow: hidden; }
+/* Sticks flush with the top: the sheet's top padding would otherwise show rows above it. */
+.sheet-head {
+  position: sticky; z-index: 1; background: var(--base); padding-bottom: 12px;
+  top: calc(-14px - env(safe-area-inset-top)); margin-top: calc(-14px - env(safe-area-inset-top)); padding-top: calc(14px + env(safe-area-inset-top));
+}
+.sheet-head .search-bar { position: static; }
+.picker-search { margin-bottom: 10px; }
+.picker-catalog-head { margin-top: 18px; }
+.playlist-row[hidden] { display: none; }
 @keyframes sheet-in { from { opacity: 0; transform: translateY(14px); } }
 .search-bar { display: flex; gap: 12px; align-items: center; position: sticky; top: 0; padding-bottom: 12px; background: var(--base); z-index: 1; }
 .search-field input { flex: 1; min-width: 0; background: none; border: 0; outline: none; color: var(--text); font: inherit; }

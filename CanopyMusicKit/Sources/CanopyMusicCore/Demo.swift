@@ -80,7 +80,13 @@ public struct DemoCatalog: MusicCatalog {
             PlaylistSummary(id: "demo-party", name: "House party", subtitle: "30 songs", kind: .library),
             PlaylistSummary(id: "demo-chill", name: "Sunday chill", subtitle: "12 songs", kind: .library),
             PlaylistSummary(id: "demo-big", name: "Big party", subtitle: "400 songs", kind: .library),
-        ]
+        ] + (ProcessInfo.processInfo.arguments.contains("-manyPlaylists") ? Self.manyPlaylists : [])
+    }
+
+    /// `-manyPlaylists`: a library the size of a big real one, for the web page's picker.
+    static let manyPlaylists: [PlaylistSummary] = (1...520).map { index in
+        let names = ["Café", "Road trip", "Dinner", "Workout", "Sunday", "Après-ski", "Late night", "Focus"]
+        return PlaylistSummary(id: "demo-many-\(index)", name: "\(names[index % names.count]) \(index)", subtitle: "30 songs", kind: .library)
     }
 
     public func searchPlaylists(_ term: String) async throws -> [PlaylistSummary] {

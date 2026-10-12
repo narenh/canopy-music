@@ -80,7 +80,8 @@ Status: built on the `tvos-spike` branch (see "Build status" at the end). Screen
   - `POST /api/display/playback`: allowed while *Playback controls on displays* is on.
 - **Up next** has 100 live songs (in snapshots: draggable, removable). Below them the same list carries on, read-only (no handle or remove, nothing can be dropped there), with the rest of the base playlist's current cycle, from `GET /api/upcoming?offset=&limit=` (compact rows, 100 at most per page). The web page and iPads (hub or display) load 50 more as the end comes into view, and fetch the rows shown again when the queue moves on, so a song simply gains its handle when it becomes live. The Apple TV shows only the rows that fit. The web page only rebuilds rows that changed, animates only rows on screen, and loads row artwork lazily.
 - **Hosts on the web** get new endpoints, all requiring the host key:
-  - `GET /api/host/playlists`: the hub's library.
+  - `GET /api/host/playlists`: the hub's library. The web picker (Change base playlist, and a TV zone's first setup) filters it as you type, ignoring case and accents.
+  - `GET /api/host/playlists/search?q=`: the music service's playlists, shown below the library matches while typing (as on the iPad; not for Spotify).
   - `POST /api/host/playlist`: load a base playlist.
   - `POST /api/host/settings`: zone name, queue and reorder from phones, display controls, Wi‑Fi; any subset (the web sheet saves each change as it's made). Not the iPad's unlock PIN, which is set only on the iPad.
   - `GET /api/host/details`: the Wi‑Fi details and the connected displays. The Wi‑Fi password is never in the snapshots guests get.

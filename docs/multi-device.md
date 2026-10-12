@@ -6,7 +6,7 @@ Status: built on the `tvos-spike` branch (see "Build status" at the end). Screen
 
 - A **zone** is one queue playing in one place. Usually a home has one zone; a big house might have Upstairs and Downstairs.
 - Each zone has exactly one **hub**: the iPad or Apple TV that plays the music. The hub owns the queue, the base playlist, the speakers, the settings and the guest web server.
-- Every other Canopy device that opens the zone is a **display**.
+- Every other Canopy Music device that opens the zone is a **display**.
 - Phones use the web page: guests always, hosts with Host Control.
 
 ### Who can do what

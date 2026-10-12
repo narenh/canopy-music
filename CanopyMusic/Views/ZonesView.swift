@@ -129,7 +129,7 @@ struct CreateZoneView: View {
     private var nameStep: some View {
         VStack(spacing: 18) {
             Text("Name this zone").font(.system(size: 34, weight: .bold))
-            Text("Shown to other Canopy devices on the Wi\u{2011}Fi.")
+            Text("Shown to other Canopy Music devices on the Wi\u{2011}Fi.")
                 .foregroundStyle(.white.opacity(0.6))
             TextField("Zone name", text: $name)
                 .font(.system(size: 20))

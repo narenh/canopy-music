@@ -52,7 +52,7 @@ final class LyricsEasterEgg {
         }
         guard let url = URL(string: "https://lrclib.net/api/get/\(Self.lrclibID)") else { return }
         var request = URLRequest(url: url)
-        request.setValue("Canopy (https://github.com/narenh/canopy-music)", forHTTPHeaderField: "User-Agent")
+        request.setValue("Canopy Music (https://github.com/narenh/canopy-music)", forHTTPHeaderField: "User-Agent")
         struct Record: Decodable { var syncedLyrics: String? }
         guard let (data, _) = try? await URLSession.shared.data(for: request),
               let synced = (try? JSONDecoder().decode(Record.self, from: data))?.syncedLyrics,

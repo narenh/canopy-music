@@ -146,7 +146,7 @@ struct HostView: View {
                     .allowsHitTesting(canStart)
                     .accessibilityHint(canStart ? "" : "Choose a playlist first")
                 } footer: {
-                    Text("To unlock later, press and hold the Canopy logo. Turn on Guided Access (triple-click the top button) so guests can't leave the app.")
+                    Text("To unlock later, press and hold the logo. Turn on Guided Access (triple-click the top button) so guests can't leave the app.")
                 }
             }
             .scrollContentBackground(.hidden)
@@ -421,7 +421,7 @@ private struct SettingsSheet: View {
                 } header: {
                     Text("Zone")
                 } footer: {
-                    Text("Other Canopy devices on the Wi\u{2011}Fi see this zone by name. The PIN is asked for when you press and hold the Canopy logo on the party screen.")
+                    Text("Other Canopy Music devices on the Wi\u{2011}Fi see this zone by name. The PIN is asked for when you press and hold the logo on the party screen.")
                 }
                 .listRowBackground(Color.white.opacity(0.08))
                 Section {

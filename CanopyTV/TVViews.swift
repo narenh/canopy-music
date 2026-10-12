@@ -171,7 +171,7 @@ struct TVConnectionOverlay: View {
                     Text(connection.hasSnapshot ? "Lost connection to \(name)" : "Connecting to \(name)…")
                         .font(.system(size: 40, weight: .bold))
                     if connection.hasSnapshot {
-                        Text("Reconnecting. Make sure \(model.shownZone?.kind == .tv ? "the Apple TV is on" : "the iPad is awake") and Canopy is open.\nPress Menu to leave.")
+                        Text("Reconnecting. Make sure \(model.shownZone?.kind == .tv ? "the Apple TV is on" : "the iPad is awake") and Canopy Music is open.\nPress Menu to leave.")
                             .font(.system(size: 26))
                             .foregroundStyle(.white.opacity(0.7))
                             .multilineTextAlignment(.center)
@@ -201,7 +201,7 @@ struct TVStartView: View {
                     .frame(height: 70)
                 Text("Scan to host")
                     .font(.system(size: 76, weight: .bold))
-                Text("Your phone becomes the remote: pick a playlist, play, pause, skip and reorder. iPads with Canopy on this Wi\u{2011}Fi can show this zone too.")
+                Text("Your phone becomes the remote: pick a playlist, play, pause, skip and reorder. iPads with Canopy Music on this Wi\u{2011}Fi can show this zone too.")
                     .font(.system(size: 34))
                     .foregroundStyle(.white.opacity(0.7))
                     .frame(maxWidth: 820, alignment: .leading)

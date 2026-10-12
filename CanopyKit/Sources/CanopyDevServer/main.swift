@@ -16,7 +16,7 @@ guard let (server, task) = await PartyServer.start(session: session) else { fata
 let hostname = FriendlyHostname(name: "music-dev")
 let ip = LocalNetwork.lanAddress() ?? "127.0.0.1"
 let registered = hostname.register(address: ip)
-print("Canopy dev server: \(server.url(host: "localhost")!) · LAN \(server.url(host: ip)!)")
+print("Canopy Music dev server: \(server.url(host: "localhost")!) · LAN \(server.url(host: ip)!)")
 print(registered ? "Also at \(server.url(host: hostname.hostname)!)" : "mDNS hostname registration failed")
 try await task.value
 #else

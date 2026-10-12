@@ -176,7 +176,8 @@ public final class PartyServer: Sendable {
             let body = try JSONDecoder.api.decode(PlaylistBody.self, from: await request.bodyData)
             guard await session.isHost(key: body.key) else { return HTTPResponse(statusCode: .forbidden) }
             do {
-                try await session.load(playlist: body.playlist)
+                // Shuffled before anything plays, so the first song is random too.
+                try await session.load(playlist: body.playlist, shuffled: body.shuffle == true)
                 if body.play == true { try await session.play() }
             } catch {
                 return .serviceFailed(error)
@@ -292,6 +293,8 @@ struct PlaylistBody: Decodable {
     var key: String
     var playlist: PlaylistSummary
     var play: Bool?
+    /// Shuffles the playlist as it loads (the web pickers' Shuffle switch).
+    var shuffle: Bool?
 }
 
 struct PlaylistLoaded: Codable {

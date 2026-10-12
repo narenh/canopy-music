@@ -256,6 +256,32 @@ struct HostSettingsTests {
         #expect(hub.snapshot().skippedOnLoad == nil)
     }
 
+    /// The web pickers' Shuffle switch: the playlist loads shuffled before anything plays, so the
+    /// first song is random too; without it, it plays in order.
+    @Test func choosingAPlaylistCanShuffleIt() async throws {
+        let hub = PartySession(catalog: DemoCatalog(), engine: DemoPlaybackEngine())
+        hub.hostKey = "secret"
+        let (server, task) = try #require(await PartyServer.start(session: hub, ports: [18799]))
+        defer { task.cancel(); Task { await server.stop() } }
+        let big = try #require(try await DemoCatalog().libraryPlaylists().first { $0.id == "demo-big" })
+        let json = try #require(try JSONSerialization.jsonObject(with: JSONEncoder.api.encode(big)))
+        let original = DemoCatalog.bigTracks.map(\.id)
+
+        let (code, _) = try await post(18799, "/api/host/playlist", ["key": "secret", "playlist": json, "play": true, "shuffle": true])
+        #expect(code == 200)
+        let shuffled = hub.state.playlist.map(\.id)
+        #expect(Set(shuffled) == Set(original))
+        #expect(shuffled != original)
+        // The first song is the shuffled order's first, and Up next follows it.
+        #expect(hub.state.current?.track.id == shuffled.first)
+        #expect(hub.state.upNext.prefix(5).map(\.track.id) == Array(shuffled.dropFirst().prefix(5)))
+
+        let (again, _) = try await post(18799, "/api/host/playlist", ["key": "secret", "playlist": json, "play": true])
+        #expect(again == 200)
+        #expect(hub.state.playlist.map(\.id) == original)
+        #expect(hub.state.current?.track.id == original.first)
+    }
+
     @Test func forgettingHostsGivesTheAskerANewKey() async throws {
         let hub = PartySession(catalog: DemoCatalog(), engine: DemoPlaybackEngine())
         hub.hostKey = "old"

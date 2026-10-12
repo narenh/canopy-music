@@ -316,8 +316,9 @@ public final class PartySession {
     // MARK: Host actions
 
     /// Starts over with a new base playlist: stops playback and clears the queue and requests.
-    /// Nothing plays until `play()`.
-    public func load(playlist: PlaylistSummary) async throws {
+    /// Nothing plays until `play()`. `shuffled` shuffles it in the same change, so the first song
+    /// is random too and nobody sees it in its original order first.
+    public func load(playlist: PlaylistSummary, shuffled: Bool = false) async throws {
         guard remote == nil else { return }
         let tracks = try await catalog.tracks(in: playlist)
         let skipped = await catalog.loadReport(for: playlist)?.skipped ?? []
@@ -326,7 +327,10 @@ public final class PartySession {
         loadedItemID = nil
         isPlaying = false
         skippedOnLoad = skipped
-        mutate { $0.load(playlist: tracks, name: playlist.name) }
+        mutate {
+            $0.load(playlist: tracks, name: playlist.name)
+            if shuffled { $0.shufflePlaylist() }
+        }
     }
 
     public func shufflePlaylist() {

@@ -144,12 +144,15 @@ struct TVZoneBadge: View {
 
     var body: some View {
         if let zone = model.shownZone {
-            Label(zone.name, systemImage: zone.kind == .tv ? "appletv" : "ipad.landscape")
-                .font(.system(size: 22, weight: .semibold))
-                .padding(.horizontal, 18)
-                .padding(.vertical, 9)
-                .background(.white.opacity(0.14), in: Capsule())
-                .foregroundStyle(.white.opacity(0.85))
+            // Plain text, not a capsule, so it can't be mistaken for a requester pill.
+            HStack(spacing: 12) {
+                Image(systemName: zone.kind == .tv ? "appletv.fill" : "ipad.landscape")
+                    .font(.system(size: 22, weight: .medium))
+                Text(zone.name)
+                    .font(.system(size: 24, weight: .medium))
+                    .lineLimit(1)
+            }
+            .foregroundStyle(.white.opacity(0.5))
         }
     }
 }

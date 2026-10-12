@@ -233,7 +233,7 @@ struct TVStartView: View {
             // Big enough to carry a symbol through it (the iPad's Wi‑Fi code does the same).
             Group {
                 if let host = model.hostURL?.absoluteString {
-                    HalftoneQRCode(payload: host, symbol: "music.note", symbolScale: 0.55, dotScale: 0.7)
+                    HalftoneQRCode(payload: host, image: Image("MusicNote"), symbolScale: 0.5, dotScale: 0.7)
                 } else {
                     ProgressView()
                 }

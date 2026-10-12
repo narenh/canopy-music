@@ -123,13 +123,30 @@ struct StyledQRCode: View {
 /// sample module centers, so the code still reads while the symbol stays big.
 struct HalftoneQRCode: View {
     let payload: String
-    let symbol: String
+    /// An SF Symbol, or a template image.
+    let symbol: Image
     /// Symbol width as a share of the code's width.
     var symbolScale: CGFloat = 0.55
     /// Size of the punched dots inside the symbol, as a share of a module.
     var dotScale: CGFloat = 0.55
     var foreground: Color = .white
     var symbolColor: Color = .white
+
+    init(payload: String, symbol: String, symbolScale: CGFloat = 0.55, dotScale: CGFloat = 0.55,
+         foreground: Color = .white, symbolColor: Color = .white) {
+        self.init(payload: payload, image: Image(systemName: symbol), symbolScale: symbolScale, dotScale: dotScale,
+                  foreground: foreground, symbolColor: symbolColor)
+    }
+
+    init(payload: String, image: Image, symbolScale: CGFloat = 0.55, dotScale: CGFloat = 0.55,
+         foreground: Color = .white, symbolColor: Color = .white) {
+        self.payload = payload
+        symbol = image
+        self.symbolScale = symbolScale
+        self.dotScale = dotScale
+        self.foreground = foreground
+        self.symbolColor = symbolColor
+    }
 
     var body: some View {
         if let matrix = QRMatrix(payload, correction: "H"), let mask = Self.mask(symbol, modules: matrix.size, scale: symbolScale) {
@@ -143,7 +160,7 @@ struct HalftoneQRCode: View {
     private func draw(_ matrix: QRMatrix, mask: [Bool], in context: inout GraphicsContext, size: CGSize) {
         let unit = size.width / CGFloat(matrix.size)
         // The symbol, big and centered, fitted the same way as `mask` (aspect fit in a square).
-        var image = context.resolve(Image(systemName: symbol))
+        var image = context.resolve(symbol)
         image.shading = .color(symbolColor)
         let box = size.width * symbolScale
         let fit = min(box / max(image.size.width, 1), box / max(image.size.height, 1))
@@ -187,11 +204,11 @@ struct HalftoneQRCode: View {
     }
 
     /// Which modules have their center inside the symbol, from a small rendering of it.
-    @MainActor static func mask(_ symbol: String, modules: Int, scale: CGFloat) -> [Bool]? {
+    @MainActor static func mask(_ symbol: Image, modules: Int, scale: CGFloat) -> [Bool]? {
         let perModule = 8
         let side = CGFloat(modules * perModule)
         let inner = side * scale
-        let view = Image(systemName: symbol).resizable().scaledToFit()
+        let view = symbol.resizable().scaledToFit()
             .frame(width: inner, height: inner)
             .frame(width: side, height: side)
         let renderer = ImageRenderer(content: view)

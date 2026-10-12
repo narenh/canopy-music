@@ -37,8 +37,9 @@ struct AppleMusicCatalog: MusicCatalog {
 
     /// Apple Music's search matches whole words, so a half-typed last word ("beac") finds junk.
     /// Its typing suggestions complete it ("…beacons") and come with their own top songs, like the
-    /// Music app's search. In order, without duplicates: those top songs, matches from your
-    /// library, a search for the completed phrase, then a search for exactly what was typed.
+    /// Music app's search. Gathered without duplicates from those top songs, matches from your
+    /// library, a search for the completed phrase and one for exactly what was typed, then ranked
+    /// by how well they match (`SearchRanking`).
     func searchSongs(_ term: String) async throws -> [QueueTrack] {
         async let librarySongs = try? searchLibrarySongs(term)
         async let typedSongs = catalogSearch(term)
@@ -57,9 +58,10 @@ struct AppleMusicCatalog: MusicCatalog {
         #endif
         var seen = Set<MusicItemID>()
         let unique = (topSongs + library + completedSongs + typed).filter { seen.insert($0.id).inserted }
-        let results = Array(unique.prefix(40))
-        await cache.store(results)
-        return results.map(QueueTrack.init)
+        await cache.store(unique)
+        // Apple ranks by popularity; put what matches the typed words first (your library ahead).
+        let ranked = SearchRanking.rank(unique.map(QueueTrack.init), for: term, library: Set(library.map(\.id.rawValue)))
+        return Array(ranked.prefix(40))
     }
 
     private func catalogSearch(_ term: String) async throws -> [Song] {

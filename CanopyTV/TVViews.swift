@@ -148,7 +148,7 @@ struct TVZoneBadge: View {
             HStack(spacing: 12) {
                 Image(systemName: zone.kind == .tv ? "appletv.fill" : "ipad.landscape")
                     .font(.system(size: 22, weight: .medium))
-                Text(zone.name)
+                Text("Playing from \(zone.name)")
                     .font(.system(size: 24, weight: .medium))
                     .lineLimit(1)
             }

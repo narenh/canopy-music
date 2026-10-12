@@ -199,6 +199,17 @@ final class TVModel {
         UIApplication.shared.isIdleTimerDisabled = false
     }
 
+    /// A Wi‑Fi join code shown next to the guest QR. The TV has no settings screens, so for now
+    /// only the debug `-fakeWifi` flag sets it.
+    var wifiPayload: String? {
+        #if DEBUG
+        if ProcessInfo.processInfo.arguments.contains("-fakeWifi") {
+            return LocalNetwork.wifiJoinPayload(ssid: "Canopy Guest", password: "summer-party-2026")
+        }
+        #endif
+        return nil
+    }
+
     /// The display's guest QR points at its hub.
     var shownGuestURL: URL? {
         role == .display ? session.lanAddress.flatMap { URL(string: "http://\($0)") } : guestURL

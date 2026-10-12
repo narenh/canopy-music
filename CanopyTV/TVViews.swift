@@ -251,6 +251,8 @@ struct TVPartyView: View {
                     .onGeometryChange(for: CGFloat.self, of: \.size.height) { footerHeight = $0 }
                 }
                 .frame(width: art, alignment: .leading)
+                // Centered in whatever the sidebar leaves.
+                .frame(maxWidth: .infinity)
 
                 // Up next + how to join.
                 VStack(alignment: .leading, spacing: 18) {
@@ -275,6 +277,7 @@ struct TVPartyView: View {
                     }
                     TVJoinCard()
                 }
+                .frame(width: 820)
                 .padding(.leading, 56)
                 .frame(maxHeight: .infinity)
                 // A sidebar running off the top, bottom and right edges.
@@ -332,7 +335,15 @@ struct TVJoinCard: View {
                 Text(Self.display(model.shownFriendlyURL ?? model.shownGuestURL))
                     .font(.system(size: 30, weight: .semibold).monospaced())
             }
+            .lineLimit(1)
+            .layoutPriority(1)
             Spacer(minLength: 0)
+            if let wifi = model.wifiPayload {
+                // Same as the iPad's: the Wi‑Fi symbol says what it is.
+                HalftoneQRCode(payload: wifi, symbol: "wifi", symbolScale: 0.6, dotScale: 0.7)
+                    .frame(width: 116, height: 116)
+                    .opacity(0.75)
+            }
         }
         .padding(26)
         .background(.white.opacity(0.08), in: RoundedRectangle(cornerRadius: 30, style: .continuous))

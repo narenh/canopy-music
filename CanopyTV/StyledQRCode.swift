@@ -1,0 +1,1 @@
+../CanopyMusic/Views/StyledQRCode.swift

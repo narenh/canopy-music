@@ -345,6 +345,7 @@ private struct DecodeBadge: View {
     }
 }
 
+#if os(iOS)
 /// `-backgroundFor "<search>"`: the party background alone for the first Apple Music match.
 struct BackgroundPreview: View {
     let term: String
@@ -374,4 +375,5 @@ struct BackgroundPreview: View {
         }
     }
 }
+#endif
 #endif

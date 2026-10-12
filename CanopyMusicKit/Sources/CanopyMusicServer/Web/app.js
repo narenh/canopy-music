@@ -113,6 +113,8 @@
   }
   let hostKey = savedHostKey();
   let hostPaired = false;
+  /** Set once the hub has answered whether this phone's host key is good. */
+  let hostChecked = !hostKey;
   let hostMode = store.get("canopymusic.hostMode") !== "guest";
   const hosting = () => hostPaired && hostMode;
 
@@ -905,12 +907,19 @@
   function renderHost() {
     const on = hosting();
     $("settings-btn").hidden = !on;
-    if (!on) { for (const id of ["setup", "settings-modal", "edit-modal", "invite-modal", "playlists"]) $(id).hidden = true; return; }
-    // A TV zone has no screens of its own for setup: the first host does it here.
+    if (!on) {
+      for (const id of ["setup", "settings-modal", "edit-modal", "invite-modal", "playlists"]) $(id).hidden = true;
+      if (hostChecked) askNameIfNeeded();
+      return;
+    }
+    // A TV zone has no screens of its own for setup: the first host does it here (with their
+    // name, instead of the name prompt).
     const needsSetup = snap.hubKind === "tv" && !snap.playlistName && !setupDismissed;
     if (needsSetup && $("setup").hidden) openSetup();
     // Kept open while starting, until the hub answers.
     if (!needsSetup && !setupStarting) $("setup").hidden = true;
+    // The setup sheet went away without this phone starting it (another host did): ask now.
+    if (!needsSetup) askNameIfNeeded();
   }
 
   async function loadPlaylists() {
@@ -1074,7 +1083,10 @@
   $("playlists-done").addEventListener("click", () => { $("playlists").hidden = true; });
 
   async function openSetup() {
+    // The setup sheet asks for this phone's name itself.
+    if (!$("name-modal").hidden) { $("name-modal").hidden = true; }
     $("setup").hidden = false;
+    $("setup-you").value = myName || "";
     $("setup-name").value = snap.zoneName || "";
     $("setup-sub").textContent = `You're hosting ${snap.hubKind === "tv" ? "the Apple TV" : "this zone"}. Guests can join once music is playing.`;
     await setupPicker.open();
@@ -1097,6 +1109,8 @@
   $("setup-start").addEventListener("click", async () => {
     if (!setupPick || setupStarting) return;
     setupBusy(true);
+    // This phone's name, saved as the name prompt saves it.
+    saveMyName($("setup-you").value);
     try {
       const name = $("setup-name").value.trim();
       if (name) await api("/api/host/settings", { key: hostKey, zoneName: name });
@@ -1372,22 +1386,35 @@
   }
   $("name-chip").addEventListener("click", askName);
   $("name-skip").addEventListener("click", closeName);
-  $("name-form").addEventListener("submit", (event) => {
-    event.preventDefault();
-    const name = $("name-input").value.trim().slice(0, 24);
+  function saveMyName(raw) {
+    const name = raw.trim().slice(0, 24);
     myName = name || null;
     store.set("canopymusic.name", myName || "");
+    store.set("canopymusic.nameAsked", "1");
+    updateNameChip();
+  }
+  $("name-form").addEventListener("submit", (event) => {
+    event.preventDefault();
+    saveMyName($("name-input").value);
     closeName();
   });
+  /** The name prompt, once per phone, unless the setup sheet (which asks itself) is showing. */
+  function askNameIfNeeded() {
+    if (store.get("canopymusic.nameAsked") || !$("name-modal").hidden || !$("setup").hidden) return;
+    askName();
+  }
 
   // MARK: Start
 
   updateNameChip();
-  if (!store.get("canopymusic.nameAsked")) askName();
+  // A phone with a host key waits to hear from the hub first: a new Apple TV zone's first host
+  // gets the setup sheet, which asks for the name itself.
+  if (!hostKey) askNameIfNeeded();
   if (hostKey) {
     api("/api/host/check", { key: hostKey, clientId })
       .then(() => {
         hostPaired = true;
+        hostChecked = true;
         // The old single key turned out to be this hub's: keep it under this hub from now on.
         if (hubID && !hostKeys()[hubID]) { saveHostKey(hostKey); store.remove("canopymusic.hostKey"); }
         updateNameChip();
@@ -1395,6 +1422,8 @@
         openSettingsFromLink();
       })
       .catch((error) => {
+        hostChecked = true;
+        if (snap) render(); else askNameIfNeeded();
         // Only a refusal means the key was revoked; a network hiccup keeps it.
         // Only this hub's key goes; an old single key it refused may be another hub's, so it stays.
         if (error.message === "403") {

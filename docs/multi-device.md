@@ -71,7 +71,7 @@ Status: built on the `tvos-spike` branch (see "Build status" at the end). Screen
 3. **Create a new zone** makes this device the hub:
    - **iPad:** name the zone (defaults to the device name), set an optional host PIN ("Skip" allowed), then choose the service if one isn't set up yet, then host mode as today.
    - A new zone always starts empty. If this device still has a zone (the Resume row), it asks first ("This ends Upstairs and clears its queue."), and ends it, as End does, once the new zone is created. Resume is the way back to the old one.
-   - **Apple TV:** straight to **Scan to host**. The first phone to scan gets Host Control and sets the zone up on the web page: name and base playlist. A TV hub has no settings screens; Menu only offers **End <zone>**. Apple Music only.
+   - **Apple TV:** straight to **Scan to host**. The first phone to scan gets Host Control and sets the zone up on the web page, in one sheet: their own name (optional, in place of the usual name prompt), the zone name and the base playlist. If another host starts the zone first, the usual name prompt shows then. A TV hub has no settings screens; Menu only offers **End <zone>** (and saving the party, below). Apple Music only.
 
 ## Network
 

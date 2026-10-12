@@ -71,7 +71,7 @@ Status: built on the `tvos-spike` branch (see "Build status" at the end). Screen
 3. **Create a new zone** makes this device the hub:
    - **iPad:** name the zone (defaults to the device name), set an optional host PIN ("Skip" allowed), then choose the service if one isn't set up yet, then host mode as today.
    - A new zone always starts empty. If this device still has a zone (the Resume row), it asks first ("This ends Upstairs and clears its queue."), and ends it, as End does, once the new zone is created. Resume is the way back to the old one.
-   - **Apple TV:** straight to **Scan to host**. The first phone to scan gets Host Control and sets the zone up on the web page, in one sheet: their own name (optional, in place of the usual name prompt), the zone name and the base playlist. If another host starts the zone first, the usual name prompt shows then. A TV hub has no settings screens; Menu only offers **End <zone>** (and saving the party, below). Apple Music only.
+   - **Apple TV:** straight to **Scan to host**. The first phone to scan gets Host Control and sets the zone up on the web page, in one sheet: their own name (optional, in place of the usual name prompt), the zone name and the base playlist. If another host starts the zone first, the usual name prompt shows then. Once a phone has scanned, the TV says "Continue on your phone" with a spinner where the code was, and goes straight to the party screen when a playlist is picked. Until then, guests' pages and TV displays of the zone say "Getting ready. The host is picking the music." (displays with the join card) instead of an empty party screen. A TV hub has no settings screens; Menu only offers **End <zone>** (and saving the party, below). Apple Music only.
 
 ## Network
 
@@ -91,6 +91,7 @@ Status: built on the `tvos-spike` branch (see "Build status" at the end). Screen
   - `POST /api/host/save-playlist`: saves the party as a playlist (`name`, `onlyRequests`). Answers `{saved: n}`, or an error with `{error: "…"}` (409 when nothing matching has played, 502 when the service failed). `GET /api/host/details` also carries `party`: the suggested name, how many songs would be saved either way, and where it saves.
   - `GET /api/host/invite.png`: the "Add another host" QR, rendered by the hub.
 - **Host keys are kept per hub:** snapshots carry the hub's device ID (`hubID`), and the page keeps one key per hub. A hub that refuses a key only drops its own, so a phone that's a host of two zones (or of a zone whose address another hub later takes) stays a host of both. Keys move along with the phone's ID and name when the page moves to the friendly address.
+- **The web page's splash:** until the page has settled on its address (the hop from the IP to the `.local` name included) and has the zone's first snapshot, it shows the "canopy music" lockup on the Venus background with "Connecting to <zone>" ("Connecting…" before the name is known), never the empty party screen. If the connection drops later, a slim "Reconnecting…" bar sits over what was showing. The lockup (`logo-music.png`) is rendered from the app's logo and Montserrat Bold to match the marketing header, since only a flattened copy of it existed.
 - **If a hub disappears,** displays show "Lost connection to <zone>" and keep retrying. The queue is saved on the hub.
 
 ## Decisions taken while building (review)

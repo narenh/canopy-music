@@ -23,13 +23,20 @@ struct TVRootView: View {
                 TVZoneListView()
                     .transition(.opacity)
             case .hub:
-                if model.hostJoined {
-                    TVPartyView().transition(.opacity)
-                } else {
+                // Straight to the party once a host has picked the music.
+                if model.session.isWaitingForSetup {
                     TVStartView().transition(.opacity)
+                } else {
+                    TVPartyView().transition(.opacity)
                 }
             case .display:
-                TVPartyView()
+                Group {
+                    if model.session.isWaitingForSetup {
+                        TVGettingReadyView()
+                    } else {
+                        TVPartyView()
+                    }
+                }
                     // Blurred behind the connection message so it reads.
                     .blur(radius: model.isWaitingForHub ? 28 : 0)
                     .overlay { TVConnectionOverlay() }
@@ -328,7 +335,8 @@ struct TVConnectionOverlay: View {
 // MARK: - Start: take host control
 
 /// TV-led parties start here: the first phone to scan becomes the host (and can add more hosts
-/// later from its own page).
+/// later from its own page). Once it has, the code gives way to a spinner while they set the zone
+/// up on the phone.
 struct TVStartView: View {
     @Environment(TVModel.self) private var model
 
@@ -339,7 +347,7 @@ struct TVStartView: View {
                     .resizable()
                     .scaledToFit()
                     .frame(height: 70)
-                Text("Scan to host")
+                Text(model.hostJoined ? "Continue on your phone" : "Scan to host")
                     .font(.system(size: 76, weight: .bold))
                     .holdsRemoteFocus()
                 Text("Use your phone to set up this zone. Other devices on this network with Canopy Music can join it.")
@@ -349,15 +357,54 @@ struct TVStartView: View {
             }
             // Big enough to carry a symbol through it (the iPad's Wi‑Fi code does the same).
             Group {
-                if let host = model.hostURL?.absoluteString {
+                if !model.hostJoined, let host = model.hostURL?.absoluteString {
                     HalftoneQRCode(payload: host, image: Image("MusicNote"), symbolScale: 0.5, dotScale: 0.7)
                 } else {
                     ProgressView()
+                        .scaleEffect(2)
                 }
             }
             .frame(width: 440, height: 440)
         }
         .foregroundStyle(.white)
+        .animation(.easeInOut(duration: 0.4), value: model.hostJoined)
+    }
+}
+
+/// A display showing an Apple TV zone whose host is still picking the music: no empty party
+/// screen, just that, and how guests can join.
+struct TVGettingReadyView: View {
+    @Environment(TVModel.self) private var model
+
+    var body: some View {
+        VStack(spacing: 0) {
+            Spacer(minLength: 0)
+            Image("CanopyLogo")
+                .resizable()
+                .scaledToFit()
+                .frame(height: 70)
+                .padding(.bottom, 44)
+            ProgressView()
+                .scaleEffect(1.4)
+                .padding(.bottom, 36)
+            Text("Getting ready")
+                .font(.system(size: 76, weight: .bold))
+                .holdsRemoteFocus()
+            Text("The host is picking the music.")
+                .font(.system(size: 34))
+                .foregroundStyle(.white.opacity(0.7))
+                .padding(.top, 14)
+            TVZoneBadge()
+                .padding(.top, 28)
+            Spacer(minLength: 0)
+            if model.session.phonesCanQueue {
+                TVJoinCard()
+                    .frame(width: 760)
+                    .padding(.bottom, 60)
+            }
+        }
+        .foregroundStyle(.white)
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
 }
 

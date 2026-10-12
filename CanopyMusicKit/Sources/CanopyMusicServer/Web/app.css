@@ -167,7 +167,23 @@ html.sheet-open, html.sheet-open body { overflow: hidden; }
   width: max-content; max-width: calc(100vw - 40px); text-align: center;
 }
 .toast.shown { opacity: 1; transform: translate(-50%, 0); }
-.offline { position: fixed; top: calc(env(safe-area-inset-top) + 8px); left: 50%; transform: translateX(-50%); background: #b3261e; color: #fff; font-size: 13px; padding: 6px 12px; border-radius: 999px; z-index: 40; }
+/* A slim bar over whatever was showing, which stays. */
+.offline { position: fixed; top: 0; left: 0; right: 0; padding: calc(env(safe-area-inset-top) + 5px) 12px 5px; background: rgba(20,20,20,.82); -webkit-backdrop-filter: blur(12px); backdrop-filter: blur(12px); color: var(--text-2); font-size: 13px; font-weight: 600; display: flex; align-items: center; justify-content: center; gap: 8px; z-index: 40; }
+.offline[hidden] { display: none; }
+.offline .spinner { width: 12px; height: 12px; border-width: 1.5px; }
+
+.splash { position: fixed; inset: 0; z-index: 100; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 30px; padding: 24px; background: #3a1236 url(/splash.jpg) center / cover no-repeat; color: #fff; transition: opacity .35s ease; }
+.splash.gone { opacity: 0; pointer-events: none; }
+.splash[hidden] { display: none; }
+.splash-logo { width: min(62vw, 300px); height: auto; }
+.splash-status { display: flex; align-items: center; gap: 10px; font-size: 16px; font-weight: 600; color: rgba(255,255,255,.85); text-align: center; margin: 0; }
+
+.getting-ready { text-align: center; padding: 18vh 24px 0; }
+.getting-ready[hidden] { display: none; }
+.getting-ready h2 { font-size: 24px; margin: 14px 0 6px; }
+.getting-ready p { color: var(--text-2); font-size: 15px; margin: 0; }
+.getting-ready .spinner { display: inline-block; width: 26px; height: 26px; color: var(--text-2); }
+#home.waiting > :not(.top):not(#getting-ready) { display: none !important; }
 
 .modal { position: fixed; inset: 0; background: rgba(0,0,0,.6); display: grid; place-items: center; padding: 16px; z-index: 50; }
 /* Opened from the settings sheet, so on top of it. */

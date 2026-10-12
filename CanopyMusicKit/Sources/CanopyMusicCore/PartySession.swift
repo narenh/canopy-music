@@ -245,6 +245,12 @@ public final class PartySession {
 
     public var hasParty: Bool { state.current != nil || !state.upNext.isEmpty }
 
+    /// An Apple TV zone whose host hasn't picked the music yet: no base playlist and nothing queued.
+    /// The TV shows "Scan to host" or "Continue on your phone", displays and guests "Getting ready".
+    public var isWaitingForSetup: Bool {
+        hubKind == .tv && state.playlistName == nil && !hasParty
+    }
+
     // MARK: Saving the party
 
     /// Every song that has played in this zone (hub only), for saving it as a playlist.

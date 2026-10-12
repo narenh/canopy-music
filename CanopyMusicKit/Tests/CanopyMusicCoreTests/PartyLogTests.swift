@@ -214,6 +214,20 @@ private func item(_ id: String, by requester: Requester? = nil) -> QueueItem {
         #expect(catalog.saved.isEmpty)
     }
 
+    /// "Scan to host" / "Continue on your phone" / "Getting ready" until a TV zone's host picks music.
+    @Test func aTVZoneWaitsForItsHostToPickTheMusic() async throws {
+        let session = PartySession(catalog: StubCatalog(ids: ["a", "b"]), engine: FakeEngine())
+        #expect(!session.isWaitingForSetup) // not a hub yet
+        session.configureHub(kind: .tv, zoneName: "Den", serviceName: "Demo")
+        #expect(session.isWaitingForSetup)
+        try await session.load(playlist: base)
+        #expect(!session.isWaitingForSetup)
+
+        let ipad = PartySession(catalog: StubCatalog(ids: []), engine: FakeEngine())
+        ipad.configureHub(kind: .ipad, zoneName: "Kitchen", serviceName: "Demo")
+        #expect(!ipad.isWaitingForSetup)
+    }
+
     @Test func aBlankNameGetsTheDate() async throws {
         let catalog = SavingCatalog(ids: ["a"])
         let session = PartySession(catalog: catalog, engine: FakeEngine())

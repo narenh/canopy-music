@@ -29,6 +29,7 @@
   // before saving anything, so everything lives under that one address.
   let initial = null;
   try { initial = await (await fetch("/api/state")).json(); } catch {}
+  if (initial && initial.zoneName) $("splash-text").textContent = `Connecting to ${initial.zoneName}`;
   // Which hub this is (older hubs don't say), for keeping host keys per hub.
   const hubID = (initial && initial.hubID) || null;
   await (async () => {
@@ -205,6 +206,7 @@
     if (snap && next.version < snap.version) return;
     snap = next;
     render();
+    hideSplash();
     openSettingsFromLink();
     followRename();
   }
@@ -234,9 +236,22 @@
     $("settings-btn").click();
   }
 
+  function hideSplash() {
+    const splash = $("splash");
+    if (splash.hidden || splash.classList.contains("gone")) return;
+    splash.classList.add("gone");
+    setTimeout(() => { splash.hidden = true; }, 400);
+  }
+
+  /** An Apple TV zone whose host hasn't picked the music yet (hosts get the setup sheet). */
+  const waitingForSetup = () => snap.hubKind === "tv" && !snap.playlistName && !snap.current && !snap.upNext.length;
+
   function render() {
     const current = snap.current;
     applyTheme(current && current.track);
+    const waiting = waitingForSetup() && !hosting();
+    $("home").classList.toggle("waiting", waiting);
+    $("getting-ready").hidden = !waiting;
 
     // The host can turn off reordering from phones (host control can always reorder).
     document.querySelector(".list-head .hint").hidden = snap.canReorder === false && !hosting();

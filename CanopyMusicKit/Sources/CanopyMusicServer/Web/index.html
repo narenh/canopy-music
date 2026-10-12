@@ -12,6 +12,12 @@
 <link rel="stylesheet" href="/app.css">
 </head>
 <body>
+<!-- Until the page knows where it's staying and has the zone's first snapshot (no empty party
+     screen on the way, including the hop to the .local address). -->
+<div id="splash" class="splash" aria-live="polite">
+  <img class="splash-logo" src="/logo-music.png" alt="Canopy Music">
+  <p class="splash-status"><span class="spinner"></span><span id="splash-text">Connecting…</span></p>
+</div>
 <div id="backdrop" aria-hidden="true"><img id="backdrop-img" alt=""></div>
 
 <main id="home">
@@ -31,6 +37,13 @@
       </button>
     </div>
   </header>
+
+  <!-- Guests, while an Apple TV zone's host is still setting it up. -->
+  <section class="getting-ready" id="getting-ready" hidden>
+    <span class="spinner"></span>
+    <h2>Getting ready</h2>
+    <p>The host is picking the music.</p>
+  </section>
 
   <p class="queue-off" id="queue-off" hidden>The host has turned off queueing from phones.</p>
 
@@ -194,7 +207,7 @@
 </section>
 
 <div id="toast" class="toast" role="status" aria-live="polite"></div>
-<div id="offline" class="offline" hidden>Reconnecting…</div>
+<div id="offline" class="offline" hidden><span class="spinner"></span>Reconnecting…</div>
 
 <div id="name-modal" class="modal" hidden>
   <form class="modal-card" id="name-form">

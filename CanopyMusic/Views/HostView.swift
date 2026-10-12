@@ -110,6 +110,23 @@ struct HostView: View {
                 }
                 .listRowBackground(Color.white.opacity(0.08))
 
+                // Other Canopy devices showing this zone (docs/multi-device.md).
+                if !model.session.displays.isEmpty {
+                    Section("Connected") {
+                        ForEach(model.session.displays) { display in
+                            Label {
+                                VStack(alignment: .leading, spacing: 2) {
+                                    Text(display.name)
+                                    Text("Display").font(.footnote).foregroundStyle(.secondary)
+                                }
+                            } icon: {
+                                Image(systemName: display.kind == .tv ? "appletv" : "ipad.landscape")
+                            }
+                        }
+                    }
+                    .listRowBackground(Color.white.opacity(0.08))
+                }
+
                 Section {
                     Button {
                         Task {
@@ -323,6 +340,12 @@ private struct SettingsSheet: View {
     /// Edited locally and applied on return or when the sheet closes, so the network name isn't
     /// re-announced on every keystroke.
     @State private var localNameDraft = ""
+    @State private var zoneNameDraft = ""
+
+    private func commitZoneName() {
+        let name = zoneNameDraft.trimmingCharacters(in: .whitespacesAndNewlines)
+        if name.isEmpty { zoneNameDraft = model.zoneName } else if name != model.zoneName { model.zoneName = String(name.prefix(40)) }
+    }
 
     var body: some View {
         @Bindable var model = model
@@ -385,12 +408,28 @@ private struct SettingsSheet: View {
                 }
                 .listRowBackground(Color.white.opacity(0.08))
                 Section {
+                    HStack {
+                        Text("Zone name")
+                        Spacer(minLength: 16)
+                        TextField(UIDevice.current.name, text: $zoneNameDraft)
+                            .multilineTextAlignment(.trailing)
+                            .submitLabel(.done)
+                            .onSubmit { commitZoneName() }
+                    }
                     SecureField("Unlock PIN (optional)", text: $model.hostPIN)
                         .keyboardType(.numberPad)
                 } header: {
-                    Text("Host")
+                    Text("Zone")
                 } footer: {
-                    Text("Asked for when you press and hold the Canopy logo on the party screen.")
+                    Text("Other Canopy devices on the Wi\u{2011}Fi see this zone by name. The PIN is asked for when you press and hold the Canopy logo on the party screen.")
+                }
+                .listRowBackground(Color.white.opacity(0.08))
+                Section {
+                    Toggle("Playback controls on displays", isOn: $model.displaysCanControl)
+                } header: {
+                    Text("Displays")
+                } footer: {
+                    Text("Play/pause, skip and scrubbing on other iPads and Apple TVs showing this zone. Reordering follows Reorder from phones.")
                 }
                 .listRowBackground(Color.white.opacity(0.08))
                 Section {
@@ -430,10 +469,25 @@ private struct SettingsSheet: View {
                     Text("Music Service")
                 }
                 .listRowBackground(Color.white.opacity(0.08))
+                Section {
+                    Button("Stop This Zone", role: .destructive) {
+                        dismiss()
+                        model.stopHosting()
+                    }
+                } footer: {
+                    Text("Stops the music and the phone page here and goes back to the zone list, where you can join another zone or resume this one.")
+                }
+                .listRowBackground(Color.white.opacity(0.08))
             }
             .scrollContentBackground(.hidden)
-            .onAppear { localNameDraft = model.localName }
-            .onDisappear { model.setLocalName(localNameDraft) }
+            .onAppear {
+                localNameDraft = model.localName
+                zoneNameDraft = model.zoneName
+            }
+            .onDisappear {
+                model.setLocalName(localNameDraft)
+                commitZoneName()
+            }
             .onChange(of: model.localName) { _, name in localNameDraft = name }
             .navigationTitle("Settings")
             .navigationBarTitleDisplayMode(.inline)

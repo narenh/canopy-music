@@ -123,18 +123,22 @@ struct RootView: View {
             return (item, lines)
         }
         Group {
-            if model.needsOnboarding {
-                OnboardingView()
+            switch model.zoneRole {
+            case .choosing:
+                ZoneListView()
                     .transition(.opacity)
-            } else if model.isLocked {
+            case .creating:
+                CreateZoneView()
+                    .transition(.opacity)
+            case .display:
                 PartyView()
                     .transition(.opacity)
-            } else {
-                HostView()
-                    .transition(.opacity)
+            case .hub:
+                hubContent
             }
         }
         .overlay { debugOverlay }
+        .animation(.easeInOut(duration: 0.4), value: model.zoneRole)
         .animation(.easeInOut(duration: 0.4), value: model.isLocked)
         .animation(.easeInOut(duration: 0.5), value: model.needsOnboarding)
         .tint(model.provider.accent)
@@ -148,6 +152,7 @@ struct RootView: View {
         }
         .animation(.easeInOut(duration: 0.6), value: takeover?.0.id)
         .task(id: current?.id) {
+            model.zoneSongChanged()
             if let current, easterEgg.matches(current.track) { await easterEgg.loadIfNeeded() }
         }
         .environment(model)
@@ -202,5 +207,24 @@ struct RootView: View {
             }
             #endif
         }
+    }
+
+    /// Today's single-device app: setup, host mode and the party screen.
+    @ViewBuilder private var hubContent: some View {
+        Group {
+            if model.needsOnboarding {
+                OnboardingView()
+                    .transition(.opacity)
+            } else if model.isLocked {
+                PartyView()
+                    .transition(.opacity)
+            } else {
+                HostView()
+                    .transition(.opacity)
+            }
+        }
+        .animation(.easeInOut(duration: 0.4), value: model.isLocked)
+        .animation(.easeInOut(duration: 0.5), value: model.needsOnboarding)
+        .tint(model.provider.accent)
     }
 }

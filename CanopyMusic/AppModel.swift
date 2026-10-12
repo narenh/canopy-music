@@ -80,7 +80,7 @@ final class AppModel {
 
     /// Spotify lost the chosen device (usually asleep), so playback commands would fail.
     var spotifyDisconnected: Bool {
-        provider == .spotify && spotifyDevicesLoaded && !spotifyDeviceAvailable
+        !isDisplay && provider == .spotify && spotifyDevicesLoaded && !spotifyDeviceAvailable
     }
 
     /// Music plays from this iPad (so its AirPlay speaker choice matters). Spotify reports the
@@ -103,12 +103,13 @@ final class AppModel {
     /// Sync Library on. Without it the Apple Music API has no library playlists to list.
     private(set) var appleMusicLibrarySynced = true
     @ObservationIgnored private var subscriptionTask: Task<Void, Never>?
-    private(set) var guestURL: URL?
+    /// This device's own guest page (hub). Displays show their hub's instead; see `guestURL`.
+    private var localGuestURL: URL?
     /// Key in the Host Control QR code. Forgetting phones replaces it.
     @ObservationIgnored private var hostKey = UserDefaults.standard.string(forKey: "hostControlKey") ?? AppModel.newHostKey()
     /// Client IDs of phones that have used the host key, for the "N phones" count.
     private(set) var hostPhones: [String] = UserDefaults.standard.stringArray(forKey: "hostControlPhones") ?? []
-    private(set) var friendlyURL: URL?
+    private var localFriendlyURL: URL?
     var errorMessage: String?
     /// Shows "Where should music play?" (host Music section or the party screen's device button).
     var isPickingSpotifyDevice = false
@@ -139,6 +140,7 @@ final class AppModel {
         didSet {
             defaults.set(phoneReorderEnabled, forKey: "phoneReorderEnabled")
             session.phonesCanReorder = phoneReorderEnabled
+        configureHubSession()
         connectHostControl()
         }
     }
@@ -180,6 +182,23 @@ final class AppModel {
         self.spotifyDisplayName = UserDefaults.standard.string(forKey: "spotifyDisplayName")
         self.session = Self.makeSession(provider ?? .none, spotify: spotifyAPI)
         hostPIN = defaults.string(forKey: "hostPIN") ?? ""
+        if let id = UserDefaults.standard.string(forKey: "deviceID") {
+            deviceID = id
+        } else {
+            deviceID = UUID().uuidString
+            UserDefaults.standard.set(deviceID, forKey: "deviceID")
+        }
+        zoneName = UserDefaults.standard.string(forKey: "zoneName") ?? UIDevice.current.name
+        displaysCanControl = UserDefaults.standard.object(forKey: "displaysCanControl") as? Bool ?? true
+        // Every launch starts at the zone list, except debug launches that go straight to a party.
+        var role = ZoneRole.choosing
+        #if DEBUG
+        let debugFlags = ["-autoParty", "-autoSearch", "-autoLoad", "-autoResume", "-autoPrevious", "-autoStress", "-showSettings",
+                          "-showPicker", "-appleMusicState", "-qrGallery", "-backgroundFor", "-screenshotParty", "-onboarding",
+                          "-onboardingSpotify", "-onboardingNetwork", "-easterEggPreview", "-diagnoseMusicKit", "-benchAppleMusic"]
+        if ProcessInfo.processInfo.arguments.contains(where: debugFlags.contains) { role = .hub }
+        #endif
+        zoneRole = role
         crossfade = defaults.bool(forKey: "crossfade")
         crossfadeSeconds = defaults.double(forKey: "crossfadeSeconds")
         wifiSSID = defaults.string(forKey: "wifiSSID") ?? ""
@@ -193,6 +212,7 @@ final class AppModel {
         applyCrossfade()
         watchAppleMusicSubscription()
         session.phonesCanReorder = phoneReorderEnabled // didSet doesn't run during init
+        configureHubSession()
         defaults.set(hostKey, forKey: "hostControlKey")
         connectHostControl()
         #if DEBUG
@@ -398,6 +418,142 @@ final class AppModel {
         }
     }
 
+    // MARK: Zones (docs/multi-device.md)
+
+    enum ZoneRole: Equatable {
+        /// The zone list (every launch).
+        case choosing
+        /// Naming a new zone and setting its PIN.
+        case creating
+        /// This iPad plays the music for its zone.
+        case hub
+        /// Showing another device's zone.
+        case display
+    }
+
+    private(set) var zoneRole: ZoneRole
+    var isDisplay: Bool { zoneRole == .display }
+    var zoneName: String {
+        didSet {
+            defaults.set(zoneName, forKey: "zoneName")
+            if !isDisplay { session.zoneName = zoneName }
+            advertiseZone()
+        }
+    }
+    /// Play/pause, skip and scrubbing on displays (a hub setting).
+    var displaysCanControl: Bool {
+        didSet {
+            defaults.set(displaysCanControl, forKey: "displaysCanControl")
+            if !isDisplay { session.displaysCanControl = displaysCanControl }
+        }
+    }
+    let zoneBrowser = ZoneBrowser()
+    private(set) var displayConnection: ZoneConnection?
+    private(set) var displayedZone: ZoneListing?
+    @ObservationIgnored let deviceID: String
+    @ObservationIgnored private let zoneAdvertiser = ZoneAdvertiser()
+    @ObservationIgnored private var advertisedPlaying: String?
+
+    /// This iPad ran a zone last time, so the list offers to resume it.
+    var canResumeZone: Bool { defaults.bool(forKey: "wasHub") && provider != .none }
+
+    /// The guest page shown in QR codes: this hub's, or the hub a display is showing.
+    var guestURL: URL? {
+        isDisplay ? session.lanAddress.flatMap { URL(string: "http://\($0)") } : localGuestURL
+    }
+    var friendlyURL: URL? {
+        isDisplay ? session.guestAddress.flatMap { URL(string: "http://\($0)") } : localFriendlyURL
+    }
+    var showsGuestQR: Bool { isDisplay ? guestURL != nil : phoneQueueEnabled }
+
+    func beginCreatingZone() {
+        zoneRole = .creating
+    }
+
+    func cancelCreatingZone() {
+        zoneRole = .choosing
+    }
+
+    func finishCreatingZone(name: String, pin: String?) {
+        let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        zoneName = trimmed.isEmpty ? UIDevice.current.name : String(trimmed.prefix(40))
+        hostPIN = pin ?? ""
+        becomeHub()
+    }
+
+    func resumeZone() {
+        becomeHub()
+    }
+
+    private func becomeHub() {
+        zoneRole = .hub
+        defaults.set(true, forKey: "wasHub")
+        isLocked = false
+        if provider == .none {
+            needsOnboarding = true
+        } else {
+            Task { await startServerIfNeeded() }
+        }
+    }
+
+    /// Stops running this zone (the server and its announcement) and goes back to the zone list.
+    func stopHosting() {
+        if session.engine.isPlaying { session.pause() }
+        zoneRole = .choosing
+        isLocked = false
+        Task { await stopServer() }
+    }
+
+    /// Shows another device's zone. Displays don't run a server or play anything.
+    func join(_ zone: ZoneListing) {
+        guard let url = zone.baseURL else { return }
+        if session.engine.isPlaying { session.pause() }
+        Task { await stopServer() }
+        let connection = ZoneConnection(baseURL: url, clientID: deviceID, name: UIDevice.current.name, kind: .ipad)
+        let mirror = PartySession(remote: connection)
+        session = mirror
+        connection.start(session: mirror)
+        displayConnection = connection
+        displayedZone = zone
+        zoneRole = .display
+        lock()
+    }
+
+    func leaveZone() {
+        displayConnection?.stop()
+        displayConnection = nil
+        displayedZone = nil
+        session = Self.makeSession(provider, spotify: spotifyAPI)
+        session.phonesCanReorder = phoneReorderEnabled
+        configureHubSession()
+        connectHostControl()
+        applyCrossfade()
+        zoneRole = .choosing
+        isLocked = false
+        UIApplication.shared.isIdleTimerDisabled = false
+    }
+
+    private func configureHubSession() {
+        session.configureHub(kind: .ipad, zoneName: zoneName, serviceName: provider == .none ? nil : provider.title)
+        session.displaysCanControl = displaysCanControl
+    }
+
+    /// Announces this zone (or refreshes what's playing in the announcement).
+    func advertiseZone() {
+        guard zoneRole == .hub, let server, let address = session.lanAddress else { return }
+        let playing = session.state.current.map { "\($0.track.title) – \($0.track.artist)" } ?? ""
+        advertisedPlaying = playing
+        zoneAdvertiser.advertise(name: zoneName, port: server.port, txt: [
+            "name": zoneName, "kind": HubKind.ipad.rawValue, "addr": address, "hub": deviceID, "playing": String(playing.prefix(120)),
+        ])
+    }
+
+    /// Called when the current song changes.
+    func zoneSongChanged() {
+        let playing = session.state.current.map { "\($0.track.title) – \($0.track.artist)" } ?? ""
+        if playing != advertisedPlaying { advertiseZone() }
+    }
+
     // MARK: Host control
 
     /// The Host Control QR code: the guest page plus the key. Uses the IP so every phone resolves it;
@@ -418,6 +574,13 @@ final class AppModel {
 
     private func connectHostControl() {
         session.hostKey = hostKey
+        // Settings changed by a host on the web page: keep ours in step and saved.
+        session.onSettingsChanged = { [weak self] in
+            guard let self else { return }
+            if let name = self.session.zoneName, name != self.zoneName { self.zoneName = name }
+            if self.session.phonesCanReorder != self.phoneReorderEnabled { self.phoneReorderEnabled = self.session.phonesCanReorder }
+            if self.session.displaysCanControl != self.displaysCanControl { self.displaysCanControl = self.session.displaysCanControl }
+        }
         session.onHostPhone = { [weak self] clientID in
             guard let self, !self.hostPhones.contains(clientID) else { return }
             self.hostPhones.append(clientID)
@@ -437,6 +600,7 @@ final class AppModel {
     func installScreenshotSession(_ session: PartySession) {
         provider = .appleMusic
         self.session = session
+        configureHubSession()
         connectHostControl()
         needsOnboarding = false
         lock()
@@ -461,7 +625,7 @@ final class AppModel {
 
     func startServerIfNeeded() async {
         await serially {
-            guard self.phoneQueueEnabled, !self.needsOnboarding else { return }
+            guard self.phoneQueueEnabled, !self.needsOnboarding, self.zoneRole == .hub else { return }
             if self.server != nil {
                 self.refreshAddresses()
                 return
@@ -490,10 +654,10 @@ final class AppModel {
 
     private func restartServerNow() async {
         await stopServerNow()
-        guard phoneQueueEnabled, !needsOnboarding else { return }
+        guard phoneQueueEnabled, !needsOnboarding, zoneRole == .hub else { return }
         guard let (server, task) = await PartyServer.start(session: session) else {
-            guestURL = nil
-            friendlyURL = nil
+            localGuestURL = nil
+            localFriendlyURL = nil
             return
         }
         self.server = server
@@ -531,19 +695,22 @@ final class AppModel {
         await server?.stop()
         server = nil
         hostname.unregister()
-        guestURL = nil
-        friendlyURL = nil
+        zoneAdvertiser.stop()
+        localGuestURL = nil
+        localFriendlyURL = nil
     }
 
     func refreshAddresses() {
         guard let server, let ip = LocalNetwork.lanAddress() else {
-            guestURL = nil
-            friendlyURL = nil
+            localGuestURL = nil
+            localFriendlyURL = nil
             return
         }
-        guestURL = server.url(host: ip)
-        friendlyURL = hostname.register(address: ip) ? server.url(host: hostname.hostname) : nil
-        session.guestAddress = friendlyURL.flatMap { url in url.host().map { $0 + (url.port.map { ":\($0)" } ?? "") } }
+        localGuestURL = server.url(host: ip)
+        localFriendlyURL = hostname.register(address: ip) ? server.url(host: hostname.hostname) : nil
+        session.guestAddress = localFriendlyURL.flatMap { url in url.host().map { $0 + (url.port.map { ":\($0)" } ?? "") } }
+        session.lanAddress = ip + (server.port == 80 ? "" : ":\(server.port)")
+        advertiseZone()
     }
 
     #if DEBUG
@@ -601,7 +768,8 @@ final class AppModel {
     #endif
 
     var wifiJoinPayload: String? {
-        wifiSSID.isEmpty ? nil : LocalNetwork.wifiJoinPayload(ssid: wifiSSID, password: wifiPassword)
+        // Wi‑Fi details are this hub's; a display doesn't know its hub's.
+        isDisplay || wifiSSID.isEmpty ? nil : LocalNetwork.wifiJoinPayload(ssid: wifiSSID, password: wifiPassword)
     }
 }
 

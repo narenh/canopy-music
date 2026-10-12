@@ -27,6 +27,13 @@ struct PartyView: View {
     @State private var toast: Announcement?
     @State private var toastTask: Task<Void, Never>?
     @State private var showUnlock = false
+    @State private var showLeave = false
+
+    /// What the search field says it searches: the hub's service on a display.
+    private var searchServiceName: String {
+        if model.isDisplay { return model.session.serviceName ?? "songs" }
+        return model.isDemo ? "demo songs" : model.provider.title
+    }
     /// Debug only: a search result to tap Add on automatically (see `-autoSearch`).
     @State private var autoAddTrackID: String?
 
@@ -68,6 +75,12 @@ struct PartyView: View {
         }
         .onChange(of: session.state.upNext.map(\.id)) { old, new in flashPhoneRequests(old: old, new: new) }
         .sheet(isPresented: $showUnlock) { UnlockView() }
+        .confirmationDialog(model.displayedZone?.name ?? "Zone", isPresented: $showLeave, titleVisibility: .visible) {
+            Button("Leave \(model.displayedZone?.name ?? "zone")", role: .destructive) { model.leaveZone() }
+        } message: {
+            Text("Showing \(model.displayedZone?.kind == .tv ? "the Apple TV's" : "an iPad's") zone. Music plays there.")
+        }
+        .overlay { DisplayConnectionOverlay() }
         #if DEBUG
         .task { await runAutoSearch() }
         #endif
@@ -80,6 +93,8 @@ struct PartyView: View {
             HStack(spacing: 18) {
                 LogoView(height: 34)
                     .onLongPressGesture(minimumDuration: 1.5) {
+                        // A display has no host mode; it can only leave the zone.
+                        if model.isDisplay { showLeave = true; return }
                         // No PIN set: go straight back to host mode, no keypad.
                         if model.hostPIN.isEmpty { _ = model.unlock(pin: "") } else { showUnlock = true }
                     }
@@ -115,7 +130,7 @@ struct PartyView: View {
                     Image(systemName: "magnifyingglass")
                         .font(.system(size: 22, weight: .semibold))
                         .foregroundStyle(.white.opacity(0.6))
-                    TextField("", text: $query, prompt: Text("Search \(model.isDemo ? "demo songs" : model.provider.title) to add a song").foregroundStyle(.white.opacity(0.5)))
+                    TextField("", text: $query, prompt: Text("Search \(searchServiceName) to add a song").foregroundStyle(.white.opacity(0.5)))
                         .font(.system(size: 22))
                         .foregroundStyle(.white)
                         .focused($searchFocused)
@@ -173,7 +188,7 @@ struct PartyView: View {
                     if let toast {
                         Text(toast.styled)
                             .foregroundStyle(.white.opacity(0.85))
-                    } else {
+                    } else if !model.isDisplay || model.session.phonesCanReorder {
                         Text("Drag to reorder")
                             .font(.system(size: 14))
                             .foregroundStyle(.white.opacity(0.45))
@@ -191,7 +206,8 @@ struct PartyView: View {
             // Songs added on the iPad can be removed here (e.g. added by mistake). Phone requests
             // can only be removed from the phone that added them.
             UpNextList(
-                session: session, canRemoveByMenu: { $0.requester?.origin == .ipad },
+                session: session, canRemoveByMenu: { !model.isDisplay && $0.requester?.origin == .ipad },
+                canReorder: !model.isDisplay || session.phonesCanReorder,
                 arriving: arriving, flashing: flashing, scrollTarget: $scrollTarget,
                 onArtworkFrame: { id, frame in rowFrames[id] = frame },
                 showsHistory: true,
@@ -200,7 +216,7 @@ struct PartyView: View {
             .reportFrame { listFrame = $0 }
 
             // The on-screen keyboard squeezes this pane; give the space to the queue instead.
-            if model.phoneQueueEnabled, !softwareKeyboardShown {
+            if model.showsGuestQR, !softwareKeyboardShown {
                 GuestQRCard()
                     .padding(16)
                     .transition(.opacity.combined(with: .move(edge: .bottom)))
@@ -416,7 +432,7 @@ struct NowPlayingView: View {
                     ProgressBar(duration: item.track.duration, session: session)
                         .frame(width: side)
                         .opacity(model.spotifyDisconnected ? 0 : 1)
-                        .allowsHitTesting(!model.spotifyDisconnected)
+                        .allowsHitTesting(!model.spotifyDisconnected && (!model.isDisplay || session.displaysCanControl))
                         .overlay {
                             if model.spotifyDisconnected {
                                 Label("Playback device disconnected", systemImage: "exclamationmark.triangle.fill")
@@ -424,7 +440,10 @@ struct NowPlayingView: View {
                                     .foregroundStyle(.orange)
                             }
                         }
-                    TransportControls(session: session)
+                    // Displays: transport only while the hub allows it (no AirPlay or crossfade).
+                    if !model.isDisplay || session.displaysCanControl {
+                        TransportControls(session: session)
+                    }
                 }
             }
             .frame(maxWidth: .infinity)
@@ -447,6 +466,10 @@ private struct TransportControls: View {
         @Bindable var model = model
         GlassEffectContainer(spacing: 20) {
             HStack(spacing: 20) {
+                if model.isDisplay {
+                    // Speakers are chosen on the hub; keep the controls centered.
+                    Color.clear.frame(width: 44, height: 44)
+                } else {
                 // Open AirPlay picker: AirPlay sessions sometimes drop and need re-picking.
                 // Disabled (but kept for balance) when Spotify plays on another device.
                 if airPlayApplies {
@@ -464,6 +487,7 @@ private struct TransportControls: View {
                         .glassEffect(.regular, in: Circle())
                         .accessibilityLabel("Speakers")
                         .accessibilityValue("Not used: music plays on \(model.spotifyDeviceName ?? "another device")")
+                }
                 }
                 Group {
                     Button {
@@ -497,7 +521,9 @@ private struct TransportControls: View {
                 .buttonBorderShape(.circle)
                 .disabled(model.spotifyDisconnected)
                 .opacity(model.spotifyDisconnected ? 0.35 : 1)
-                if model.provider == .spotify {
+                if model.isDisplay {
+                    Color.clear.frame(width: 44, height: 44)
+                } else if model.provider == .spotify {
                     // Spotify's crossfade lives in the Spotify app; this spot picks where music plays.
                     SpotifyDeviceButton()
                 } else {
@@ -676,5 +702,39 @@ struct GuestQRCard: View {
 
     static func display(_ url: URL) -> String {
         url.absoluteString.replacingOccurrences(of: "http://", with: "")
+    }
+}
+
+/// On a display: "Connecting…" until the hub's first update, "Lost connection" if it drops.
+private struct DisplayConnectionOverlay: View {
+    @Environment(AppModel.self) private var model
+
+    var body: some View {
+        if model.isDisplay, let connection = model.displayConnection, !connection.isConnected {
+            let name = model.displayedZone?.name ?? "the zone"
+            ZStack {
+                Rectangle().fill(.black.opacity(connection.hasSnapshot ? 0.55 : 0.85))
+                    .ignoresSafeArea()
+                VStack(spacing: 14) {
+                    ProgressView().controlSize(.large).tint(.white)
+                    Text(connection.hasSnapshot ? "Lost connection to \(name)" : "Connecting to \(name)…")
+                        .font(.system(size: 22, weight: .bold))
+                    if connection.hasSnapshot {
+                        Text("Trying again. Make sure \(model.displayedZone?.kind == .tv ? "the Apple TV is on" : "the iPad is awake") and Canopy is open.")
+                            .foregroundStyle(.white.opacity(0.7))
+                            .multilineTextAlignment(.center)
+                            .frame(maxWidth: 380)
+                    }
+                    Button("Leave \(name)") { model.leaveZone() }
+                        .buttonStyle(.glass)
+                        .tint(.primary)
+                        .padding(.top, 6)
+                }
+                .padding(28)
+                .glassEffect(.regular, in: RoundedRectangle(cornerRadius: 28, style: .continuous))
+                .foregroundStyle(.white)
+            }
+            .transition(.opacity)
+        }
     }
 }

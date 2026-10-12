@@ -8,6 +8,8 @@ struct UpNextList: View {
     var canDelete: (QueueItem) -> Bool = { _ in false }
     /// Which rows get a press-and-hold Remove menu instead (keeps artwork aligned).
     var canRemoveByMenu: (QueueItem) -> Bool = { _ in false }
+    /// False on a display when its hub has turned off reordering from phones.
+    var canReorder = true
     /// Items whose row should stay empty while a flying copy is on its way in.
     var arriving: Set<UUID> = []
     var flashing: Set<UUID> = []
@@ -74,7 +76,7 @@ struct UpNextList: View {
                     )
                     .listRowInsets(EdgeInsets(top: 6, leading: 12, bottom: 6, trailing: 12))
                     .listRowSeparatorTint(.white.opacity(0.08))
-                    .moveDisabled(!upcoming || locked)
+                    .moveDisabled(!upcoming || locked || !canReorder)
                     .deleteDisabled(!upcoming || !canDelete(item) || locked)
                     .id(item.id)
                 }

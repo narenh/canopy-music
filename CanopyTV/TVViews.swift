@@ -236,11 +236,17 @@ struct TVPartyView: View {
                         Text(current?.track.title ?? "Nothing playing")
                             .font(.system(size: 56, weight: .bold))
                             .lineLimit(1)
-                        Text(current?.track.artist ?? "")
-                            .font(.system(size: 36))
-                            .foregroundStyle(.white.opacity(0.65))
-                            .lineLimit(1)
-                            .padding(.bottom, 26)
+                        // Who requested it shares the artist line, as on the iPad.
+                        HStack(spacing: 16) {
+                            Text(current?.track.artist ?? "")
+                                .font(.system(size: 36))
+                                .foregroundStyle(.white.opacity(0.65))
+                                .lineLimit(1)
+                            if let requester = current?.requester {
+                                TVRequesterPill(requester: requester).fixedSize()
+                            }
+                        }
+                        .padding(.bottom, 26)
                         TVProgress(session: session)
                         if model.role == .display {
                             TVZoneBadge().padding(.top, 24)
@@ -317,14 +323,30 @@ struct TVQueueRow: View {
             .lineLimit(1)
             Spacer(minLength: 16)
             if let requester = item.requester {
-                Text(requester.name ?? (requester.origin == .ipad ? "iPad" : "Guest"))
-                    .font(.system(size: 19, weight: .semibold))
-                    .padding(.horizontal, 14)
-                    .padding(.vertical, 6)
-                    .background(.white.opacity(0.16), in: Capsule())
+                TVRequesterPill(requester: requester)
             }
         }
         .frame(height: Self.height)
+    }
+}
+
+/// Who requested a song (the iPad's RequesterPill at TV size).
+struct TVRequesterPill: View {
+    let requester: Requester
+
+    var body: some View {
+        HStack(spacing: 7) {
+            if requester.origin == .phone {
+                Image(systemName: "iphone").font(.system(size: 16, weight: .semibold))
+            }
+            Text(requester.name ?? (requester.origin == .phone ? "Guest" : "iPad"))
+                .lineLimit(1)
+        }
+        .font(.system(size: 19, weight: .semibold))
+        .padding(.horizontal, 14)
+        .padding(.vertical, 6)
+        .foregroundStyle(.white.opacity(0.8))
+        .background(.white.opacity(0.16), in: Capsule())
     }
 }
 

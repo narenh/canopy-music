@@ -66,16 +66,40 @@ struct ScreenshotScene {
         var tracks: [QueueTrack] = []
         for song in [current] + upNext {
             let results = (try? await catalog.searchSongs("\(song.title) \(song.artist)")) ?? []
-            let match = results.first { Self.matches($0, song) } ?? results.first
+            // Exact title and artist first, so "Sympathy is a knife" isn't a remix or a feature.
+            let match = results.first { Self.matches($0, song, exact: true) } ?? results.first { Self.matches($0, song) } ?? results.first
             print("[screenshot] \(song.title) – \(song.artist) -> \(match.map { "\($0.title) – \($0.artist)" } ?? "NOT FOUND")\(match.map { Self.matches($0, song) } == true ? "" : " (check)")")
             if let match { tracks.append(match) }
         }
         return tracks
     }
 
-    private static func matches(_ track: QueueTrack, _ song: Song) -> Bool {
+    private static func matches(_ track: QueueTrack, _ song: Song, exact: Bool = false) -> Bool {
         let fold = { (s: String) in s.lowercased().filter { $0.isLetter || $0.isNumber } }
+        if exact { return fold(track.title) == fold(song.title) && fold(track.artist) == fold(song.artist) }
         return fold(track.title).hasPrefix(fold(song.title)) && (song.artist.isEmpty || fold(track.artist).contains(fold(song.artist)))
+    }
+}
+
+/// The hub's marketing values while posing, so displays (the Apple TV) show "Playing from
+/// Living Room" and `music.local` on their join card instead of the simulator's own names.
+/// Call `ScreenshotHub.pose(model)` right after `installScreenshotSession`.
+@MainActor
+enum ScreenshotHub {
+    /// With a no-break space: it reads the same, but `-showZone $'Living\xc2\xa0Room'` on the Apple
+    /// TV picks this zone over another "Living Room" on the network.
+    static let zoneName = "Living\u{00A0}Room"
+    static let guestAddress = "music.local"
+
+    static func pose(_ model: AppModel) {
+        model.zoneName = zoneName
+        // mDNS confirms the simulator's own `.local` name after this (and again after renames): keep ours.
+        Task { @MainActor in
+            while true {
+                if model.session.guestAddress != guestAddress { model.session.guestAddress = guestAddress }
+                try? await Task.sleep(for: .milliseconds(250))
+            }
+        }
     }
 }
 

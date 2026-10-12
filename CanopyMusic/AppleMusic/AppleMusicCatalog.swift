@@ -34,6 +34,21 @@ enum AppleMusicError: LocalizedError {
 
 struct AppleMusicCatalog: MusicCatalog {
     let cache: SongCache
+    /// Which catalog song each unlabelled library track (iTunes Match / uploads) turned out to be.
+    var memory: CatalogMatchMemory = .shared
+    /// How the most recent library playlist loads went, including which tracks were left out.
+    var reports = PlaylistLoadReports()
+
+    /// Tracks left out of the last library playlist loaded through this catalog (not on Apple Music,
+    /// or no confident match). 0 before any library playlist has loaded.
+    var lastSkippedCount: Int {
+        get async { await reports.last?.skippedCount ?? 0 }
+    }
+
+    /// How loading `playlist` went the last time, or nil if it hasn't been loaded (or isn't a library playlist).
+    func loadReport(for playlist: PlaylistSummary) async -> PlaylistLoadReport? {
+        await reports.report(for: playlist.id)
+    }
 
     /// Apple Music's search matches whole words, so a half-typed last word ("beac") finds junk.
     /// Its typing suggestions complete it ("…beacons") and come with their own top songs, like the
@@ -75,7 +90,8 @@ struct AppleMusicCatalog: MusicCatalog {
         let encoded = term.replacingOccurrences(of: " ", with: "+")
             .addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? term
         let response: LibrarySearchResponse = try await fetch("/v1/me/library/search?term=\(encoded)&types=library-songs&limit=10&include=catalog")
-        return try await catalogSongs(for: response.results.librarySongs?.data ?? [])
+        // Uses remembered matches for uploads but doesn't search for them: this runs as you type.
+        return try await catalogSongs(for: response.results.librarySongs?.data ?? [], searchUnlabelled: false).songs
     }
 
     func searchPlaylists(_ term: String) async throws -> [PlaylistSummary] {
@@ -163,40 +179,153 @@ struct AppleMusicCatalog: MusicCatalog {
             resources += page.data
             path = page.next
         }
-        return try await catalogSongs(for: resources)
+        let (songs, report) = try await catalogSongs(for: resources, playlistID: id)
+        await reports.record(report)
+        #if DEBUG
+        if report.skippedCount > 0 || report.unlabelled > 0 {
+            print("[match] playlist \(id): loaded \(report.loaded) of \(report.total); unlabelled \(report.unlabelled) (memory \(report.matchedFromMemory), search \(report.matchedBySearch)); skipped \(report.skippedCount)")
+        }
+        #endif
+        return songs
     }
 
-    /// Maps library songs to their catalog songs, keeping order. Songs with no catalog match
-    /// (uploads, removed tracks) can't be played here and are skipped.
-    private func catalogSongs(for resources: [LibrarySongResource]) async throws -> [Song] {
-        enum Slot { case song(Song), pending(String) }
-        let slots: [Slot] = resources.compactMap { resource in
-            #if os(tvOS)
-            // On tvOS the catalog song that comes with a library track can't start a fresh player:
-            // the player's first update then refers to the user's library, which the app can't
-            // open, so the player connection drops and polling it blocks the main thread. The same
-            // song fetched from the catalog plays, so fetch them all.
-            if let id = resource.relationships?.catalog?.data.first?.id.rawValue ?? resource.attributes?.playParams?.catalogId {
-                return .pending(id)
+    /// Maps library songs to their catalog songs, keeping order. Most come with their catalog song
+    /// or its id. iTunes Match and uploaded copies come with neither, so they're found by searching
+    /// the catalog for a song with the same title, artist, album and length (`CatalogMatching`),
+    /// remembered for next time. Songs with no catalog match can't be played here and are skipped.
+    private func catalogSongs(
+        for resources: [LibrarySongResource], playlistID: String = "", searchUnlabelled: Bool = true
+    ) async throws -> (songs: [Song], report: PlaylistLoadReport) {
+        enum Slot { case song(Song), pending(String), remembered(String), search, skip }
+        var report = PlaylistLoadReport(playlistID: playlistID)
+        report.total = resources.count
+        var slots: [Slot] = []
+        for resource in resources {
+            if let attached = resource.relationships?.catalog?.data.first {
+                report.withCatalogSong += 1
+                #if os(tvOS)
+                // On tvOS the catalog song that comes with a library track can't start a fresh player:
+                // the player's first update then refers to the user's library, which the app can't
+                // open, so the player connection drops and polling it blocks the main thread. The same
+                // song fetched from the catalog plays, so fetch them all.
+                slots.append(.pending(attached.id.rawValue))
+                #else
+                slots.append(.song(attached))
+                #endif
+            } else if let catalogID = resource.attributes?.playParams?.catalogId {
+                report.withCatalogIDOnly += 1
+                slots.append(.pending(catalogID))
+            } else {
+                report.unlabelled += 1
+                let recall: CatalogMatchMemory.Recall = if let id = resource.id { await memory.recall(id) } else { .unknown }
+                switch recall {
+                case .match(let catalogID): slots.append(.remembered(catalogID))
+                case .recentMiss: report.recentlyUnmatched += 1; slots.append(.skip)
+                case .unknown: slots.append(searchUnlabelled ? .search : .skip)
+                }
             }
-            #else
-            if let song = resource.relationships?.catalog?.data.first { return .song(song) }
-            if let catalogID = resource.attributes?.playParams?.catalogId { return .pending(catalogID) }
-            #endif
-            return nil
         }
 
-        let pendingIDs = slots.compactMap { if case .pending(let id) = $0 { id } else { nil } }
+        // Everything with a known catalog id, in batches of 100.
+        let pendingIDs = slots.compactMap { slot -> String? in
+            switch slot {
+            case .pending(let id), .remembered(let id): id
+            default: nil
+            }
+        }
         var fetched: [String: Song] = [:]
         for chunk in stride(from: 0, to: pendingIDs.count, by: 100).map({ Array(pendingIDs[$0..<min($0 + 100, pendingIDs.count)]) }) {
             let request = MusicCatalogResourceRequest<Song>(matching: \.id, memberOf: chunk.map { MusicItemID($0) })
             for song in try await request.response().items { fetched[song.id.rawValue] = song }
         }
-        return slots.compactMap { slot in
-            switch slot {
+
+        // A remembered song that's gone from the catalog gets searched for again.
+        var changedMemory = false
+        for index in slots.indices {
+            guard case .remembered(let id) = slots[index], fetched[id] == nil else { continue }
+            if let libraryID = resources[index].id { await memory.forget(libraryID) }
+            changedMemory = true
+            slots[index] = searchUnlabelled ? .search : .skip
+        }
+
+        let searchIndices = slots.indices.filter { if case .search = slots[$0] { true } else { false } }
+        let found = await searchCatalog(for: searchIndices.map { (index: $0, wanted: resources[$0].track) })
+        for (index, outcome) in found {
+            guard let libraryID = resources[index].id else { continue }
+            switch outcome {
+            case .found(let song): await memory.remember(song.id.rawValue, for: libraryID)
+            case .noMatch: await memory.remember(nil, for: libraryID)
+            case .failed: continue  // Try again next load.
+            }
+            changedMemory = true
+        }
+        if changedMemory { await memory.save() }
+
+        var songs: [Song] = []
+        for (index, slot) in slots.enumerated() {
+            let song: Song? = switch slot {
             case .song(let song): song
             case .pending(let id): fetched[id]
+            case .remembered(let id): fetched[id]
+            case .search: if case .found(let song) = found[index] { song } else { nil }
+            case .skip: nil
             }
+            if let song {
+                songs.append(song)
+                if case .remembered = slot { report.matchedFromMemory += 1 }
+                if case .search = slot { report.matchedBySearch += 1 }
+            } else {
+                report.skipped.append(resources[index].track)
+            }
+        }
+        report.loaded = songs.count
+        return (songs, report)
+    }
+
+    private enum SearchOutcome: Sendable {
+        case found(Song)
+        case noMatch
+        case failed
+    }
+
+    /// Catalog searches for unlabelled library tracks, a few at a time, keyed by the given index.
+    private func searchCatalog(for lookups: [(index: Int, wanted: QueueTrack)]) async -> [Int: SearchOutcome] {
+        let maxConcurrent = 6
+        return await withTaskGroup(of: (Int, SearchOutcome).self) { group in
+            var results: [Int: SearchOutcome] = [:]
+            var next = 0
+            func startNext() {
+                guard next < lookups.count else { return }
+                let lookup = lookups[next]
+                next += 1
+                group.addTask { (lookup.index, await findCatalogSong(matching: lookup.wanted)) }
+            }
+            for _ in 0..<maxConcurrent { startNext() }
+            while let (index, outcome) = await group.next() {
+                results[index] = outcome
+                startNext()
+            }
+            return results
+        }
+    }
+
+    private func findCatalogSong(matching wanted: QueueTrack) async -> SearchOutcome {
+        guard !wanted.title.isEmpty, !wanted.artist.isEmpty else { return .noMatch }
+        var request = MusicCatalogSearchRequest(term: CatalogMatching.searchTerm(for: wanted), types: [Song.self])
+        request.limit = 10
+        do {
+            let songs = try await request.response().songs
+            let candidates = songs.map {
+                QueueTrack(id: $0.id.rawValue, title: $0.title, artist: $0.artistName, album: $0.albumTitle ?? "", duration: $0.duration)
+            }
+            guard let best = CatalogMatching.bestMatch(among: candidates, for: wanted),
+                  let song = songs.first(where: { $0.id.rawValue == best.id }) else { return .noMatch }
+            return .found(song)
+        } catch {
+            #if DEBUG
+            print("[match] search for \"\(wanted.title)\" failed: \(error)")
+            #endif
+            return .failed
         }
     }
 
@@ -219,6 +348,64 @@ struct AppleMusicCatalog: MusicCatalog {
             }
         } catch {
             print("[bench] failed: \(error)")
+        }
+    }
+    #endif
+
+    #if DEBUG
+    /// `-diagnosePlaylist <name>`: how the tracks of the library playlist whose name is (or
+    /// contains) `name` map to catalog songs, written to Library/Caches/playlist-diagnosis.txt.
+    /// Loads it twice through `tracks(in:)`: the second load should need no searches.
+    /// Add `-forgetCatalogMatches` to clear remembered matches first, to see the searches again.
+    static func diagnosePlaylist(named name: String) async {
+        let file = URL.cachesDirectory.appending(path: "playlist-diagnosis.txt")
+        var out = "Playlist diagnosis: \"\(name)\" (\(Date.now.formatted(.iso8601)))\n"
+        func note(_ line: String) { out += line + "\n" }
+        defer {
+            try? out.write(to: file, atomically: true, encoding: .utf8)
+            print("[diagnose] wrote \(file.path)\n\(out)")
+        }
+        guard MusicAuthorization.currentStatus == .authorized else { note("Apple Music not authorized"); return }
+        let catalog = AppleMusicCatalog(cache: SongCache())
+        if ProcessInfo.processInfo.arguments.contains("-forgetCatalogMatches") {
+            await catalog.memory.forgetEverything()
+            await catalog.memory.save()
+            note("forgot remembered matches first")
+        }
+        do {
+            let all = try await catalog.libraryPlaylists()
+            guard let playlist = all.first(where: { $0.name == name })
+                    ?? all.first(where: { $0.name.localizedCaseInsensitiveContains(name) }) else {
+                note("no library playlist named or containing that (of \(all.count))")
+                return
+            }
+            note("playlist: \(playlist.name) id=\(playlist.id)")
+            let clock = ContinuousClock()
+            for attempt in ["first load", "second load"] {
+                var tracks: [QueueTrack] = []
+                let time = try await clock.measure { tracks = try await catalog.tracks(in: playlist) }
+                guard let r = await catalog.loadReport(for: playlist) else { note("\(attempt): no report"); continue }
+                let unmatched = r.unlabelled - r.matchedFromMemory - r.matchedBySearch
+                note("")
+                note("\(attempt) (\(time.formatted(.units(allowed: [.seconds, .milliseconds], width: .narrow)))):")
+                note("  tracks: \(r.total)")
+                note("  with catalog song attached: \(r.withCatalogSong)")
+                note("  catalog id only: \(r.withCatalogIDOnly)")
+                note("  neither (iTunes Match / uploads): \(r.unlabelled)")
+                note("    resolved: \(r.matchedFromMemory + r.matchedBySearch) (from memory \(r.matchedFromMemory), by search \(r.matchedBySearch))")
+                note("    unresolved: \(unmatched) (of which no-match remembered from an earlier load: \(r.recentlyUnmatched))")
+                note("  catalog ids that didn't come back: \(r.skippedCount - unmatched)")
+                note("  skipped: \(r.skippedCount); lastSkippedCount: \(await catalog.lastSkippedCount)")
+                note("  app loads: \(tracks.count) of \(r.total)")
+                if attempt == "first load" {
+                    for track in r.skipped {
+                        let length = track.duration.map { " \(Int($0) / 60):\(String(format: "%02d", Int($0) % 60))" } ?? ""
+                        note("    skipped: \(track.title) – \(track.artist) [\(track.album)]\(length) (\(track.id))")
+                    }
+                }
+            }
+        } catch {
+            note("error: \(error)")
         }
     }
     #endif
@@ -271,13 +458,42 @@ private struct LibrarySongResource: Decodable {
     struct Attributes: Decodable {
         struct PlayParams: Decodable { var catalogId: String? }
         var playParams: PlayParams?
+        var name: String?
+        var artistName: String?
+        var albumName: String?
+        var durationInMillis: Int?
     }
     struct Relationships: Decodable {
         struct Catalog: Decodable { var data: [Song] }
         var catalog: Catalog?
     }
+    /// The library song id ("i.…").
+    var id: String?
     var attributes: Attributes?
     var relationships: Relationships?
+
+    /// The track as the library describes it (id is the library id).
+    var track: QueueTrack {
+        QueueTrack(
+            id: id ?? "", title: attributes?.name ?? "", artist: attributes?.artistName ?? "",
+            album: attributes?.albumName ?? "", duration: attributes?.durationInMillis.map { TimeInterval($0) / 1000 }
+        )
+    }
+}
+
+/// The latest `PlaylistLoadReport` per playlist, and the very latest.
+actor PlaylistLoadReports {
+    private(set) var last: PlaylistLoadReport?
+    private var byPlaylist: [String: PlaylistLoadReport] = [:]
+
+    func record(_ report: PlaylistLoadReport) {
+        last = report
+        byPlaylist[report.playlistID] = report
+    }
+
+    func report(for playlistID: String) -> PlaylistLoadReport? {
+        byPlaylist[playlistID]
+    }
 }
 
 // MARK: - Conversions

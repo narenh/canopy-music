@@ -166,6 +166,10 @@ struct RootView: View {
             if ProcessInfo.processInfo.arguments.contains("-benchAppleMusic") {
                 await AppleMusicCatalog.benchmark()
             }
+            // `-diagnosePlaylist <name>` writes Library/Caches/playlist-diagnosis.txt.
+            if let i = ProcessInfo.processInfo.arguments.firstIndex(of: "-diagnosePlaylist"), i + 1 < ProcessInfo.processInfo.arguments.count {
+                await AppleMusicCatalog.diagnosePlaylist(named: ProcessInfo.processInfo.arguments[i + 1])
+            }
             print("[debug] guest URL \(model.guestURL?.absoluteString ?? "none")")
             let args = ProcessInfo.processInfo.arguments
             if let i = args.firstIndex(of: "-screenshotParty"), i + 1 < args.count, let scene = ScreenshotScene.all[args[i + 1]] {

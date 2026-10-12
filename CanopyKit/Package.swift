@@ -3,7 +3,7 @@ import PackageDescription
 
 let package = Package(
     name: "CanopyKit",
-    platforms: [.iOS(.v26), .macOS(.v26), .tvOS(.v26)],
+    platforms: [.iOS(.v26), .macOS(.v26)],
     products: [
         .library(name: "CanopyCore", targets: ["CanopyCore"]),
         .library(name: "CanopyServer", targets: ["CanopyServer"]),

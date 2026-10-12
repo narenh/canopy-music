@@ -236,6 +236,8 @@ struct TVPartyView: View {
                         Text(current?.track.title ?? "Nothing playing")
                             .font(.system(size: 56, weight: .bold))
                             .lineLimit(1)
+                            // Long titles shrink before they truncate.
+                            .minimumScaleFactor(0.6)
                         // Who requested it shares the artist line, as on the iPad.
                         HStack(spacing: 16) {
                             Text(current?.track.artist ?? "")

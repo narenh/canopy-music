@@ -135,8 +135,6 @@ final class AppModel {
     var wifiPassword: String { didSet { defaults.set(wifiPassword, forKey: "wifiPassword"); session.wifi.password = wifiPassword } }
     /// Plain Join Wi‑Fi code with a caption, for phones that struggle with the Wi‑Fi symbol design.
     var wifiSimpleQR: Bool { didSet { defaults.set(wifiSimpleQR, forKey: "wifiSimpleQR"); session.wifi.simpleQR = wifiSimpleQR } }
-    /// The `<name>.local` address guests can type. Set through `setLocalName(_:)`.
-    private(set) var localName: String
     /// Runs the LAN web server guests use to queue from their phones.
     /// Guests can drag songs around from their phones. Off: phones can still add and remove their own.
     var phoneReorderEnabled: Bool {
@@ -211,9 +209,9 @@ final class AppModel {
         wifiSimpleQR = defaults.bool(forKey: "wifiSimpleQR")
         phoneQueueEnabled = defaults.object(forKey: "phoneQueueEnabled") as? Bool ?? true
         phoneReorderEnabled = defaults.object(forKey: "phoneReorderEnabled") as? Bool ?? true
-        let savedName = Self.sanitizedLocalName(defaults.string(forKey: "localName") ?? "")
-        localName = savedName
-        hostname = FriendlyHostname(name: savedName)
+        // The `.local` address follows the zone name.
+        hostname = FriendlyHostname(name: FriendlyHostname.localName(forZone: zoneName))
+        defaults.removeObject(forKey: "localName") // the old editable address
         applyCrossfade()
         watchAppleMusicSubscription()
         session.phonesCanReorder = phoneReorderEnabled // didSet doesn't run during init
@@ -442,6 +440,7 @@ final class AppModel {
         didSet {
             defaults.set(zoneName, forKey: "zoneName")
             if !isDisplay { session.zoneName = zoneName }
+            followZoneName()
             advertiseZone()
         }
     }
@@ -665,16 +664,17 @@ final class AppModel {
         refreshAddresses()
     }
 
-    /// Changes the `.local` name and re-announces it.
-    func setLocalName(_ raw: String) {
-        let name = Self.sanitizedLocalName(raw)
-        guard name != localName else { return }
-        localName = name
-        defaults.set(name, forKey: "localName")
-        hostname.unregister()
-        hostname = FriendlyHostname(name: name)
-        watchHostnameRenames()
-        refreshAddresses()
+    /// The `.local` address guests can type: the confirmed one, or the one being checked.
+    var localAddress: String {
+        localFriendlyURL?.host ?? "\(FriendlyHostname.localName(forZone: zoneName)).local"
+    }
+
+    /// The `.local` name follows the zone name: a renamed zone announces its new name, which is
+    /// handed out once it's confirmed (`watchHostnameRenames`).
+    private func followZoneName() {
+        guard hostname.rename(to: FriendlyHostname.localName(forZone: zoneName)) else { return }
+        localFriendlyURL = nil
+        if !isDisplay { session.guestAddress = nil }
     }
 
     /// The `.local` name is handed out only once mDNS confirms it's ours (it may have moved to
@@ -685,19 +685,6 @@ final class AppModel {
             self.localFriendlyURL = server.url(host: name)
             self.session.guestAddress = name + (server.port == 80 ? "" : ":\(server.port)")
         }
-    }
-
-    /// Lowercase letters, digits and hyphens, at most 63 characters; empty means "music".
-    static func sanitizedLocalName(_ raw: String) -> String {
-        let allowed = Set("abcdefghijklmnopqrstuvwxyz0123456789-")
-        var name = raw.lowercased()
-            .replacingOccurrences(of: ".local", with: "")
-            .replacingOccurrences(of: " ", with: "-")
-            .filter { allowed.contains($0) }
-        while name.hasPrefix("-") { name.removeFirst() }
-        while name.hasSuffix("-") { name.removeLast() }
-        name = String(name.prefix(63))
-        return name.isEmpty ? "music" : name
     }
 
     private func stopServerNow() async {

@@ -200,3 +200,32 @@ struct HostSettingsTests {
         #expect(again == 403)
     }
 }
+
+struct LocalNameTests {
+    @Test func followsTheZoneName() {
+        #expect(FriendlyHostname.localName(forZone: "Living Room") == "living-room")
+        #expect(FriendlyHostname.localName(forZone: "Naren's Living Room") == "narens-living-room")
+        #expect(FriendlyHostname.localName(forZone: "Café  Upstairs!") == "cafe-upstairs")
+        #expect(FriendlyHostname.localName(forZone: "Rock & Roll") == "rock-roll")
+        #expect(FriendlyHostname.localName(forZone: "  -Den- ") == "den")
+        #expect(FriendlyHostname.localName(forZone: "Kitchen 2") == "kitchen-2")
+    }
+
+    @Test func fallsBackToMusic() {
+        #expect(FriendlyHostname.localName(forZone: nil) == "music")
+        #expect(FriendlyHostname.localName(forZone: "") == "music")
+        #expect(FriendlyHostname.localName(forZone: "🎉🎉") == "music")
+    }
+
+    @Test func fitsInADNSLabel() {
+        let name = FriendlyHostname.localName(forZone: String(repeating: "ab ", count: 40))
+        #expect(name.count <= 63)
+        #expect(!name.hasSuffix("-"))
+    }
+
+    @Test func renamingChangesTheName() {
+        let hostname = FriendlyHostname(name: "upstairs")
+        hostname.rename(to: "living-room")
+        #expect(hostname.hostname == "living-room.local")
+    }
+}

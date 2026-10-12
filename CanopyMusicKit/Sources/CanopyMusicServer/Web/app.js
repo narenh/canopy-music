@@ -33,13 +33,22 @@
     if (!address || !lan || address === location.host) return;
     // Only if that name reaches this same hub: another zone can answer at music.local too.
     if (!(await reachable(address, lan))) return;
-    const next = new URLSearchParams(params);
-    const existing = store.get("canopymusic.clientId");
-    if (existing) next.set("cid", existing);
-    if (store.get("canopymusic.name")) next.set("name", store.get("canopymusic.name"));
-    location.replace(`http://${address}/${next.toString() ? `?${next}` : ""}`);
+    moveTo(address, params, location.hash);
     await new Promise(() => {}); // stop here while the browser navigates
   })();
+
+  // Continues at another address of this hub, taking this phone's ID, name and host key along
+  // (each address has its own storage).
+  function moveTo(address, params, hash = "") {
+    const next = new URLSearchParams(params);
+    const existing = store.get("canopymusic.clientId");
+    if (existing && !next.get("cid")) next.set("cid", existing);
+    // An empty name means this phone was asked and skipped it.
+    if (store.get("canopymusic.nameAsked") && !next.has("name")) next.set("name", store.get("canopymusic.name") || "");
+    const key = store.get("canopymusic.hostKey");
+    if (key && !next.get("host")) next.set("host", key);
+    location.replace(`http://${address}/${next.toString() ? `?${next}` : ""}${hash}`);
+  }
 
   // An image loads across addresses where fetch can't; the hub only serves this one if it's the
   // hub at `lan`.
@@ -68,19 +77,20 @@
   }
   const myIds = new Set([clientId, ...otherIds]);
   // A link can carry a name (`?name=Sam`), which skips the name prompt.
-  const linkName = params.get("name");
-  if (linkName) { store.set("canopymusic.name", linkName.slice(0, 30)); store.set("canopymusic.nameAsked", "1"); }
+  if (params.has("name")) { store.set("canopymusic.name", params.get("name").slice(0, 30)); store.set("canopymusic.nameAsked", "1"); }
   let myName = store.get("canopymusic.name") || null;
 
   // Host control: a phone that scanned the iPad's Host Control QR code. The key arrives in the
   // link once, is kept on the phone, and is checked with the iPad on every load. Host mode is
   // remembered per phone; the switch next to the name flips between it and the guest view.
   if (params.get("host")) {
+    // A new key means a new pairing, so start in host view; the same key (carried along from
+    // another address) keeps the view this phone chose.
+    if (params.get("host") !== store.get("canopymusic.hostKey")) store.set("canopymusic.hostMode", "host");
     store.set("canopymusic.hostKey", params.get("host"));
-    store.set("canopymusic.hostMode", "host");
   }
-  if (params.get("host") || params.get("cid")) {
-    ["host", "cid"].forEach((key) => params.delete(key));
+  if (params.has("host") || params.has("cid") || params.has("name")) {
+    ["host", "cid", "name"].forEach((key) => params.delete(key));
     history.replaceState(null, "", location.pathname + (params.toString() ? `?${params}` : "") + location.hash);
   }
   let hostKey = store.get("canopymusic.hostKey");
@@ -161,6 +171,19 @@
     snap = next;
     render();
     openSettingsFromLink();
+    followRename();
+  }
+
+  // A renamed zone moves to a new `.local` name; a page on the old one follows it there (if this
+  // phone can reach the new name), so it isn't left on a name that no longer answers.
+  let followedAddress = null;
+  async function followRename() {
+    const address = snap.address;
+    if (!address || address === location.host || address === followedAddress) return;
+    if (!location.hostname.endsWith(".local")) return; // on the IP address, which still works
+    followedAddress = address;
+    if (!(await reachable(address, snap.lanAddress))) return;
+    moveTo(address, new URLSearchParams(location.search));
   }
 
   // A link to …/#settings opens the zone settings once this phone is a host and the state has loaded.
@@ -784,6 +807,9 @@
   // Zone settings: the admin view for every hub (an Apple TV has no settings screens).
   $("settings-btn").addEventListener("click", () => {
     $("settings-name").value = snap.zoneName || "";
+    // The `.local` address follows the zone name.
+    $("settings-address").hidden = !snap.address;
+    $("settings-address").textContent = `Phones can also go to ${snap.address}. It follows the zone name.`;
     // Only hubs with something to unlock (iPads) have a PIN. It's never sent here, only whether it's set.
     const pinBlock = $("settings-pin-block");
     pinBlock.hidden = snap.hasPIN == null;

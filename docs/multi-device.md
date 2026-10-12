@@ -39,7 +39,7 @@ Status: built on the `tvos-spike` branch (see "Build status" at the end). Screen
 | Zone name | iPad, web | web |
 | Base playlist | iPad, web | web |
 | Unlock PIN | iPad, web | — (nothing to unlock) |
-| `.local` address | iPad (default `music`) | fixed `music` |
+| `.local` address | follows the zone name | follows the zone name |
 | Stop the zone | iPad host mode | Menu on the remote, web |
 | Resume after relaunch | Resume row | create again (the queue is restored) |
 | **Guests** | | |
@@ -74,7 +74,7 @@ Status: built on the `tvos-spike` branch (see "Build status" at the end). Screen
 ## Network
 
 - **Discovery:** hubs advertise Bonjour `_canopymusic._tcp`. The TXT record carries the zone name, the hub kind (ipad/tv), what's playing and the guest address. Displays browse for it; the list updates live.
-- **Addresses:** each hub announces its own `.local` name (`music.local`, then `music-2.local`… on a clash). Every QR code points at its own hub.
+- **Addresses:** each hub announces a `.local` name made from its zone name ("Living Room" is `living-room.local`; `music.local` if nothing's left), then `living-room-2.local`… on a clash. It's handed out only once mDNS confirms it. Renaming the zone (iPad or web) announces the new name, and a web page on the old name moves to the new one, keeping the phone's ID, name and Host Control. Simulator builds use `canopytest-<zone>.local`, so tests never take real names. Every QR code points at its own hub.
 - **Displays** use the same JSON API and WebSocket snapshots as the guest page, plus a few display endpoints:
   - `POST /api/display/hello`: a heartbeat, so the hub can list connected displays.
   - `POST /api/display/playback`: allowed while *Playback controls on displays* is on.

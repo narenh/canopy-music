@@ -220,6 +220,16 @@ let base = PlaylistSummary(id: "p", name: "Base", kind: .library)
         #expect(next != nil)
         #expect(next!.version > first!.version)
     }
+
+    /// A renamed zone's new `.local` address reaches pages right away, so they can follow it.
+    @Test func newAddressIsSent() async throws {
+        let session = PartySession(catalog: StubCatalog(ids: []), engine: FakeEngine())
+        session.guestAddress = "upstairs.local"
+        var iterator = session.snapshots().makeAsyncIterator()
+        #expect(await iterator.next()?.address == "upstairs.local")
+        session.guestAddress = "living-room.local"
+        #expect(await iterator.next()?.address == "living-room.local")
+    }
 }
 
 @MainActor

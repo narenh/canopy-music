@@ -55,12 +55,8 @@ final class TVModel {
     @ObservationIgnored let deviceID: String
     @ObservationIgnored private var server: PartyServer?
     @ObservationIgnored private var serverTask: Task<Void, Error>?
-    // The simulator shares the Mac's network; keep test zones off the real music.local.
-    #if targetEnvironment(simulator)
-    @ObservationIgnored private var hostname = FriendlyHostname(name: "canopytest")
-    #else
-    @ObservationIgnored private var hostname = FriendlyHostname(name: "music")
-    #endif
+    /// The `.local` address, which follows the zone name (as on the iPad).
+    @ObservationIgnored private let hostname = FriendlyHostname(name: "music")
     @ObservationIgnored private let advertiser = ZoneAdvertiser()
     /// The Host Control key and the phones that have used it (shared with the iPad app).
     let hostControl = HostControl()
@@ -110,6 +106,7 @@ final class TVModel {
             session = PartySession(catalog: AppleMusicCatalog(cache: cache), engine: AppleMusicEngine(cache: cache), storeURL: store)
         }
         hostJoined = false
+        hostname.rename(to: FriendlyHostname.localName(forZone: zoneName))
         session.configureHub(kind: .tv, zoneName: zoneName, serviceName: usesDemo ? "Demo" : "Apple Music")
         // Same settings, saved under the same names, as an iPad hub.
         session.phonesCanQueue = defaults.object(forKey: "phoneQueueEnabled") as? Bool ?? true
@@ -130,6 +127,7 @@ final class TVModel {
             self.defaults.set(self.session.wifi.password, forKey: "wifiPassword")
             self.defaults.set(self.session.wifi.simpleQR, forKey: "wifiSimpleQR")
             if let name = self.session.zoneName { self.zoneName = name }
+            self.followZoneName()
             self.advertise()
         }
         session.onStopRequested = { [weak self] in self?.stopZone() }
@@ -155,6 +153,13 @@ final class TVModel {
         UIApplication.shared.isIdleTimerDisabled = false
     }
 
+    /// A renamed zone announces its new `.local` name, handed out once it's confirmed.
+    private func followZoneName() {
+        guard hostname.rename(to: FriendlyHostname.localName(forZone: zoneName)) else { return }
+        friendlyURL = nil
+        session.guestAddress = nil
+    }
+
     /// The remote's play/pause button: always on a hub; on a display, if its hub allows it.
     func playPause() {
         guard role == .hub || session.displaysCanControl else { return }
@@ -172,8 +177,8 @@ final class TVModel {
         serverTask = task
         guard let ip = LocalNetwork.lanAddress() else { return }
         guestURL = server.url(host: ip)
-        // Hand out the .local name only once it's confirmed ours: another zone may already be
-        // music.local, and this follows the name we end up with.
+        // Hand out the .local name only once it's confirmed ours: another zone may already have
+        // it, and this follows the name we end up with (and the zone's new name after a rename).
         hostname.onConfirmed = { [weak self] name in
             guard let self, let server = self.server else { return }
             self.friendlyURL = server.url(host: name)

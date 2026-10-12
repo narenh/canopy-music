@@ -337,9 +337,8 @@ private struct SpeakersRow: View {
 private struct SettingsSheet: View {
     @Environment(AppModel.self) private var model
     @Environment(\.dismiss) private var dismiss
-    /// Edited locally and applied on return or when the sheet closes, so the network name isn't
-    /// re-announced on every keystroke.
-    @State private var localNameDraft = ""
+    /// Edited locally and applied on return or when the sheet closes, so the zone (and its
+    /// `.local` address) isn't re-announced on every keystroke.
     @State private var zoneNameDraft = ""
 
     private func commitZoneName() {
@@ -354,21 +353,9 @@ private struct SettingsSheet: View {
                 Section {
                     Toggle("Queue from phones", isOn: $model.phoneQueueEnabled)
                     Toggle("Reorder from phones", isOn: $model.phoneReorderEnabled)
-                    HStack(spacing: 0) {
-                        Text("Address")
-                        Spacer(minLength: 16)
-                        TextField("music", text: $localNameDraft)
-                            .multilineTextAlignment(.trailing)
-                            .textInputAutocapitalization(.never)
-                            .autocorrectionDisabled()
-                            .keyboardType(.asciiCapable)
-                            .submitLabel(.done)
-                            .onSubmit { model.setLocalName(localNameDraft) }
-                        Text(".local")
-                            .foregroundStyle(.secondary)
-                    }
+                    LabeledContent("Address", value: model.localAddress)
                 } footer: {
-                    Text("Guests search and queue from their phones at \(model.localName).local. Turning it off hides the QR code; Host Control and displays keep working.")
+                    Text("Guests search and queue from their phones at \(model.localAddress), which follows the zone name. Turning it off hides the QR code; Host Control and displays keep working.")
                 }
                 .listRowBackground(Color.white.opacity(0.08))
                 if let hostURL = model.hostControlURL {
@@ -478,15 +465,9 @@ private struct SettingsSheet: View {
                 .listRowBackground(Color.white.opacity(0.08))
             }
             .scrollContentBackground(.hidden)
-            .onAppear {
-                localNameDraft = model.localName
-                zoneNameDraft = model.zoneName
-            }
-            .onDisappear {
-                model.setLocalName(localNameDraft)
-                commitZoneName()
-            }
-            .onChange(of: model.localName) { _, name in localNameDraft = name }
+            .onAppear { zoneNameDraft = model.zoneName }
+            .onDisappear { commitZoneName() }
+            .onChange(of: model.zoneName) { _, name in zoneNameDraft = name }
             .navigationTitle("Settings")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {

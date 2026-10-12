@@ -409,8 +409,11 @@ public final class PartySession {
         return true
     }
 
-    /// The guest page's friendly address (`music.local`, plus `:port` if not 80).
-    public var guestAddress: String?
+    /// The guest page's friendly address (`music.local`, plus `:port` if not 80). Sent as it
+    /// changes, so a page on the old name can follow a renamed zone to its new one.
+    public var guestAddress: String? {
+        didSet { if guestAddress != oldValue, remote == nil { broadcast() } }
+    }
 
     /// Whether phones may drag songs around. The iPad can always reorder.
     public var phonesCanReorder = true {

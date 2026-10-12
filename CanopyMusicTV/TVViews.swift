@@ -410,8 +410,10 @@ struct TVJoinCard: View {
                 Text("Scan with your camera, or go to")
                     .font(.system(size: 22))
                     .foregroundStyle(.white.opacity(0.6))
+                // Long zone names make long addresses (it follows the zone name); shrink like the iPad's.
                 Text(Self.display(model.shownFriendlyURL ?? model.shownGuestURL))
                     .font(.system(size: 25, weight: .semibold).monospaced())
+                    .minimumScaleFactor(0.7)
             }
             .lineLimit(1)
             .frame(maxWidth: .infinity, alignment: .leading)

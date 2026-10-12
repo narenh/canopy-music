@@ -32,7 +32,7 @@ struct ZoneListView: View {
                         }
                     }
                     Section {
-                        ZoneRow(icon: "plus", title: "Create a new zone", subtitle: "This iPad plays the music") {
+                        ZoneRow(icon: "plus", title: "Create a new zone", subtitle: "Music plays from this iPad") {
                             model.beginCreatingZone()
                         }
                     }

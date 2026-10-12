@@ -84,7 +84,7 @@ struct TVZoneListView: View {
                 Button {
                     Task { await model.createZone() }
                 } label: {
-                    TVZoneRow(icon: "plus", title: "Create a new zone", subtitle: "This TV plays the music")
+                    TVZoneRow(icon: "plus", title: "Create a new zone", subtitle: "Music plays from this TV")
                 }
                 .focused($focused, equals: "create")
             }

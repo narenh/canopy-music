@@ -127,7 +127,8 @@ struct TVRootView: View {
 
 // MARK: - Ending the zone
 
-/// Menu › End once songs guests added have played: saves them as a playlist, then ends the zone.
+/// Menu › End once someone has added a song (played or still in Up next): saves the songs guests
+/// added as a playlist, then ends the zone.
 /// The name starts as the party's date and a space; the host can finish it with the Siri Remote,
 /// dictation, or the keyboard tvOS offers on a nearby iPhone, or leave it as the date (then it's
 /// "<date> <zone>"). Menu cancels.

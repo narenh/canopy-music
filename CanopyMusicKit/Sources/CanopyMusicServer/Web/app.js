@@ -1181,13 +1181,14 @@
     fillPartyRow();
   }
 
-  /** Saving is offered once a song a guest added has played; until then the party is just the
-   * base playlist, nothing worth saving. */
+  /** Saving is offered once someone has added a song (played or still in Up next); until then the
+   * party is just the base playlist, nothing worth saving. */
   const partyCanSave = () => !!(partyInfo && partyInfo.destination && partyInfo.requestCount > 0);
 
   function fillPartyRow() {
     $("settings-party-row").hidden = !partyCanSave();
-    if (partyInfo) $("settings-party").textContent = partyInfo.allCount === 1 ? "1 song played" : `${partyInfo.allCount} songs played`;
+    // The songs guests added, as "Only songs guests added" (on by default) saves.
+    if (partyInfo) $("settings-party").textContent = partyInfo.requestCount === 1 ? "1 song added" : `${partyInfo.requestCount} songs added`;
   }
 
   /** Fetches the host details (Wi‑Fi, displays, the party so far). */
@@ -1317,7 +1318,7 @@
     $("party-fields").hidden = !canSave || !partySaving();
     const n = partyCount();
     $("party-note").textContent = n === 0
-      ? ($("party-only").checked ? "No songs guests added have played yet." : "No songs have played yet.")
+      ? ($("party-only").checked ? "Guests haven't added any songs yet." : "No songs have played or been added yet.")
       : `${n === 1 ? "1 song" : `${n} songs`}. ${partyInfo.destination}.`;
     const go = $("party-go");
     go.disabled = partyBusy || (partyMode === "save" && !partyWillSave());
@@ -1334,7 +1335,7 @@
     $("party-title").textContent = mode === "end" ? `End ${snap.zoneName || "this zone"}?` : "Save as playlist";
     $("party-sub").textContent = mode === "end"
       ? `The music stops for everyone and the queue is cleared. The ${device} goes back to its zone list.`
-      : "Saves the songs that have played so far. The party carries on.";
+      : "Saves the songs guests added so far, played or still in Up next. The party carries on.";
     $("party-save").checked = true;
     $("party-only").checked = true;
     $("party-error").hidden = true;

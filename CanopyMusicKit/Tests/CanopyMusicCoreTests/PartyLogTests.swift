@@ -63,6 +63,36 @@ private func item(_ id: String, by requester: Requester? = nil) -> QueueItem {
         #expect(log.tracks(onlyRequests: true).map(\.id) == ["a"])
     }
 
+    /// Requests are the point of saving: still waiting counts, after the songs that played.
+    @Test func requestsStillWaitingCountAfterThePlayedSongs() {
+        var log = PartyLog()
+        log.record(item("a"))
+        log.record(item("x", by: guest))
+        let waiting = [item("y", by: guest), item("b"), item("z", by: Requester(origin: .ipad))]
+        #expect(log.tracks(onlyRequests: true, waiting: waiting).map(\.id) == ["x", "y", "z"])
+        // Off: everything that played, plus the requests waiting; never base songs that didn't play.
+        #expect(log.tracks(onlyRequests: false, waiting: waiting).map(\.id) == ["a", "x", "y", "z"])
+        #expect(PartyLog().tracks(onlyRequests: true, waiting: waiting).map(\.id) == ["y", "z"])
+    }
+
+    @Test func aSongRequestedTwiceIsSavedOnce() {
+        var log = PartyLog()
+        let played = item("x", by: guest)
+        log.record(played)
+        // Requested again, and the item that played back in the queue (gone back to).
+        let waiting = [item("x", by: phone("Phil")), played, item("y", by: guest), item("y", by: guest)]
+        #expect(log.tracks(onlyRequests: true, waiting: waiting).map(\.id) == ["x", "y"])
+        #expect(log.tracks(onlyRequests: false, waiting: waiting).map(\.id) == ["x", "y"])
+    }
+
+    @Test func creditsRequestsStillWaiting() {
+        var log = PartyLog()
+        log.record(item("a", by: phone("Sam")))
+        let waiting = [item("b", by: phone("Phil")), item("c", by: phone("Phil"))]
+        #expect(log.credit(onlyRequests: true, waiting: waiting) == "Queued by Phil and Sam")
+        #expect(log.playlistDescription(onlyRequests: true, waiting: waiting) == "Queued by Phil and Sam · Canopy Music")
+    }
+
     @Test func creditsNamedPhonesMostSongsFirst() {
         var log = PartyLog()
         log.record(item("1", by: phone("Phil")))
@@ -201,6 +231,101 @@ private func item(_ id: String, by requester: Requester? = nil) -> QueueItem {
         #expect(catalog.saved.last?.tracks.map(\.id) == ["x", "a"])
         // Saving doesn't end anything.
         #expect(session.partyLog.songs.count == 2)
+    }
+
+    /// The Apple TV report: a phone adds a song, the host ends before it plays. Saving is offered
+    /// and saves it.
+    @Test func aRequestThatHasntPlayedIsOfferedAndSaved() async throws {
+        let catalog = SavingCatalog(ids: ["a", "b", "c"])
+        let session = PartySession(catalog: catalog, engine: FakeEngine())
+        try await session.load(playlist: base)
+        session.add(track("x"), by: guest)
+        #expect(session.partyLog.isEmpty) // nothing has played
+        #expect(session.partySaveInfo.requestCount == 1)
+        #expect(session.partySaveInfo.allCount == 1) // base songs that haven't played stay out
+        #expect(session.partySaveInfo.offersSave)
+
+        let count = try await session.savePartyPlaylist(name: "Party", onlyRequests: true)
+        #expect(count == 1)
+        #expect(catalog.saved.last?.tracks.map(\.id) == ["x"])
+        #expect(catalog.saved.last?.description == "Queued by Sam · Canopy Music")
+        try await session.savePartyPlaylist(name: "Party", onlyRequests: false)
+        #expect(catalog.saved.last?.tracks.map(\.id) == ["x"])
+
+        session.end() // clears the log and the queue
+        #expect(session.partySaveInfo.requestCount == 0)
+        #expect(!session.partySaveInfo.offersSave)
+    }
+
+    @Test func aRemovedRequestDoesNotCount() async throws {
+        let catalog = SavingCatalog(ids: ["a", "b"])
+        let session = PartySession(catalog: catalog, engine: FakeEngine())
+        try await session.load(playlist: base)
+        try await session.play() // a
+        guard case .added(let x, _) = session.add(track("x"), by: guest) else { Issue.record("not added"); return }
+        #expect(session.partySaveInfo.offersSave)
+        session.remove(x.id)
+        #expect(session.partySaveInfo.requestCount == 0)
+        #expect(session.partySaveInfo.allCount == 1) // a played
+        #expect(!session.partySaveInfo.offersSave)
+        await #expect(throws: PartySaveError.nothingToSave(onlyRequests: true)) {
+            try await session.savePartyPlaylist(name: "x", onlyRequests: true)
+        }
+    }
+
+    /// A request skipped over (here while paused, so it never started) didn't make the party.
+    @Test func aRequestSkippedBeforeItPlayedDoesNotCount() async throws {
+        let session = PartySession(catalog: SavingCatalog(ids: ["a", "b"]), engine: FakeEngine())
+        try await session.load(playlist: base)
+        try await session.play() // a
+        session.add(track("x"), by: guest)
+        session.pause()
+        await session.skip() // x is current, not started: still waiting
+        #expect(session.partySaveInfo.requestCount == 1)
+        await session.skip() // b
+        #expect(session.partySaveInfo.requestCount == 0)
+    }
+
+    @Test func aSongRequestedAgainAfterItPlayedIsSavedOnce() async throws {
+        let catalog = SavingCatalog(ids: ["a", "b", "c"])
+        let engine = FakeEngine()
+        let session = PartySession(catalog: catalog, engine: engine)
+        try await session.load(playlist: base)
+        session.add(track("x"), by: guest)
+        try await session.play() // x
+        await settle()
+        engine.finishTrack() // a
+        await settle()
+        session.add(track("x"), by: Requester(name: "Phil", clientID: "phone-2", origin: .phone))
+        #expect(session.partySaveInfo.requestCount == 1)
+        #expect(session.partySaveInfo.allCount == 2)
+        try await session.savePartyPlaylist(name: "Party", onlyRequests: true)
+        #expect(catalog.saved.last?.tracks.map(\.id) == ["x"])
+    }
+
+    /// Played songs in the order they played, then the requests waiting in Up next's order.
+    @Test func savesPlayedSongsThenWaitingRequestsInQueueOrder() async throws {
+        let catalog = SavingCatalog(ids: ["a", "b", "c", "d"])
+        let engine = FakeEngine()
+        let session = PartySession(catalog: catalog, engine: engine)
+        try await session.load(playlist: base)
+        try await session.play() // a (b is already handed to the player)
+        await settle()
+        for id in ["x", "y", "w"] { session.add(track(id), by: guest) }
+        engine.finishTrack() // b
+        await settle()
+        engine.finishTrack() // x
+        await settle()
+        guard case .added(let z, _) = session.add(track("z"), by: guest) else { Issue.record("not added"); return }
+        session.move(z.id, to: 0) // the host plays z first
+        #expect(session.state.upNext.prefix(3).map(\.track.id) == ["z", "y", "w"])
+        #expect(session.partySaveInfo.requestCount == 4)
+        #expect(session.partySaveInfo.allCount == 6)
+
+        try await session.savePartyPlaylist(name: "Guests", onlyRequests: true)
+        #expect(catalog.saved.last?.tracks.map(\.id) == ["x", "z", "y", "w"])
+        try await session.savePartyPlaylist(name: "All", onlyRequests: false)
+        #expect(catalog.saved.last?.tracks.map(\.id) == ["a", "b", "x", "z", "y", "w"]) // c, d didn't play
     }
 
     @Test func nothingToSave() async throws {

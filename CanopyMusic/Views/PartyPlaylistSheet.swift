@@ -2,8 +2,8 @@ import CanopyMusicCore
 import SwiftUI
 
 /// Ending the zone, with "Save as playlist" (on by default), or saving the party mid-way from
-/// Settings. The songs that played go into the service's account as a playlist named after the
-/// party's date plus whatever the host types (docs/multi-device.md).
+/// Settings. The songs that played, and the requests still waiting, go into the service's account
+/// as a playlist named after the party's date plus whatever the host types (docs/multi-device.md).
 struct PartyPlaylistSheet: View {
     enum Purpose { case end, save }
 
@@ -121,7 +121,7 @@ struct PartyPlaylistSheet: View {
 
     private var footer: String {
         if needsSpotifySignIn { return "Spotify needs you to sign in again before Canopy Music can save playlists." }
-        if count == 0 { return onlyRequests ? "No songs guests added have played yet." : "No songs have played yet." }
+        if count == 0 { return onlyRequests ? "Guests haven't added any songs yet." : "No songs have played or been added yet." }
         return "\(count == 1 ? "1 song" : "\(count) songs"). \(info.destination ?? "")."
     }
 

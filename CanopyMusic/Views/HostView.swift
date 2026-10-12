@@ -484,7 +484,7 @@ private struct SettingsSheet: View {
                     Section {
                         Button("Save as Playlist") { savingPlaylist = true }
                     } footer: {
-                        Text("Saves the songs that have played so far. The party carries on.")
+                        Text("Saves the songs guests added so far, played or still in Up Next. The party carries on.")
                     }
                     .listRowBackground(Color.white.opacity(0.08))
                 }
@@ -523,8 +523,9 @@ private extension View {
     }
 }
 
-/// A small sheet with "Save as playlist" and its name field once songs guests added have played;
-/// until then a plain alert (the party is just the base playlist, nothing worth saving).
+/// A small sheet with "Save as playlist" and its name field once someone has added a song (played
+/// or still waiting); until then a plain alert (the party is just the base playlist, nothing worth
+/// saving).
 private struct EndZoneConfirmation: ViewModifier {
     @Environment(AppModel.self) private var model
     @Binding var isPresented: Bool

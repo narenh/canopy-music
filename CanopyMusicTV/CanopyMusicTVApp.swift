@@ -211,8 +211,8 @@ final class TVModel {
         closeZone()
     }
 
-    /// Menu › End offers to save the party once songs guests added have played (and the service
-    /// can save); otherwise it's a plain End.
+    /// Menu › End offers to save the party once someone has added a song, played or not (and the
+    /// service can save); otherwise it's a plain End.
     var canSaveParty: Bool { role == .hub && session.partySaveInfo.offersSave }
 
     /// The name Menu › End saves under: what the host typed after the party's date, or, left as

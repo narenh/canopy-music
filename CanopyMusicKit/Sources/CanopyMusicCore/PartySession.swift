@@ -278,24 +278,32 @@ public final class PartySession {
     /// Every song that has played in this zone (hub only), for saving it as a playlist.
     public var partyLog: PartyLog { state.log }
 
+    /// The queue's songs that haven't played yet, in queue order: the current item (unless it
+    /// has started) and Up next. Their requests are saved with the songs that played.
+    private var waitingItems: [QueueItem] { [state.current].compactMap { $0 } + state.upNext }
+
     /// What saving would do right now (hub only).
     public var partySaveInfo: PartySaveInfo {
-        let log = state.log
-        return PartySaveInfo(suggestedName: log.suggestedName(), allCount: log.songs(onlyRequests: false).count,
-                             requestCount: log.songs(onlyRequests: true).count, destination: catalog.playlistDestination)
+        let log = state.log, waiting = waitingItems
+        return PartySaveInfo(suggestedName: log.suggestedName(),
+                             allCount: log.songs(onlyRequests: false, waiting: waiting).count,
+                             requestCount: log.songs(onlyRequests: true, waiting: waiting).count,
+                             destination: catalog.playlistDestination)
     }
 
-    /// Saves the songs that played as a playlist in the hub's account, crediting the guests who
-    /// queued them. A blank name gets the suggested one. Returns how many songs it saved.
+    /// Saves the party as a playlist in the hub's account, crediting the guests who queued its
+    /// songs: the songs that played and the requests still waiting (`PartyLog.songs`). A blank
+    /// name gets the suggested one. Returns how many songs it saved.
     @discardableResult
     public func savePartyPlaylist(name: String, onlyRequests: Bool) async throws -> Int {
         guard remote == nil else { throw PartySaveError.unsupported }
-        let log = state.log
-        let tracks = log.tracks(onlyRequests: onlyRequests)
+        let log = state.log, waiting = waitingItems
+        let tracks = log.tracks(onlyRequests: onlyRequests, waiting: waiting)
         guard !tracks.isEmpty else { throw PartySaveError.nothingToSave(onlyRequests: onlyRequests) }
         var name = String(name.trimmingCharacters(in: .whitespacesAndNewlines).prefix(100))
         if name.isEmpty { name = log.suggestedName().trimmingCharacters(in: .whitespaces) }
-        try await catalog.savePlaylist(name: name, description: log.playlistDescription(onlyRequests: onlyRequests), tracks: tracks)
+        let description = log.playlistDescription(onlyRequests: onlyRequests, waiting: waiting)
+        try await catalog.savePlaylist(name: name, description: description, tracks: tracks)
         return tracks.count
     }
 

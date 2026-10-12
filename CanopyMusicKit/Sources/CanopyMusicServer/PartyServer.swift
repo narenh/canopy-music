@@ -208,8 +208,9 @@ public final class PartyServer: Sendable {
                                          party: await session.partySaveInfo))
         }
 
-        // Saves the songs that played as a playlist in the hub's account (mid-party from the
-        // settings sheet, or just before ending). Failures say why, so the page can offer a retry.
+        // Saves the party (songs that played, requests still waiting) as a playlist in the hub's
+        // account (mid-party from the settings sheet, or just before ending). Failures say why, so
+        // the page can offer a retry.
         await server.appendRoute("POST /api/host/save-playlist") { request in
             let body = try JSONDecoder.api.decode(SavePlaylistBody.self, from: await request.bodyData)
             guard await session.isHost(key: body.key) else { return HTTPResponse(statusCode: .forbidden) }

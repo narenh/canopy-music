@@ -17,6 +17,13 @@ public struct PlayedSong: Codable, Equatable, Sendable {
     }
 }
 
+/// A song saving the party would save: one that played, or a request still waiting to.
+public struct PartySong: Equatable, Sendable {
+    public var track: QueueTrack
+    /// nil for a base playlist song.
+    public var requester: Requester?
+}
+
 /// Every song that played in the zone, in order, for saving the party as a playlist. Unlike the
 /// queue's history it isn't capped. A song counts once it has started playing (the player took
 /// it); songs skipped before they played, and songs that failed to play, don't.
@@ -38,27 +45,36 @@ public struct PartyLog: Codable, Equatable, Sendable {
         return true
     }
 
-    /// The songs to save, in the order they first played, each once. `onlyRequests` keeps the
-    /// songs someone added (from a phone, the hub or a display), leaving out the base playlist's.
-    public func songs(onlyRequests: Bool) -> [PlayedSong] {
+    /// The songs to save, each once: the songs that played, in the order they played, then the
+    /// requests still `waiting` to (the zone's current item and Up next, in queue order). Requests
+    /// are the point of saving, so a request counts whether or not it got to play; one removed
+    /// from the queue (or skipped) before playing doesn't. Base playlist songs count only once
+    /// they've played. `onlyRequests` keeps the songs someone added (from a phone, the hub or a
+    /// display), leaving out the base playlist's.
+    public func songs(onlyRequests: Bool, waiting: [QueueItem] = []) -> [PartySong] {
+        let played = songs.map { PartySong(track: $0.track, requester: $0.requester) }
+        let loggedIDs = Set(songs.map(\.itemID))
+        let pending = waiting
+            .filter { $0.requester != nil && !loggedIDs.contains($0.id) }
+            .map { PartySong(track: $0.track, requester: $0.requester) }
         var seen = Set<String>()
-        return songs.filter { song in
+        return (played + pending).filter { song in
             guard !onlyRequests || song.requester != nil else { return false }
             return seen.insert(song.track.id).inserted
         }
     }
 
-    public func tracks(onlyRequests: Bool) -> [QueueTrack] {
-        songs(onlyRequests: onlyRequests).map(\.track)
+    public func tracks(onlyRequests: Bool, waiting: [QueueItem] = []) -> [QueueTrack] {
+        songs(onlyRequests: onlyRequests, waiting: waiting).map(\.track)
     }
 
-    /// "Queued by Sam, Phil and 6 others": the people who added the songs from their phones and
-    /// gave a name, most songs first. Songs added on the hub or a display, and phones without a
-    /// name, aren't credited. nil when nobody is.
-    public func credit(onlyRequests: Bool) -> String? {
+    /// "Queued by Sam, Phil and 6 others": the people who added the saved songs from their phones
+    /// and gave a name, most songs first. Songs added on the hub or a display, and phones without
+    /// a name, aren't credited. nil when nobody is.
+    public func credit(onlyRequests: Bool, waiting: [QueueItem] = []) -> String? {
         var names: [String] = []
         var counts: [String: Int] = [:]
-        for song in songs(onlyRequests: onlyRequests) {
+        for song in songs(onlyRequests: onlyRequests, waiting: waiting) {
             guard let requester = song.requester, requester.origin == .phone,
                   let name = requester.name?.trimmingCharacters(in: .whitespacesAndNewlines),
                   !name.isEmpty, name.lowercased() != "guest" else { continue }
@@ -81,8 +97,8 @@ public struct PartyLog: Codable, Equatable, Sendable {
     }
 
     /// The saved playlist's description: the credit, then where it came from.
-    public func playlistDescription(onlyRequests: Bool) -> String {
-        [credit(onlyRequests: onlyRequests), "Canopy Music"].compactMap { $0 }.joined(separator: " · ")
+    public func playlistDescription(onlyRequests: Bool, waiting: [QueueItem] = []) -> String {
+        [credit(onlyRequests: onlyRequests, waiting: waiting), "Canopy Music"].compactMap { $0 }.joined(separator: " · ")
     }
 
     /// The name field starts as the party's date and a space ("2026-10-12 "), for the host to
@@ -99,14 +115,16 @@ public struct PartyLog: Codable, Equatable, Sendable {
 public struct PartySaveInfo: Codable, Equatable, Sendable {
     /// "2026-10-12 "
     public var suggestedName: String
-    /// Songs that would be saved with "Only songs guests added" off, and on.
+    /// Songs that would be saved with "Only songs guests added" off, and on (see
+    /// `PartyLog.songs(onlyRequests:waiting:)`).
     public var allCount: Int
     public var requestCount: Int
     /// "Saves to your Apple Music library", or nil when the service can't save playlists.
     public var destination: String?
 
-    /// Hubs offer saving once a song a guest added has played: until then the party is just the
-    /// base playlist, nothing worth saving, and End is a plain confirmation.
+    /// Hubs offer saving as soon as someone has added a song (played or still in Up next): until
+    /// then the party is just the base playlist, nothing worth saving, and End is a plain
+    /// confirmation.
     public var offersSave: Bool { destination != nil && requestCount > 0 }
 }
 
@@ -116,7 +134,7 @@ public enum PartySaveError: LocalizedError, Equatable {
 
     public var errorDescription: String? {
         switch self {
-        case .nothingToSave(let onlyRequests): onlyRequests ? "No songs guests added have played yet." : "No songs have played yet."
+        case .nothingToSave(let onlyRequests): onlyRequests ? "Guests haven't added any songs yet." : "No songs have played or been added yet."
         case .unsupported: "This music service can't save playlists."
         }
     }

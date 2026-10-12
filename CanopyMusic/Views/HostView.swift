@@ -61,19 +61,9 @@ struct HostView: View {
     private var settings: some View {
         @Bindable var model = model
         return VStack(spacing: 0) {
-            HStack(spacing: 12) {
+            HStack {
                 LogoView(height: 36)
                 Spacer()
-                Button(role: .destructive) {
-                    confirmingEnd = true
-                } label: {
-                    Text("End \(model.zoneName)")
-                        .lineLimit(1)
-                }
-                .buttonStyle(.glass)
-                .tint(.red)
-                .foregroundStyle(.red)
-                .endZoneConfirmation(isPresented: $confirmingEnd)
                 Button {
                     showSettings = true
                 } label: {
@@ -164,11 +154,29 @@ struct HostView: View {
                 } footer: {
                     Text("To unlock later, press and hold the logo. Turn on Guided Access (triple-click the top button) so guests can't leave the app.")
                 }
+
+                Section {
+                    Button(role: .destructive) {
+                        confirmingEnd = true
+                    } label: {
+                        Text("End Zone")
+                            .font(.headline)
+                            .foregroundStyle(.red)
+                            .frame(maxWidth: .infinity, minHeight: 48)
+                            .overlay { Capsule().strokeBorder(.red, lineWidth: 1.5) }
+                            .contentShape(Capsule())
+                    }
+                    .buttonStyle(.plain)
+                    .listRowBackground(Color.clear)
+                    // Set apart from Start so it isn't hit by mistake.
+                    .padding(.top, 28)
+                }
             }
             .scrollContentBackground(.hidden)
             .scrollBounceBehavior(.basedOnSize)
             .listSectionSpacing(.compact)
         }
+        .endZoneConfirmation(isPresented: $confirmingEnd)
     }
 
     // MARK: Queue column
@@ -472,7 +480,7 @@ private struct SettingsSheet: View {
                 }
                 .listRowBackground(Color.white.opacity(0.08))
                 Section {
-                    Button("End \(model.zoneName)", role: .destructive) { confirmingEnd = true }
+                    Button("End Zone", role: .destructive) { confirmingEnd = true }
                 } footer: {
                     Text("Ends the music and the phone page here and goes back to the zone list, where you can join another zone or resume this one.")
                 }

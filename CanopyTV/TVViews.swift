@@ -23,7 +23,6 @@ struct TVRootView: View {
                 }
             case .display:
                 TVPartyView()
-                    .overlay(alignment: .bottomLeading) { TVZoneBadge() }
                     .overlay { TVConnectionOverlay() }
                     .transition(.opacity)
             }
@@ -211,65 +210,77 @@ struct TVStartView: View {
 
 struct TVPartyView: View {
     @Environment(TVModel.self) private var model
+    /// Heights of everything in the now-playing column except the artwork, which takes the rest.
+    @State private var headerHeight: CGFloat = 82
+    @State private var footerHeight: CGFloat = 200
 
     var body: some View {
         let session = model.session
         let current = session.state.current
-        HStack(alignment: .top, spacing: 70) {
-            // Now playing.
-            VStack(alignment: .leading, spacing: 0) {
-                Image("CanopyLogo")
-                    .resizable()
-                    .scaledToFit()
-                    .frame(height: 46)
-                    .padding(.bottom, 36)
-                TVArtwork(track: current?.track, cornerRadius: 22)
-                    .frame(width: 500, height: 500)
-                    .shadow(color: .black.opacity(0.4), radius: 30, y: 16)
-                    .padding(.bottom, 34)
-                Text(current?.track.title ?? "Nothing playing")
-                    .font(.system(size: 56, weight: .bold))
-                    .lineLimit(1)
-                Text(current?.track.artist ?? "")
-                    .font(.system(size: 36))
-                    .foregroundStyle(.white.opacity(0.65))
-                    .lineLimit(1)
-                    .padding(.bottom, 26)
-                TVProgress(session: session)
-                    .frame(width: 500)
-            }
-            .frame(width: 540, alignment: .leading)
-            .frame(maxHeight: .infinity, alignment: .center)
-
-            // Up next + how to join.
-            VStack(alignment: .leading, spacing: 18) {
-                Text("Up next")
-                    .font(.system(size: 44, weight: .bold))
-                // Takes whatever height is left above the join card and fades out at the bottom.
-                GeometryReader { geo in
-                    VStack(spacing: 0) {
-                        // Rows are a fixed height, so show as many as fit (plus one to fade out).
-                        ForEach(Array(session.state.upNext.prefix(Int(geo.size.height / TVQueueRow.height) + 1))) { item in
-                            TVQueueRow(item: item)
+        GeometryReader { geo in
+            let art = max(300, (geo.size.height - headerHeight - footerHeight).rounded(.down))
+            HStack(alignment: .top, spacing: 70) {
+                // Now playing: the logo lines up with "Up next" and the artwork grows to fill the height.
+                VStack(alignment: .leading, spacing: 0) {
+                    Image("CanopyLogo")
+                        .resizable()
+                        .scaledToFit()
+                        .frame(height: 46)
+                        // Matches the space above the capitals in "Up next".
+                        .padding(.top, 4.5)
+                        .padding(.bottom, 36)
+                        .onGeometryChange(for: CGFloat.self, of: \.size.height) { headerHeight = $0 }
+                    TVArtwork(track: current?.track, cornerRadius: 22)
+                        .frame(width: art, height: art)
+                        .shadow(color: .black.opacity(0.4), radius: 30, y: 16)
+                    VStack(alignment: .leading, spacing: 0) {
+                        Text(current?.track.title ?? "Nothing playing")
+                            .font(.system(size: 56, weight: .bold))
+                            .lineLimit(1)
+                        Text(current?.track.artist ?? "")
+                            .font(.system(size: 36))
+                            .foregroundStyle(.white.opacity(0.65))
+                            .lineLimit(1)
+                            .padding(.bottom, 26)
+                        TVProgress(session: session)
+                        if model.role == .display {
+                            TVZoneBadge().padding(.top, 24)
                         }
                     }
-                    .frame(width: geo.size.width, height: geo.size.height, alignment: .top)
-                    .clipped()
+                    .padding(.top, 34)
+                    .onGeometryChange(for: CGFloat.self, of: \.size.height) { footerHeight = $0 }
                 }
-                .mask {
-                    VStack(spacing: 0) {
-                        Color.black
-                        LinearGradient(colors: [.black, .clear], startPoint: .top, endPoint: .bottom).frame(height: 90)
+                .frame(width: art, alignment: .leading)
+
+                // Up next + how to join.
+                VStack(alignment: .leading, spacing: 18) {
+                    Text("Up next")
+                        .font(.system(size: 44, weight: .bold))
+                    // Takes whatever height is left above the join card and fades out at the bottom.
+                    GeometryReader { geo in
+                        VStack(spacing: 0) {
+                            // Rows are a fixed height, so show as many as fit (plus one to fade out).
+                            ForEach(Array(session.state.upNext.prefix(Int(geo.size.height / TVQueueRow.height) + 1))) { item in
+                                TVQueueRow(item: item)
+                            }
+                        }
+                        .frame(width: geo.size.width, height: geo.size.height, alignment: .top)
+                        .clipped()
                     }
+                    .mask {
+                        VStack(spacing: 0) {
+                            Color.black
+                            LinearGradient(colors: [.black, .clear], startPoint: .top, endPoint: .bottom).frame(height: 90)
+                        }
+                    }
+                    TVJoinCard()
                 }
-                TVJoinCard()
-            }
-            .padding(.vertical, 8)
-            .padding(.leading, 56)
-            .frame(maxHeight: .infinity)
-            // A sidebar running off the top, bottom and right edges.
-            .background {
-                Color.black.opacity(0.22).ignoresSafeArea(edges: [.top, .bottom, .trailing])
+                .padding(.leading, 56)
+                .frame(maxHeight: .infinity)
+                // A sidebar running off the top, bottom and right edges.
+                .background {
+                    Color.black.opacity(0.22).ignoresSafeArea(edges: [.top, .bottom, .trailing])
+                }
             }
         }
         .foregroundStyle(.white)

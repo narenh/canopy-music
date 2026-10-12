@@ -35,21 +35,37 @@ enum AppleMusicError: LocalizedError {
 struct AppleMusicCatalog: MusicCatalog {
     let cache: SongCache
 
-    /// Matches from your library first, then Apple Music, without duplicates.
+    /// Apple Music's search matches whole words, so a half-typed last word ("beac") finds junk.
+    /// Its typing suggestions complete it ("…beacons") and come with their own top songs, like the
+    /// Music app's search. In order, without duplicates: those top songs, matches from your
+    /// library, a search for the completed phrase, then a search for exactly what was typed.
     func searchSongs(_ term: String) async throws -> [QueueTrack] {
         async let librarySongs = try? searchLibrarySongs(term)
-        var request = MusicCatalogSearchRequest(term: term, types: [Song.self])
-        request.limit = 25
-        let catalogSongs = Array(try await request.response().songs)
-
+        async let typedSongs = catalogSearch(term)
+        let suggestions = try? await MusicCatalogSearchSuggestionsRequest(term: term, includingTopResultsOfTypes: [Song.self]).response()
+        let topSongs: [Song] = suggestions?.topResults.compactMap {
+            if case .song(let song) = $0 { song } else { nil }
+        } ?? []
+        // The first suggestion is the likeliest completion; skip it if it's just what was typed.
+        var completed = suggestions?.suggestions.first?.searchTerm
+        if completed?.caseInsensitiveCompare(term) == .orderedSame { completed = nil }
+        let completedSongs = if let completed { (try? await catalogSearch(completed)) ?? [] } else { [Song]() }
+        let typed = try await typedSongs
         let library = await librarySongs ?? []
         #if DEBUG
-        print("[search] \"\(term)\": library \(library.count), catalog \(catalogSongs.count)")
+        print("[search] \"\(term)\" → \"\(completed ?? "-")\": top \(topSongs.count), library \(library.count), completed \(completedSongs.count), typed \(typed.count)")
         #endif
         var seen = Set<MusicItemID>()
-        let unique = (library + catalogSongs).filter { seen.insert($0.id).inserted }
-        await cache.store(unique)
-        return unique.map(QueueTrack.init)
+        let unique = (topSongs + library + completedSongs + typed).filter { seen.insert($0.id).inserted }
+        let results = Array(unique.prefix(40))
+        await cache.store(results)
+        return results.map(QueueTrack.init)
+    }
+
+    private func catalogSearch(_ term: String) async throws -> [Song] {
+        var request = MusicCatalogSearchRequest(term: term, types: [Song.self])
+        request.limit = 25
+        return Array(try await request.response().songs)
     }
 
     /// Library search via the Apple Music API, mapped to catalog songs (https artwork, playable by id).

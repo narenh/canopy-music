@@ -49,7 +49,8 @@ public final class PartyServer: Sendable {
                     return (server, task)
                 } catch {
                     task.cancel()
-                    await server.stop()
+                    // Don't wait: stopping a server that never got its port can hang.
+                    Task { await server.stop() }
                 }
             }
         }

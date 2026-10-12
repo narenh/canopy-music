@@ -1,6 +1,6 @@
 # Multi-device Canopy Music: zones
 
-Status: being built on the `tvos-spike` branch. Screens: [multi-device-mockups.html](multi-device-mockups.html).
+Status: built on the `tvos-spike` branch (see "Build status" at the end). Screens: [multi-device-mockups.html](multi-device-mockups.html).
 
 ## Model
 
@@ -51,3 +51,21 @@ Status: being built on the `tvos-spike` branch. Screens: [multi-device-mockups.h
 - **"Queue from phones" isn't offered on a TV hub,** since the web page is how a TV zone is run.
 - **Displays add songs as "<zone display name>"** (e.g. "Kitchen iPad"), so the requester pill shows where a song came from. Displays can't delete, including songs they added.
 - **The device-name default needs Apple's user-assigned-device-name entitlement** on iOS 16 and later. Until it's granted, the default is "iPad" / "Apple TV".
+
+- **TV hubs use demo songs in the simulator,** since the simulator can't play Apple Music. On a real Apple TV they use Apple Music and ask for access when you create a zone.
+- **The TV's zone name defaults to the Apple TV's device name.** The first host can change it on the setup page.
+
+## Build status
+
+**Working and checked (two iPad simulators, an Apple TV simulator, an iPhone simulator's Safari):**
+- **iPad:** the zone list; an iPad hub announcing its zone; another iPad joining as a display, with the live queue and controls following the hub's settings; Leave; the lost-connection overlay.
+- **Apple TV:** the zone list finding the iPad's zone; showing it as a display with the zone badge; creating a zone; "Scan to host"; first-host setup from the web API (name and playlist), after which the TV plays and announces the renamed zone.
+- **Web:** the host page with the base playlist row; the invite QR (rendered by the hub); the playlists endpoint.
+- **Package tests:** display mirroring, adding with the display's ID, refused moves undone, display controls following the hub setting, port fallback.
+
+**Not tested yet:**
+- **The iPad's "Create a new zone" screens** (name, PIN): built, but not tapped through. The simulator can't be tapped from here.
+- **Moving to `music-2.local` on a name clash:** simulators share the Mac's IP address, which mDNS doesn't treat as a clash. Needs two real devices.
+- **Real Apple Music on an Apple TV.**
+- **Pressing Menu and Play/Pause on the Siri Remote.**
+- **The web page's setup sheet, settings and invite modals** in a real phone browser (only the API behind them was exercised).

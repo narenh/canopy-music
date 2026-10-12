@@ -74,6 +74,7 @@ final class TVModel {
     // MARK: Hub
 
     func createZone() async {
+        debugLog("createZone")
         if !usesDemo {
             let status = await MusicAuthorization.request()
             authorizationDenied = status != .authorized
@@ -105,7 +106,8 @@ final class TVModel {
         session.onStopRequested = { [weak self] in self?.stopZone() }
         UIApplication.shared.isIdleTimerDisabled = true
         role = .hub
-        await startServer()
+        // Not tied to the caller: the zone list (and any task it started) goes away right here.
+        await Task { await self.startServer() }.value
     }
 
     func stopZone() {
@@ -132,11 +134,22 @@ final class TVModel {
     }
 
     private func startServer() async {
-        guard let (server, task) = await PartyServer.start(session: session) else { return }
+        debugLog("starting server")
+        guard let (server, task) = await PartyServer.start(session: session) else {
+            debugLog("server failed to start")
+            return
+        }
+        debugLog("server on \(server.port)")
         self.server = server
         serverTask = task
         guard let ip = LocalNetwork.lanAddress() else { return }
         guestURL = server.url(host: ip)
+        // Another zone may already be music.local; follow the name we end up with.
+        hostname.onRename = { [weak self] name in
+            guard let self, let server = self.server else { return }
+            self.friendlyURL = server.url(host: name)
+            self.session.guestAddress = name + (server.port == 80 ? "" : ":\(server.port)")
+        }
         if hostname.register(address: ip) {
             friendlyURL = server.url(host: hostname.hostname)
             session.guestAddress = hostname.hostname + (server.port == 80 ? "" : ":\(server.port)")
@@ -187,6 +200,21 @@ final class TVModel {
     }
     var shownFriendlyURL: URL? {
         role == .display ? session.guestAddress.flatMap { URL(string: "http://\($0)") } : friendlyURL
+    }
+
+    /// Debug builds: appends to Library/Caches/tv.log (the simulator's console capture is unreliable).
+    func debugLog(_ line: String) {
+        #if DEBUG
+        let url = URL.cachesDirectory.appending(path: "tv.log")
+        let text = "\(Date()) \(line)\n"
+        if let handle = try? FileHandle(forWritingTo: url) {
+            handle.seekToEndOfFile()
+            handle.write(Data(text.utf8))
+            try? handle.close()
+        } else {
+            try? Data(text.utf8).write(to: url)
+        }
+        #endif
     }
 
     private static func newKey() -> String {

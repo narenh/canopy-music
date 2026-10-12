@@ -89,3 +89,20 @@ struct ZoneTests {
         #expect(Array(data) == [7] + Array("kind=tv".utf8) + [7] + Array("name=Up".utf8))
     }
 }
+
+@MainActor
+@Suite struct PortFallbackTests {
+    /// Two hubs on one machine (or simulators sharing a Mac): the second falls back to the next port.
+    @Test(.timeLimit(.minutes(1))) func secondServerFallsBack() async throws {
+        let first = PartySession(catalog: DemoCatalog(), engine: DemoPlaybackEngine())
+        let (server1, task1) = try #require(await PartyServer.start(session: first, ports: [18781]))
+        defer { task1.cancel(); Task { await server1.stop() } }
+        let second = PartySession(catalog: DemoCatalog(), engine: DemoPlaybackEngine())
+        let started = Date()
+        let result = await PartyServer.start(session: second, ports: [18781, 18782])
+        let (server2, task2) = try #require(result)
+        defer { task2.cancel(); Task { await server2.stop() } }
+        #expect(server2.port == 18782)
+        #expect(Date().timeIntervalSince(started) < 10)
+    }
+}

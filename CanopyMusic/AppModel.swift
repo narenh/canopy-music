@@ -213,6 +213,7 @@ final class AppModel {
         watchAppleMusicSubscription()
         session.phonesCanReorder = phoneReorderEnabled // didSet doesn't run during init
         configureHubSession()
+        watchHostnameRenames()
         defaults.set(hostKey, forKey: "hostControlKey")
         connectHostControl()
         #if DEBUG
@@ -673,7 +674,17 @@ final class AppModel {
         defaults.set(name, forKey: "localName")
         hostname.unregister()
         hostname = FriendlyHostname(name: name)
+        watchHostnameRenames()
         refreshAddresses()
+    }
+
+    /// Another zone already had our `.local` name, so we moved to `name-2.local` etc.
+    private func watchHostnameRenames() {
+        hostname.onRename = { [weak self] name in
+            guard let self, let server = self.server else { return }
+            self.localFriendlyURL = server.url(host: name)
+            self.session.guestAddress = name + (server.port == 80 ? "" : ":\(server.port)")
+        }
     }
 
     /// Lowercase letters, digits and hyphens, at most 63 characters; empty means "music".

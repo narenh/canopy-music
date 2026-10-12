@@ -72,7 +72,6 @@
   if (params.get("host")) {
     store.set("canopy.hostKey", params.get("host"));
     store.set("canopy.hostMode", "host");
-    store.set("canopy.hostWelcome", "1");
   }
   if (params.get("host") || params.get("cid")) {
     ["host", "cid"].forEach((key) => params.delete(key));
@@ -828,10 +827,6 @@
     api("/api/host/check", { key: hostKey, clientId })
       .then(() => {
         hostPaired = true;
-        if (store.get("canopy.hostWelcome")) {
-          store.remove("canopy.hostWelcome");
-          toast("This phone has host control. Tap Host next to your name to switch to guest view.", 5000);
-        }
         updateNameChip();
         if (snap) render();
       })

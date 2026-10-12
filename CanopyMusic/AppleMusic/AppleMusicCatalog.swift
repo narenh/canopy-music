@@ -249,13 +249,20 @@ struct AppleMusicCatalog: MusicCatalog {
         }
 
         let searchIndices = slots.indices.filter { if case .search = slots[$0] { true } else { false } }
-        let found = await searchCatalog(for: searchIndices.map { (index: $0, wanted: resources[$0].track) })
-        for (index, outcome) in found {
+        let searched = await searchCatalog(for: searchIndices.map { (index: $0, wanted: resources[$0].track) })
+        report.searchConcurrency = searched.finalConcurrency
+        for (index, result) in searched.results {
+            report.searches += 1
+            report.searchAttempts += result.attempts
+            report.searchRetries += max(0, result.attempts - 1)
+            report.searchErrors += result.errors
+            if case .found = result.outcome, result.attempts > 1 { report.resolvedAfterRetry += 1 }
+            if case .failed = result.outcome { report.searchesFailed += 1 }
             guard let libraryID = resources[index].id else { continue }
-            switch outcome {
+            switch result.outcome {
             case .found(let song): await memory.remember(song.id.rawValue, for: libraryID)
             case .noMatch: await memory.remember(nil, for: libraryID)
-            case .failed: continue  // Try again next load.
+            case .failed: continue  // Errors every time: try again next load.
             }
             changedMemory = true
         }
@@ -267,7 +274,7 @@ struct AppleMusicCatalog: MusicCatalog {
             case .song(let song): song
             case .pending(let id): fetched[id]
             case .remembered(let id): fetched[id]
-            case .search: if case .found(let song) = found[index] { song } else { nil }
+            case .search: if case .found(let song) = searched.results[index]?.outcome { song } else { nil }
             case .skip: nil
             }
             if let song {
@@ -282,51 +289,88 @@ struct AppleMusicCatalog: MusicCatalog {
         return (songs, report)
     }
 
+    /// `noMatch` is a search that worked but found nothing acceptable (remembered for a day);
+    /// `failed` is a search that errored on every try (not remembered).
     private enum SearchOutcome: Sendable {
         case found(Song)
         case noMatch
         case failed
     }
 
+    private struct SearchResult: Sendable {
+        var outcome: SearchOutcome
+        var attempts: Int
+        var errors: [String]
+    }
+
+    /// Searches started at once at first, and after searches start erroring (Apple Music
+    /// throttles bursts). A search that errors is retried after `searchRetryDelays`.
+    private static let searchConcurrency = 6
+    private static let searchConcurrencyAfterErrors = 3
+    private static let searchRetryDelays: [Duration] = [.milliseconds(500), .milliseconds(1500)]
+
     /// Catalog searches for unlabelled library tracks, a few at a time, keyed by the given index.
-    private func searchCatalog(for lookups: [(index: Int, wanted: QueueTrack)]) async -> [Int: SearchOutcome] {
-        let maxConcurrent = 6
-        return await withTaskGroup(of: (Int, SearchOutcome).self) { group in
-            var results: [Int: SearchOutcome] = [:]
-            var next = 0
-            func startNext() {
-                guard next < lookups.count else { return }
-                let lookup = lookups[next]
-                next += 1
-                group.addTask { (lookup.index, await findCatalogSong(matching: lookup.wanted)) }
+    /// Once two searches have hit errors, fewer run at once for the rest of the load.
+    private func searchCatalog(for lookups: [(index: Int, wanted: QueueTrack)]) async -> (results: [Int: SearchResult], finalConcurrency: Int) {
+        await withTaskGroup(of: (Int, SearchResult).self) { group in
+            var results: [Int: SearchResult] = [:]
+            var limit = Self.searchConcurrency
+            var next = 0, running = 0, searchesWithErrors = 0
+            func fill() {
+                while running < limit, next < lookups.count {
+                    let lookup = lookups[next]
+                    next += 1
+                    running += 1
+                    group.addTask { (lookup.index, await findCatalogSong(matching: lookup.wanted)) }
+                }
             }
-            for _ in 0..<maxConcurrent { startNext() }
-            while let (index, outcome) = await group.next() {
-                results[index] = outcome
-                startNext()
+            fill()
+            while let (index, result) = await group.next() {
+                running -= 1
+                results[index] = result
+                if !result.errors.isEmpty {
+                    searchesWithErrors += 1
+                    if searchesWithErrors >= 2 { limit = min(limit, Self.searchConcurrencyAfterErrors) }
+                }
+                fill()
             }
-            return results
+            return (results, lookups.isEmpty ? 0 : limit)
         }
     }
 
-    private func findCatalogSong(matching wanted: QueueTrack) async -> SearchOutcome {
-        guard !wanted.title.isEmpty, !wanted.artist.isEmpty else { return .noMatch }
+    private func findCatalogSong(matching wanted: QueueTrack) async -> SearchResult {
+        guard !wanted.title.isEmpty, !wanted.artist.isEmpty else { return SearchResult(outcome: .noMatch, attempts: 0, errors: []) }
         var request = MusicCatalogSearchRequest(term: CatalogMatching.searchTerm(for: wanted), types: [Song.self])
         request.limit = 10
-        do {
-            let songs = try await request.response().songs
-            let candidates = songs.map {
-                QueueTrack(id: $0.id.rawValue, title: $0.title, artist: $0.artistName, album: $0.albumTitle ?? "", duration: $0.duration)
+        var errors: [String] = []
+        for attempt in 0...Self.searchRetryDelays.count {
+            if attempt > 0 { try? await Task.sleep(for: Self.searchRetryDelays[attempt - 1]) }
+            do {
+                let songs = try await request.response().songs
+                let candidates = songs.map {
+                    QueueTrack(id: $0.id.rawValue, title: $0.title, artist: $0.artistName, album: $0.albumTitle ?? "", duration: $0.duration)
+                }
+                let song = CatalogMatching.bestMatch(among: candidates, for: wanted)
+                    .flatMap { best in songs.first { $0.id.rawValue == best.id } }
+                return SearchResult(outcome: song.map { .found($0) } ?? .noMatch, attempts: attempt + 1, errors: errors)
+            } catch {
+                let description = Self.describe(error)
+                errors.append(description)
+                #if DEBUG
+                print("[match] search \(attempt + 1) for \"\(wanted.title)\" failed: \(description)")
+                #endif
             }
-            guard let best = CatalogMatching.bestMatch(among: candidates, for: wanted),
-                  let song = songs.first(where: { $0.id.rawValue == best.id }) else { return .noMatch }
-            return .found(song)
-        } catch {
-            #if DEBUG
-            print("[match] search for \"\(wanted.title)\" failed: \(error)")
-            #endif
-            return .failed
         }
+        return SearchResult(outcome: .failed, attempts: Self.searchRetryDelays.count + 1, errors: errors)
+    }
+
+    /// An error as status/code/domain, short enough to tally ("status 429 TooManyRequests …").
+    private static func describe(_ error: Error) -> String {
+        if let error = error as? MusicDataRequest.Error {
+            return "MusicDataRequest status \(error.status) \(error.code) \(error.title)"
+        }
+        let ns = error as NSError
+        return "\(ns.domain) \(ns.code) \(String(describing: error).prefix(120))"
     }
 
     #if DEBUG
@@ -395,6 +439,11 @@ struct AppleMusicCatalog: MusicCatalog {
                 note("    resolved: \(r.matchedFromMemory + r.matchedBySearch) (from memory \(r.matchedFromMemory), by search \(r.matchedBySearch))")
                 note("    unresolved: \(unmatched) (of which no-match remembered from an earlier load: \(r.recentlyUnmatched))")
                 note("  catalog ids that didn't come back: \(r.skippedCount - unmatched)")
+                note("  searches: \(r.searches) (attempts \(r.searchAttempts), retries \(r.searchRetries), resolved after retry \(r.resolvedAfterRetry), failed every try \(r.searchesFailed), concurrency at end \(r.searchConcurrency))")
+                note("  search errors: \(r.searchErrors.count)")
+                for (error, count) in Dictionary(grouping: r.searchErrors, by: { $0 }).mapValues(\.count).sorted(by: { $0.value > $1.value }) {
+                    note("    \(count)× \(error)")
+                }
                 note("  skipped: \(r.skippedCount); lastSkippedCount: \(await catalog.lastSkippedCount)")
                 note("  app loads: \(tracks.count) of \(r.total)")
                 if attempt == "first load" {

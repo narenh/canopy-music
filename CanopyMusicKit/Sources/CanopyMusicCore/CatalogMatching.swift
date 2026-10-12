@@ -141,6 +141,20 @@ public struct PlaylistLoadReport: Sendable, Equatable {
     public var matchedBySearch = 0
     /// Unlabelled tracks skipped because a search within the last day found nothing.
     public var recentlyUnmatched = 0
+    /// Catalog searches run (one per track looked up, however many tries it took).
+    public var searches = 0
+    /// Requests made for those searches, including retries.
+    public var searchAttempts = 0
+    /// Retries after a search errored.
+    public var searchRetries = 0
+    /// Searches that found their song after at least one error.
+    public var resolvedAfterRetry = 0
+    /// Searches that errored on every try (not remembered, so they're tried again next load).
+    public var searchesFailed = 0
+    /// Each error a search hit, described by status/code/domain.
+    public var searchErrors: [String] = []
+    /// How many searches could run at once by the end of the load (lowered after errors).
+    public var searchConcurrency = 0
     /// Tracks that couldn't be loaded, as they appear in the library (id is the library id).
     public var skipped: [QueueTrack] = []
     /// Songs actually loaded.

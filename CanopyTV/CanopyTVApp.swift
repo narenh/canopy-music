@@ -14,9 +14,19 @@ struct CanopyTVApp: App {
 
     var body: some Scene {
         WindowGroup {
+            #if DEBUG
+            if ProcessInfo.processInfo.arguments.contains("-playTest") {
+                TVPlayTestView()
+            } else {
+                TVRootView()
+                    .environment(model)
+                    .preferredColorScheme(.dark)
+            }
+            #else
             TVRootView()
                 .environment(model)
                 .preferredColorScheme(.dark)
+            #endif
         }
     }
 }

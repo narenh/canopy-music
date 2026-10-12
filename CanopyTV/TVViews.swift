@@ -210,26 +210,21 @@ struct TVStartView: View {
 
 struct TVPartyView: View {
     @Environment(TVModel.self) private var model
-    /// Heights of everything in the now-playing column except the artwork, which takes the rest.
-    @State private var headerHeight: CGFloat = 82
+    /// Height of everything in the now-playing column under the artwork, which takes the rest.
     @State private var footerHeight: CGFloat = 200
+    /// The logo's visible top and left margin from the screen edges, level with the capitals in
+    /// "Up next". The image has 6.5pt of empty space above the arc and 1pt to its left.
+    static let logoInset: CGFloat = 71
 
     var body: some View {
         let session = model.session
         let current = session.state.current
         GeometryReader { geo in
-            let art = max(300, (geo.size.height - headerHeight - footerHeight).rounded(.down))
+            // As big as fits, up to a size that leaves room around the corner logo.
+            let art = min(600, max(300, (geo.size.height - footerHeight).rounded(.down)))
             HStack(alignment: .top, spacing: 70) {
-                // Now playing: the logo lines up with "Up next" and the artwork grows to fill the height.
+                // Now playing.
                 VStack(alignment: .leading, spacing: 0) {
-                    Image("CanopyLogo")
-                        .resizable()
-                        .scaledToFit()
-                        .frame(height: 46)
-                        // Matches the space above the capitals in "Up next".
-                        .padding(.top, 4.5)
-                        .padding(.bottom, 36)
-                        .onGeometryChange(for: CGFloat.self, of: \.size.height) { headerHeight = $0 }
                     TVArtwork(track: current?.track, cornerRadius: 22)
                         .frame(width: art, height: art)
                         .shadow(color: .black.opacity(0.4), radius: 30, y: 16)
@@ -252,7 +247,7 @@ struct TVPartyView: View {
                 }
                 .frame(width: art, alignment: .leading)
                 // Centered in whatever the sidebar leaves.
-                .frame(maxWidth: .infinity)
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
 
                 // Up next + how to join.
                 VStack(alignment: .leading, spacing: 18) {
@@ -287,6 +282,15 @@ struct TVPartyView: View {
             }
         }
         .foregroundStyle(.white)
+        .overlay(alignment: .topLeading) {
+            Image("CanopyLogo")
+                .resizable()
+                .scaledToFit()
+                .frame(height: 46)
+                .padding(.top, Self.logoInset - 6.5)
+                .padding(.leading, Self.logoInset - 1)
+                .ignoresSafeArea()
+        }
     }
 }
 

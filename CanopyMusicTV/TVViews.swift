@@ -11,11 +11,21 @@ struct TVRootView: View {
     /// Saving the party failed: try again, or end without saving.
     @State private var saveError: String?
 
+    /// `-capture` (debug builds, as on the iPad): screenshots for the App Store and the README,
+    /// so the lyrics takeover never shows in them.
+    private static var capturing: Bool {
+        #if DEBUG
+        ProcessInfo.processInfo.arguments.contains("-capture")
+        #else
+        false
+        #endif
+    }
+
     var body: some View {
         let current = model.session.state.current
         // The same takeover as the iPad's, as a hub or a display (a display's time comes from
         // its hub's snapshots).
-        let takeover = model.role == .choosing ? nil : easterEgg.takeover(for: current)
+        let takeover = model.role == .choosing || Self.capturing ? nil : easterEgg.takeover(for: current)
         ZStack {
             TVBackground(track: current?.track, theme: ArtworkTheme(current?.track.colors))
             switch model.role {

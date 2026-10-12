@@ -299,3 +299,90 @@ let base = PlaylistSummary(id: "p", name: "Base", kind: .library)
         #expect(Set(list.rows.map(\.trackID)).isDisjoint(with: session.state.upNext.map(\.track.id)))
     }
 }
+
+/// A catalog that leaves some songs out of a playlist, as Apple Music does with uploads.
+struct SkippingCatalog: MusicCatalog {
+    var skipped: [String: [QueueTrack]]
+    func searchSongs(_ term: String) async throws -> [QueueTrack] { [] }
+    func libraryPlaylists() async throws -> [PlaylistSummary] { [] }
+    func searchPlaylists(_ term: String) async throws -> [PlaylistSummary] { [] }
+    func tracks(in playlist: PlaylistSummary) async throws -> [QueueTrack] {
+        if playlist.id == "broken" { throw URLError(.notConnectedToInternet) }
+        return ["a", "b"].map(track)
+    }
+    func loadReport(for playlist: PlaylistSummary) async -> PlaylistLoadReport? {
+        guard let tracks = skipped[playlist.id] else { return nil }
+        var report = PlaylistLoadReport(playlistID: playlist.id)
+        report.skipped = tracks
+        return report
+    }
+}
+
+/// Hosts are told when a playlist loads without some of its songs.
+@MainActor
+@Suite struct SkippedOnLoadTests {
+    let five = (1...5).map { QueueTrack(id: "u\($0)", title: "Upload \($0)", artist: "Someone") }
+    var catalog: SkippingCatalog { SkippingCatalog(skipped: ["p": five, "q": []]) }
+
+    @Test func loadKeepsTheSkippedSongsAndSnapshotsCountThem() async throws {
+        let session = PartySession(catalog: catalog, engine: FakeEngine())
+        #expect(session.snapshot().skippedOnLoad == nil)
+        try await session.load(playlist: base)
+        #expect(session.skippedOnLoad == five)
+        let snapshot = session.snapshot()
+        #expect(snapshot.skippedOnLoad == 5)
+        #expect(snapshot.skippedTitles == ["Upload 1", "Upload 2", "Upload 3"])
+    }
+
+    @Test func listenersHearAboutIt() async throws {
+        let session = PartySession(catalog: catalog, engine: FakeEngine())
+        var updates = session.snapshots().makeAsyncIterator()
+        _ = await updates.next()
+        try await session.load(playlist: base)
+        #expect(await updates.next()?.skippedOnLoad == 5)
+    }
+
+    @Test func nextPlaylistClearsIt() async throws {
+        let session = PartySession(catalog: catalog, engine: FakeEngine())
+        try await session.load(playlist: base)
+        try await session.load(playlist: PlaylistSummary(id: "q", name: "Other", kind: .library))
+        #expect(session.skippedOnLoad.isEmpty)
+        #expect(session.snapshot().skippedOnLoad == nil)
+        #expect(session.snapshot().skippedTitles == nil)
+        // A playlist with no report at all (e.g. a catalog playlist) too.
+        try await session.load(playlist: base)
+        try await session.load(playlist: PlaylistSummary(id: "c", name: "Catalog", kind: .catalog))
+        #expect(session.skippedOnLoad.isEmpty)
+    }
+
+    @Test func aFailedLoadKeepsTheCurrentPlaylistsNote() async throws {
+        let session = PartySession(catalog: catalog, engine: FakeEngine())
+        try await session.load(playlist: base)
+        await #expect(throws: URLError.self) {
+            try await session.load(playlist: PlaylistSummary(id: "broken", name: "Broken", kind: .library))
+        }
+        #expect(session.state.playlistName == "Base")
+        #expect(session.snapshot().skippedOnLoad == 5)
+    }
+
+    @Test func snapshotsWithoutItStillDecode() throws {
+        var snapshot = PartySession(catalog: catalog, engine: FakeEngine()).snapshot()
+        snapshot.skippedOnLoad = 2
+        snapshot.skippedTitles = ["x", "y"]
+        var json = try #require(try JSONSerialization.jsonObject(with: JSONEncoder().encode(snapshot)) as? [String: Any])
+        #expect(json["skippedOnLoad"] as? Int == 2)
+        json["skippedOnLoad"] = nil
+        json["skippedTitles"] = nil
+        let decoded = try JSONDecoder().decode(PartySnapshot.self, from: JSONSerialization.data(withJSONObject: json))
+        #expect(decoded.skippedOnLoad == nil)
+    }
+
+    @Test func demoRoadTripSkipsSongs() async throws {
+        let demo = DemoCatalog()
+        let roadTrip = try #require(try await demo.libraryPlaylists().first { $0.id == "demo-skips" })
+        let session = PartySession(catalog: demo, engine: FakeEngine())
+        try await session.load(playlist: roadTrip)
+        #expect(session.skippedOnLoad.count == 4)
+        #expect(!session.state.upNext.isEmpty)
+    }
+}

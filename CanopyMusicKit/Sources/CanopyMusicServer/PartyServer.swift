@@ -178,7 +178,9 @@ public final class PartyServer: Sendable {
             } catch {
                 return .serviceFailed(error)
             }
-            return HTTPResponse(statusCode: .ok)
+            // Which songs were left out, as in snapshots, so the page can say so straight away.
+            let snapshot = await session.snapshot()
+            return try .json(PlaylistLoaded(skippedOnLoad: snapshot.skippedOnLoad ?? 0, skippedTitles: snapshot.skippedTitles ?? []))
         }
 
         await server.appendRoute("POST /api/host/settings") { request in
@@ -268,6 +270,11 @@ struct PlaylistBody: Decodable {
     var key: String
     var playlist: PlaylistSummary
     var play: Bool?
+}
+
+struct PlaylistLoaded: Codable {
+    var skippedOnLoad: Int
+    var skippedTitles: [String]
 }
 
 struct HostDetails: Encodable {

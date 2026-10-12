@@ -180,6 +180,11 @@ struct RootView: View {
                let first = try? await model.session.catalog.libraryPlaylists().first {
                 await model.load(first)
             }
+            // `-autoLoadPlaylist <id>` loads that demo playlist (e.g. `demo-skips`, which leaves songs out).
+            if let i = args.firstIndex(of: "-autoLoadPlaylist"), i + 1 < args.count, model.isDemo,
+               let playlist = try? await model.session.catalog.libraryPlaylists().first(where: { $0.id == args[i + 1] }) {
+                await model.load(playlist)
+            }
             // `-autoResume` resumes a restored party, for testing playback without touching the iPad.
             if ProcessInfo.processInfo.arguments.contains("-autoResume") {
                 await model.play()

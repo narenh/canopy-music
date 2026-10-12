@@ -9,6 +9,7 @@ struct HostView: View {
     @State private var showPicker = false
     @State private var showSettings = false
     @State private var showSubscriptionOffer = false
+    @State private var showSkipped = false
     @State private var scrollTarget: UUID?
 
     private var session: PartySession { model.session }
@@ -41,6 +42,9 @@ struct HostView: View {
         .onAppear {
             if ProcessInfo.processInfo.arguments.contains("-showSettings") { showSettings = true }
             if ProcessInfo.processInfo.arguments.contains("-showPicker") { showPicker = true }
+            if ProcessInfo.processInfo.arguments.contains("-showSkipped") {
+                Task { try? await Task.sleep(for: .seconds(2)); showSkipped = true }
+            }
         }
         #endif
         .alert("Something went wrong", isPresented: Binding(get: { model.errorMessage != nil }, set: { if !$0 { model.errorMessage = nil } })) {
@@ -501,6 +505,9 @@ private extension HostView {
                     .font(.system(size: 17, weight: .semibold))
                     .foregroundStyle(.white)
                     .lineLimit(1)
+                if !session.skippedOnLoad.isEmpty {
+                    skippedNote
+                }
                 if let current = session.state.current {
                     Text("Playing \(current.track.title) · \(current.track.artist)")
                         .font(.system(size: 13))
@@ -532,6 +539,59 @@ private extension HostView {
         .padding(.horizontal, 12)
         .padding(.top, 12)
         .padding(.bottom, 8)
+    }
+
+    /// "3 songs aren't on Apple Music": the base playlist loaded without them. Tap for the list.
+    var skippedNote: some View {
+        let count = session.skippedOnLoad.count
+        let service = session.serviceName ?? model.provider.title
+        return Button { showSkipped = true } label: {
+            Label(count == 1 ? "1 song isn't on \(service)" : "\(count) songs aren't on \(service)",
+                  systemImage: "exclamationmark.circle")
+                .font(.system(size: 13, weight: .medium))
+                .foregroundStyle(.orange)
+                .lineLimit(1)
+        }
+        .buttonStyle(.plain)
+        .popover(isPresented: $showSkipped, arrowEdge: .top) {
+            SkippedSongsView(songs: session.skippedOnLoad, service: service)
+                .preferredColorScheme(.dark)
+        }
+    }
+}
+
+/// The songs a base playlist loaded without.
+private struct SkippedSongsView: View {
+    let songs: [QueueTrack]
+    let service: String
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            Text("Not on \(service), so they won't play.")
+                .font(.system(size: 15, weight: .semibold))
+                .padding(.horizontal, 20)
+                .padding(.top, 18)
+                .padding(.bottom, 10)
+            ScrollView {
+                LazyVStack(alignment: .leading, spacing: 12) {
+                    ForEach(Array(songs.enumerated()), id: \.offset) { _, song in
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text(song.title)
+                                .font(.system(size: 15))
+                                .lineLimit(1)
+                            Text(song.artist)
+                                .font(.system(size: 13))
+                                .foregroundStyle(.secondary)
+                                .lineLimit(1)
+                        }
+                    }
+                }
+                .padding(.horizontal, 20)
+                .padding(.bottom, 18)
+            }
+        }
+        // Popovers don't size to a scroll view's content: about 46 points a song, up to 420.
+        .frame(width: 340, height: min(420, 62 + CGFloat(songs.count) * 46))
     }
 }
 

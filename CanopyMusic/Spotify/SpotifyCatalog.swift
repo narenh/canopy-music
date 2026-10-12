@@ -4,6 +4,8 @@ import Foundation
 /// Search and playlists through the Spotify Web API. Track ids are Spotify URIs.
 struct SpotifyCatalog: MusicCatalog {
     let api: SpotifyAPI
+    /// Which songs the latest loads left out (local files and anything else that isn't a track).
+    var reports = PlaylistLoadReports()
 
     /// Development Mode caps search at 10 per request, so fetch two pages.
     func searchSongs(_ term: String) async throws -> [QueueTrack] {
@@ -38,13 +40,28 @@ struct SpotifyCatalog: MusicCatalog {
 
     func tracks(in playlist: PlaylistSummary) async throws -> [QueueTrack] {
         var tracks: [QueueTrack] = []
+        var report = PlaylistLoadReport(playlistID: playlist.id)
         var page = try await api.get("/playlists/\(playlist.id)/items", query: ["limit": "50"], as: SpotifyPage<PlaylistEntry>.self)
         while let current = page {
-            tracks += current.items.compactMap { ($0.item ?? $0.track).flatMap(QueueTrack.init(spotify:)) }
+            for object in current.items.compactMap({ $0.item ?? $0.track }) {
+                if let track = QueueTrack(spotify: object) {
+                    tracks.append(track)
+                } else {
+                    report.skipped.append(QueueTrack(id: object.uri, title: object.name, artist: object.artists.map(\.name).joined(separator: ", "),
+                                                     album: object.album?.name ?? ""))
+                }
+            }
             guard let next = current.next else { break }
             page = try await api.getNext(next, as: SpotifyPage<PlaylistEntry>.self)
         }
+        report.loaded = tracks.count
+        report.total = tracks.count + report.skipped.count
+        await reports.record(report)
         return tracks
+    }
+
+    func loadReport(for playlist: PlaylistSummary) async -> PlaylistLoadReport? {
+        await reports.report(for: playlist.id)
     }
 
     private struct PlaylistObject: Decodable, Sendable {

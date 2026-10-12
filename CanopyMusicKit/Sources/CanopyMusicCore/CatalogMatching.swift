@@ -166,3 +166,20 @@ public struct PlaylistLoadReport: Sendable, Equatable {
         self.playlistID = playlistID
     }
 }
+
+/// The latest `PlaylistLoadReport` per playlist, and the very latest.
+public actor PlaylistLoadReports {
+    public private(set) var last: PlaylistLoadReport?
+    private var byPlaylist: [String: PlaylistLoadReport] = [:]
+
+    public init() {}
+
+    public func record(_ report: PlaylistLoadReport) {
+        last = report
+        byPlaylist[report.playlistID] = report
+    }
+
+    public func report(for playlistID: String) -> PlaylistLoadReport? {
+        byPlaylist[playlistID]
+    }
+}

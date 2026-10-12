@@ -21,6 +21,15 @@ struct CanopyMusicTVApp: App {
                 TVRootView()
                     .environment(model)
                     .preferredColorScheme(.dark)
+                    .task {
+                        // `-diagnosePlaylist <name>` (as on the iPad): how a library playlist's songs
+                        // map to catalog songs, in Library/Caches/playlist-diagnosis.txt and the console.
+                        let args = ProcessInfo.processInfo.arguments
+                        if let i = args.firstIndex(of: "-diagnosePlaylist"), i + 1 < args.count {
+                            if MusicAuthorization.currentStatus == .notDetermined { _ = await MusicAuthorization.request() }
+                            await AppleMusicCatalog.diagnosePlaylist(named: args[i + 1])
+                        }
+                    }
             }
             #else
             TVRootView()

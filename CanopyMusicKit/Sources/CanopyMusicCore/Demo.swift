@@ -80,6 +80,7 @@ public struct DemoCatalog: MusicCatalog {
             PlaylistSummary(id: "demo-party", name: "House party", subtitle: "30 songs", kind: .library),
             PlaylistSummary(id: "demo-chill", name: "Sunday chill", subtitle: "12 songs", kind: .library),
             PlaylistSummary(id: "demo-big", name: "Big party", subtitle: "400 songs", kind: .library),
+            PlaylistSummary(id: "demo-skips", name: "Road trip", subtitle: "34 songs, 4 can't play", kind: .library),
         ] + (ProcessInfo.processInfo.arguments.contains("-manyPlaylists") ? Self.manyPlaylists : [])
     }
 
@@ -100,6 +101,24 @@ public struct DemoCatalog: MusicCatalog {
         default: Self.allTracks
         }
     }
+
+    /// "Road trip" leaves out songs as a library playlist with uploads does, so the "not on
+    /// Apple Music" note can be seen in the simulator.
+    public func loadReport(for playlist: PlaylistSummary) async -> PlaylistLoadReport? {
+        guard playlist.id == "demo-skips" else { return nil }
+        var report = PlaylistLoadReport(playlistID: playlist.id)
+        report.skipped = Self.unplayable
+        report.loaded = Self.allTracks.count
+        report.total = report.loaded + report.skipped.count
+        return report
+    }
+
+    static let unplayable: [QueueTrack] = [
+        QueueTrack(id: "demo-upload-1", title: "Harbour Lights (Live at the Lido)", artist: "The Tidelines", album: "Bootlegs"),
+        QueueTrack(id: "demo-upload-2", title: "Mum's Birthday Song", artist: "Uncle Rob", album: "Voice Memos"),
+        QueueTrack(id: "demo-upload-3", title: "Paper Planes (Demo)", artist: "Juniper Row", album: "Demos 2009"),
+        QueueTrack(id: "demo-upload-4", title: "Untitled 4", artist: "Unknown Artist", album: "Unknown Album"),
+    ]
 }
 
 /// Timer-driven fake player. Tracks last `track.duration` seconds (30 in the demo catalog).

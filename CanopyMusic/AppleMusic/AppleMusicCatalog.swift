@@ -530,21 +530,6 @@ private struct LibrarySongResource: Decodable {
     }
 }
 
-/// The latest `PlaylistLoadReport` per playlist, and the very latest.
-actor PlaylistLoadReports {
-    private(set) var last: PlaylistLoadReport?
-    private var byPlaylist: [String: PlaylistLoadReport] = [:]
-
-    func record(_ report: PlaylistLoadReport) {
-        last = report
-        byPlaylist[report.playlistID] = report
-    }
-
-    func report(for playlistID: String) -> PlaylistLoadReport? {
-        byPlaylist[playlistID]
-    }
-}
-
 // MARK: - Conversions
 
 private extension MusicKit.Track {

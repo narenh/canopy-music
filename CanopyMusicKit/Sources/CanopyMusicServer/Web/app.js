@@ -1006,12 +1006,31 @@
     };
   }
 
+  /** "3 songs aren't on Apple Music: “A”, “B” and “C”." when the base playlist loaded without some
+   * of its songs (`skippedOnLoad`, `skippedTitles` and `service` as in snapshots); "" otherwise. */
+  function skippedNote(s) {
+    const n = s.skippedOnLoad || 0;
+    if (!n) return "";
+    const head = `${n} ${n === 1 ? "song isn't" : "songs aren't"} on ${s.service || "this music service"}`;
+    const titles = (s.skippedTitles || []).map((t) => `“${t}”`);
+    if (!titles.length) return `${head}.`;
+    const list = titles.length === 1 ? titles[0] : `${titles.slice(0, -1).join(", ")} and ${titles[titles.length - 1]}`;
+    return n > titles.length ? `${head}, including ${list}.` : `${head}: ${list}.`;
+  }
+
+  /** An Apple TV has no screen for it, so its hosts hear once, when they choose the playlist. */
+  function toastSkipped(reply) {
+    if (snap && snap.hubKind === "tv" && reply && reply.skippedOnLoad) {
+      toast(skippedNote({ ...reply, service: snap.service }), 6000);
+    }
+  }
+
   // Changing the base playlist from the host page (on top of the settings sheet).
   const changePicker = playlistPicker("playlists", "playlist-list", "playlists-empty", async (p) => {
     if (!confirm(`Switch to "${p.name}"? The queue starts over and requests are cleared.`)) return;
     $("playlists").hidden = true;
     try {
-      await api("/api/host/playlist", { key: hostKey, playlist: p, play: !!(snap && snap.playback.isPlaying) });
+      toastSkipped(await api("/api/host/playlist", { key: hostKey, playlist: p, play: !!(snap && snap.playback.isPlaying) }));
     } catch { toast("Couldn't change the playlist"); }
   });
   $("settings-playlist-change").addEventListener("click", () => {
@@ -1039,9 +1058,10 @@
     try {
       const name = $("setup-name").value.trim();
       if (name) await api("/api/host/settings", { key: hostKey, zoneName: name });
-      await api("/api/host/playlist", { key: hostKey, playlist: setupPick, play: true });
+      const reply = await api("/api/host/playlist", { key: hostKey, playlist: setupPick, play: true });
       setupDismissed = true;
       $("setup").hidden = true;
+      toastSkipped(reply);
     } catch {
       toast("Couldn't start. Try again.");
       $("setup-start").disabled = false;
@@ -1067,6 +1087,9 @@
     $("settings-address-row").hidden = !snap.address;
     $("settings-address").textContent = snap.address || "";
     $("settings-playlist").textContent = snap.playlistName || "None yet";
+    const skipped = skippedNote(snap);
+    $("settings-playlist-skipped").hidden = !skipped;
+    $("settings-playlist-skipped").textContent = skipped;
     $("settings-queue").checked = snap.canQueue !== false;
     $("settings-reorder").checked = snap.canReorder !== false;
     $("settings-displays").checked = snap.displaysCanControl !== false;

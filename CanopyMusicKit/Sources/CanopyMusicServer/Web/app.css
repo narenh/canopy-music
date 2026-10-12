@@ -213,4 +213,6 @@ html.sheet-open, html.sheet-open body { overflow: hidden; }
 .danger-btn[hidden] { display: none; }
 .modal-card.centered { text-align: center; }
 .modal-card .small { font-size: 12px; margin: 12px 0 0; }
+.modal-card .skipped-note { color: #ffb340; margin: 8px 2px 4px; }
+.skipped-note[hidden] { display: none; }
 .invite-qr { width: 220px; height: 220px; image-rendering: pixelated; background: #fff; border-radius: 14px; padding: 10px; }

@@ -232,6 +232,30 @@ struct HostSettingsTests {
         #expect(text.contains("hunter22") && text.contains("Kitchen iPad"))
     }
 
+    /// Choosing a playlist on the web answers with the songs it left out, for a toast.
+    @Test func choosingAPlaylistSaysWhatWasSkipped() async throws {
+        let hub = PartySession(catalog: DemoCatalog(), engine: DemoPlaybackEngine())
+        hub.hostKey = "secret"
+        let (server, task) = try #require(await PartyServer.start(session: hub, ports: [18798]))
+        defer { task.cancel(); Task { await server.stop() } }
+
+        func choose(_ id: String) async throws -> PlaylistLoaded {
+            let playlist = try #require(try await DemoCatalog().libraryPlaylists().first { $0.id == id })
+            let json = try #require(try JSONSerialization.jsonObject(with: JSONEncoder.api.encode(playlist)))
+            let (code, data) = try await post(18798, "/api/host/playlist", ["key": "secret", "playlist": json])
+            #expect(code == 200)
+            return try JSONDecoder.api.decode(PlaylistLoaded.self, from: data)
+        }
+        let roadTrip = try await choose("demo-skips")
+        #expect(roadTrip.skippedOnLoad == 4)
+        #expect(roadTrip.skippedTitles.count == PartySession.skippedTitlesInSnapshots)
+        let state = try await URLSession.shared.data(from: URL(string: "http://127.0.0.1:18798/api/state")!).0
+        #expect(try JSONDecoder.api.decode(PartySnapshot.self, from: state).skippedOnLoad == 4)
+        let party = try await choose("demo-party")
+        #expect(party.skippedOnLoad == 0)
+        #expect(hub.snapshot().skippedOnLoad == nil)
+    }
+
     @Test func forgettingHostsGivesTheAskerANewKey() async throws {
         let hub = PartySession(catalog: DemoCatalog(), engine: DemoPlaybackEngine())
         hub.hostKey = "old"

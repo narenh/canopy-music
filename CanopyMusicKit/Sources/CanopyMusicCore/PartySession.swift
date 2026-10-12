@@ -52,6 +52,11 @@ public struct PartySnapshot: Codable, Equatable, Sendable {
     public var hostPhones: Int?
     /// The hub's device ID, so a phone keeps one host key per hub whatever address it used.
     public var hubID: String?
+    /// How many of the base playlist's songs were left out when it loaded, because they can't be
+    /// played (e.g. not on Apple Music). nil when none were.
+    public var skippedOnLoad: Int?
+    /// The first few of those songs' titles.
+    public var skippedTitles: [String]?
 }
 
 /// Owns the queue and keeps the player in step with it. Both the iPad UI and the phone server
@@ -94,6 +99,11 @@ public final class PartySession {
     @ObservationIgnored public var onForgetHostPhones: (@MainActor () -> String?)?
     /// The hub's guest address by IP, from the hub (display) or set by the app (hub).
     public var lanAddress: String?
+    /// Songs of the base playlist left out when it loaded because they can't be played (hub only).
+    /// Replaced by the next playlist's.
+    public private(set) var skippedOnLoad: [QueueTrack] = []
+    /// How many of their titles snapshots carry.
+    public static let skippedTitlesInSnapshots = 3
     /// Displays that have checked in recently (hub only).
     public private(set) var displays: [ZoneDisplay] = []
     /// Called when a host changes settings from the web page, so the app can save them.
@@ -224,10 +234,12 @@ public final class PartySession {
     public func load(playlist: PlaylistSummary) async throws {
         guard remote == nil else { return }
         let tracks = try await catalog.tracks(in: playlist)
+        let skipped = await catalog.loadReport(for: playlist)?.skipped ?? []
         if engine.isPlaying { engine.pause() }
         stagedItemID = nil
         loadedItemID = nil
         isPlaying = false
+        skippedOnLoad = skipped
         mutate { $0.load(playlist: tracks, name: playlist.name) }
     }
 
@@ -444,7 +456,9 @@ public final class PartySession {
             history: Array(state.history.prefix(20)),
             canQueue: phonesCanQueue,
             hostPhones: hostPhoneCount,
-            hubID: hubID
+            hubID: hubID,
+            skippedOnLoad: skippedOnLoad.isEmpty ? nil : skippedOnLoad.count,
+            skippedTitles: skippedOnLoad.isEmpty ? nil : skippedOnLoad.prefix(Self.skippedTitlesInSnapshots).map(\.title)
         )
     }
 

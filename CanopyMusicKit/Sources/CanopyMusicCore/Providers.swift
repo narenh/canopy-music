@@ -6,6 +6,13 @@ public protocol MusicCatalog: Sendable {
     func libraryPlaylists() async throws -> [PlaylistSummary]
     func searchPlaylists(_ term: String) async throws -> [PlaylistSummary]
     func tracks(in playlist: PlaylistSummary) async throws -> [QueueTrack]
+    /// How the latest `tracks(in:)` for `playlist` went, including the songs it left out because
+    /// they can't be played. nil when there's nothing to report.
+    func loadReport(for playlist: PlaylistSummary) async -> PlaylistLoadReport?
+}
+
+public extension MusicCatalog {
+    func loadReport(for playlist: PlaylistSummary) async -> PlaylistLoadReport? { nil }
 }
 
 public enum PlaybackEvent: Sendable, Equatable {

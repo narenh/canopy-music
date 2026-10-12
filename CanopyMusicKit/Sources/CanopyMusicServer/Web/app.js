@@ -175,6 +175,7 @@
     $("t-play").setAttribute("aria-label", playing ? "Pause" : "Play");
     $("zone-device").innerHTML = snap.hubKind === "tv" ? icons.tv : icons.ipad;
     $("zone-name").textContent = snap.zoneName || "";
+    document.title = snap.zoneName ? `${snap.zoneName} - Canopy Music` : "Canopy Music";
     $("zone-line").hidden = !snap.zoneName;
     $("playlist-name").textContent = snap.playlistName || "";
     $("playlist-line").hidden = !snap.playlistName;

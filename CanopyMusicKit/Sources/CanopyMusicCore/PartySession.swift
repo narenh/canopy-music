@@ -417,7 +417,14 @@ public final class PartySession {
     private func play(_ item: QueueItem) async throws {
         stagedItemID = nil
         loadedItemID = item.id
-        try await engine.play(item.track)
+        do {
+            try await engine.play(item.track)
+        } catch {
+            // Nothing is loaded, so nothing gets staged behind it. Staging onto a player whose
+            // play just failed can hang (Apple Music on tvOS reconnects on the main thread).
+            loadedItemID = nil
+            throw error
+        }
         isPlaying = engine.isPlaying
         broadcast()
         Task { await syncStaging() }

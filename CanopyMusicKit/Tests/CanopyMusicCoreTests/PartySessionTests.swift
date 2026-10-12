@@ -13,7 +13,13 @@ final class FakeEngine: PlaybackEngine {
 
     init(canReplaceStaged: Bool = true) { self.canReplaceStaged = canReplaceStaged }
 
-    func play(_ track: QueueTrack) async throws { playing = track; staged = nil; isPlaying = true }
+    /// Thrown by the next `play`, then cleared.
+    var playError: Error?
+
+    func play(_ track: QueueTrack) async throws {
+        if let playError { self.playError = nil; throw playError }
+        playing = track; staged = nil; isPlaying = true
+    }
     func stage(_ track: QueueTrack?) async throws { staged = track }
     func resume() async throws { isPlaying = true }
     func pause() { isPlaying = false }
@@ -233,5 +239,24 @@ let base = PlaylistSummary(id: "p", name: "Base", kind: .library)
         engine.currentTime = 95
         let next = try #require(await snapshots.next())
         #expect(abs(next.playback.position - 95) < 0.01)
+    }
+}
+
+@MainActor
+@Suite struct PlayFailureTests {
+    /// A failed play leaves nothing loaded, so nothing is staged onto the broken player.
+    @Test func failedPlayStagesNothing() async throws {
+        let engine = FakeEngine()
+        let session = PartySession(catalog: StubCatalog(ids: ["a", "b", "c"]), engine: engine)
+        try await session.load(playlist: base)
+        engine.playError = URLError(.cannotConnectToHost)
+        await #expect(throws: (any Error).self) { try await session.play() }
+        await settle()
+        #expect(engine.staged == nil)
+        // Pressing play again works and stages as usual.
+        try await session.play()
+        await settle()
+        #expect(engine.playing?.id == "a")
+        #expect(engine.staged?.id == "b")
     }
 }

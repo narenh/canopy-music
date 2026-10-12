@@ -46,8 +46,18 @@
 
   // Coming from the IP address, the link carries this phone's existing ID (`cid`), so it's still
   // the same phone here.
-  if (params.get("cid") && !store.get("canopy.clientId")) store.set("canopy.clientId", params.get("cid").slice(0, 64));
+  const handedId = params.get("cid") ? params.get("cid").slice(0, 64) : null;
+  if (handedId && !store.get("canopy.clientId")) store.set("canopy.clientId", handedId);
   const clientId = store.get("canopy.clientId") || (() => { const id = uuid(); store.set("canopy.clientId", id); return id; })();
+  // Each address keeps its own storage, so a phone that used the IP address while it already had
+  // an ID here has two. Both are this phone: its songs show as "You" and it can remove them.
+  let otherIds = [];
+  try { otherIds = JSON.parse(store.get("canopy.otherIds") || "[]"); } catch {}
+  if (handedId && handedId !== clientId && !otherIds.includes(handedId)) {
+    otherIds = [...otherIds, handedId].slice(-5);
+    store.set("canopy.otherIds", JSON.stringify(otherIds));
+  }
+  const myIds = new Set([clientId, ...otherIds]);
   // A link can carry a name (`?name=Sam`), which skips the name prompt.
   const linkName = params.get("name");
   if (linkName) { store.set("canopy.name", linkName.slice(0, 30)); store.set("canopy.nameAsked", "1"); }
@@ -170,7 +180,7 @@
   function requesterLabel(item) {
     const r = item.requester;
     if (!r) return null;
-    if (r.clientID === clientId) return { text: "You", mine: true };
+    if (myIds.has(r.clientID)) return { text: "You", mine: true };
     if (r.name) return { text: r.name, mine: false };
     return { text: r.origin === "ipad" ? "iPad" : "Guest", mine: false };
   }
@@ -344,7 +354,10 @@
     const id = li.dataset.id;
     li.animate([{ opacity: 1 }, { opacity: 0, transform: "translateX(24px)" }], { duration: 200, fill: "forwards" });
     try {
-      await api("/api/remove", { id, clientId, key: hosting() ? hostKey : undefined });
+      // Removing your own song: say it with the ID it was added under.
+      const item = snap && snap.upNext.find((i) => i.id === id);
+      const owner = item && item.requester && myIds.has(item.requester.clientID) ? item.requester.clientID : clientId;
+      await api("/api/remove", { id, clientId: owner, key: hosting() ? hostKey : undefined });
     } catch {
       toast("Couldn't remove that one");
       if (snap) render();

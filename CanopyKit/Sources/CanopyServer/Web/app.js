@@ -151,6 +151,7 @@
     // The host can turn off reordering from phones (host control can always reorder).
     document.querySelector(".list-head .hint").hidden = snap.canReorder === false && !hosting();
     $("transport").hidden = !hosting();
+    renderHost();
     const playing = !!(current && snap.playback.isPlaying);
     $("t-play").innerHTML = playing ? icons.pause : icons.play;
     $("t-play").setAttribute("aria-label", playing ? "Pause" : "Play");
@@ -606,6 +607,144 @@
     store.set("canopy.hostMode", hostMode ? "host" : "guest");
     updateNameChip();
     if (snap) render();
+  });
+
+  // MARK: Host: base playlist, zone settings, another host, first setup
+
+  let playlistsCache = null;
+  let setupPick = null;
+  let setupDismissed = false;
+  const keyQuery = () => `key=${encodeURIComponent(hostKey || "")}`;
+
+  function renderHost() {
+    const on = hosting();
+    $("host-playlist").hidden = !on;
+    $("host-links").hidden = !on;
+    if (!on) { $("setup").hidden = true; return; }
+    $("host-playlist-name").textContent = snap.playlistName || "None yet";
+    // A TV zone has no screens of its own for setup: the first host does it here.
+    const needsSetup = snap.hubKind === "tv" && !snap.playlistName && !setupDismissed;
+    if (needsSetup && $("setup").hidden) openSetup();
+    if (!needsSetup) $("setup").hidden = true;
+  }
+
+  async function loadPlaylists() {
+    if (playlistsCache) return playlistsCache;
+    playlistsCache = await api(`/api/host/playlists?${keyQuery()}`);
+    return playlistsCache;
+  }
+
+  function fillPlaylists(list, emptyEl, playlists, selectedId, onPick) {
+    list.innerHTML = "";
+    emptyEl.hidden = playlists.length > 0;
+    emptyEl.textContent = "No playlists in this library.";
+    for (const p of playlists) {
+      const li = document.createElement("li");
+      li.className = "playlist-row" + (p.id === selectedId ? " selected" : "");
+      const art = document.createElement("div");
+      art.className = "art";
+      if (p.artworkURL) art.style.backgroundImage = `url("${p.artworkURL}")`;
+      const meta = document.createElement("div");
+      const title = document.createElement("p");
+      title.textContent = p.name;
+      const sub = document.createElement("p");
+      sub.className = "row-sub";
+      sub.textContent = p.subtitle || "";
+      meta.append(title, sub);
+      li.append(art, meta);
+      if (p.id === selectedId) {
+        const check = document.createElement("span");
+        check.className = "check";
+        check.innerHTML = icons.check;
+        li.append(check);
+      }
+      li.addEventListener("click", () => onPick(p));
+      list.append(li);
+    }
+  }
+
+  // Changing the base playlist from the host page.
+  $("host-playlist-change").addEventListener("click", async () => {
+    $("playlists").hidden = false;
+    $("playlists-empty").hidden = false;
+    $("playlists-empty").textContent = "Loading playlists…";
+    try {
+      const playlists = await loadPlaylists();
+      fillPlaylists($("playlist-list"), $("playlists-empty"), playlists, null, async (p) => {
+        if (!confirm(`Switch to "${p.name}"? The queue starts over and requests are cleared.`)) return;
+        $("playlists").hidden = true;
+        try {
+          await api("/api/host/playlist", { key: hostKey, playlist: p, play: !!(snap && snap.playback.isPlaying) });
+        } catch { toast("Couldn't change the playlist"); }
+      });
+    } catch {
+      $("playlists-empty").textContent = "Couldn't load playlists.";
+    }
+  });
+  $("playlists-done").addEventListener("click", () => { $("playlists").hidden = true; });
+
+  async function openSetup() {
+    $("setup").hidden = false;
+    $("setup-name").value = snap.zoneName || "";
+    $("setup-sub").textContent = `You're hosting ${snap.hubKind === "tv" ? "the Apple TV" : "this zone"}. Guests can join once music is playing.`;
+    $("setup-empty").hidden = false;
+    $("setup-empty").textContent = "Loading playlists…";
+    const redraw = (playlists) => fillPlaylists($("setup-playlists"), $("setup-empty"), playlists, setupPick && setupPick.id, (p) => {
+      setupPick = p;
+      $("setup-start").disabled = false;
+      redraw(playlists);
+    });
+    try { redraw(await loadPlaylists()); } catch { $("setup-empty").textContent = "Couldn't load playlists."; }
+  }
+  $("setup-start").addEventListener("click", async () => {
+    if (!setupPick) return;
+    $("setup-start").disabled = true;
+    try {
+      const name = $("setup-name").value.trim();
+      if (name) await api("/api/host/settings", { key: hostKey, zoneName: name });
+      await api("/api/host/playlist", { key: hostKey, playlist: setupPick, play: true });
+      setupDismissed = true;
+      $("setup").hidden = true;
+    } catch {
+      toast("Couldn't start. Try again.");
+      $("setup-start").disabled = false;
+    }
+  });
+
+  // Another host: the hub draws the QR code.
+  $("host-invite").addEventListener("click", () => {
+    $("invite-img").src = `/api/host/invite.png?${keyQuery()}&t=${Date.now()}`;
+    $("invite-modal").hidden = false;
+  });
+  $("invite-done").addEventListener("click", () => { $("invite-modal").hidden = true; });
+
+  // Zone settings.
+  $("host-settings").addEventListener("click", () => {
+    $("settings-name").value = snap.zoneName || "";
+    $("settings-reorder").checked = snap.canReorder !== false;
+    $("settings-displays").checked = snap.displaysCanControl !== false;
+    const stop = $("settings-stop");
+    stop.hidden = snap.hubKind !== "tv";
+    stop.textContent = `Stop ${snap.zoneName || "this zone"}`;
+    $("settings-modal").hidden = false;
+  });
+  $("settings-cancel").addEventListener("click", () => { $("settings-modal").hidden = true; });
+  $("settings-form").addEventListener("submit", async (event) => {
+    event.preventDefault();
+    $("settings-modal").hidden = true;
+    try {
+      await api("/api/host/settings", {
+        key: hostKey,
+        zoneName: $("settings-name").value.trim() || undefined,
+        phonesCanReorder: $("settings-reorder").checked,
+        displaysCanControl: $("settings-displays").checked,
+      });
+    } catch { toast("Couldn't save settings"); }
+  });
+  $("settings-stop").addEventListener("click", async () => {
+    if (!confirm(`Stop ${snap.zoneName || "this zone"}? The music stops and the TV goes back to its zone list.`)) return;
+    $("settings-modal").hidden = true;
+    try { await api("/api/host/stop", { key: hostKey }); } catch { toast("Couldn't stop the zone"); }
   });
 
   $("transport").addEventListener("click", (event) => {

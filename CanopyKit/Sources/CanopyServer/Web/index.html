@@ -31,6 +31,14 @@
     <span>Search for a song</span>
   </button>
 
+  <section class="host-card" id="host-playlist" hidden>
+    <div class="host-card-text">
+      <p class="muted-label">Base playlist</p>
+      <p class="host-card-title" id="host-playlist-name">None yet</p>
+    </div>
+    <button class="pill-btn" id="host-playlist-change" type="button">Change</button>
+  </section>
+
   <section class="now" id="now" aria-live="polite">
     <div class="now-art art" id="now-art"></div>
     <div class="now-meta">
@@ -52,7 +60,62 @@
   </div>
   <ol class="queue" id="queue"></ol>
   <p class="empty" id="queue-empty" hidden>The queue's empty. Search for something to get it going.</p>
+  <div class="host-links" id="host-links" hidden>
+    <button class="text-btn" id="host-invite" type="button">Add another host</button>
+    <button class="text-btn" id="host-settings" type="button">Zone settings</button>
+  </div>
 </main>
+
+<!-- Host: first setup of a zone run by an Apple TV (it has no screens of its own for this). -->
+<section id="setup" class="sheet" hidden>
+  <img class="brand-logo" src="/logo.png" alt="Canopy">
+  <h2 class="sheet-title">Set up this zone</h2>
+  <p class="sheet-sub" id="setup-sub">You're hosting. Guests can join once music is playing.</p>
+  <p class="muted-label">Zone name</p>
+  <input class="text-input" id="setup-name" maxlength="40" autocomplete="off" enterkeyhint="done">
+  <p class="muted-label" style="margin-top:18px">Base playlist</p>
+  <ul class="playlists" id="setup-playlists"></ul>
+  <p class="empty" id="setup-empty" hidden>Loading playlists…</p>
+  <button class="primary-btn wide" id="setup-start" type="button" disabled>Start the music</button>
+</section>
+
+<!-- Host: choose the base playlist. -->
+<section id="playlists" class="sheet" hidden>
+  <div class="search-bar">
+    <h2 class="sheet-title" style="flex:1;margin:0">Base playlist</h2>
+    <button class="text-btn" id="playlists-done" type="button">Done</button>
+  </div>
+  <p class="sheet-sub">Changing it starts the queue over; requests are cleared.</p>
+  <ul class="playlists" id="playlist-list"></ul>
+  <p class="empty" id="playlists-empty" hidden>Loading playlists…</p>
+</section>
+
+<!-- Host: add another host. -->
+<div id="invite-modal" class="modal" hidden>
+  <div class="modal-card centered">
+    <h2>Add another host</h2>
+    <p>Scan with the other phone's camera.</p>
+    <img class="invite-qr" id="invite-img" alt="Host Control QR code">
+    <p class="small">Gives play, pause, skip, reorder and delete. Nothing changes for anyone else.</p>
+    <div class="modal-actions"><button type="button" class="primary-btn" id="invite-done">Done</button></div>
+  </div>
+</div>
+
+<!-- Host: zone settings. -->
+<div id="settings-modal" class="modal" hidden>
+  <form class="modal-card" id="settings-form">
+    <h2>Zone settings</h2>
+    <p class="muted-label" style="margin-top:14px">Zone name</p>
+    <input class="text-input" id="settings-name" maxlength="40" autocomplete="off" enterkeyhint="done">
+    <label class="setting-row"><span>Reorder from phones</span><input type="checkbox" class="switch" id="settings-reorder"></label>
+    <label class="setting-row"><span>Playback controls on displays</span><input type="checkbox" class="switch" id="settings-displays"></label>
+    <button type="button" class="danger-btn" id="settings-stop" hidden></button>
+    <div class="modal-actions">
+      <button type="button" class="text-btn" id="settings-cancel">Cancel</button>
+      <button type="submit" class="primary-btn">Done</button>
+    </div>
+  </form>
+</div>
 
 <section id="search" class="sheet" hidden>
   <div class="search-bar">

@@ -67,15 +67,6 @@ struct TVZoneListView: View {
         let zones = model.browser.zones.filter { $0.hubID != model.deviceID }
         VStack(spacing: 34) {
             Image("CanopyLogo").resizable().scaledToFit().frame(height: 70)
-            if zones.isEmpty {
-                Text(model.browser.hasSearched ? "No zones playing yet." : "Looking for zones…")
-                    .font(.system(size: 30))
-                    .foregroundStyle(.white.opacity(0.6))
-            } else {
-                Text("Zones on this Wi\u{2011}Fi")
-                    .font(.system(size: 52, weight: .bold))
-                    .foregroundStyle(.white)
-            }
             VStack(spacing: 16) {
                 ForEach(zones) { zone in
                     Button {

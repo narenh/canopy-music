@@ -15,18 +15,19 @@ struct ZoneListView: View {
                 LogoView(height: 44)
                     .padding(.top, 48)
                 List {
-                    // Hidden until a zone shows up.
-                    if !zones.isEmpty {
+                    // Hidden until there's a zone to show. This iPad's own zone from last time
+                    // comes first.
+                    if !zones.isEmpty || model.canResumeZone {
                         Section("Active Zones") {
+                            if model.canResumeZone {
+                                ZoneRow(icon: "ipad.landscape", title: model.zoneName, subtitle: "This iPad · resume") {
+                                    model.resumeZone()
+                                }
+                            }
                             zoneRows(zones)
                         }
                     }
                     Section {
-                        if model.canResumeZone {
-                            ZoneRow(icon: "ipad.landscape", title: "Resume \(model.zoneName)", subtitle: "This iPad plays the music") {
-                                model.resumeZone()
-                            }
-                        }
                         ZoneRow(icon: "plus", title: "Create a new zone", subtitle: "This iPad plays the music") {
                             model.beginCreatingZone()
                         }

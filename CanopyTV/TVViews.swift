@@ -233,14 +233,21 @@ struct TVPartyView: View {
                         .frame(width: art, height: art)
                         .shadow(color: .black.opacity(0.4), radius: 30, y: 16)
                     VStack(alignment: .leading, spacing: 0) {
-                        Text(current?.track.title ?? "Nothing playing")
+                        // Long titles shrink before they truncate, on the same baseline in a
+                        // full-size line, so the art's size and everything's position never change.
+                        Text(verbatim: " ")
                             .font(.system(size: 56, weight: .bold))
-                            .lineLimit(1)
-                            // Long titles shrink before they truncate.
-                            .minimumScaleFactor(0.6)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .hidden()
+                            .overlay(alignment: Alignment(horizontal: .leading, vertical: .lastTextBaseline)) {
+                                Text(current?.track.title ?? "Nothing playing")
+                                    .font(.system(size: 56, weight: .bold))
+                                    .lineLimit(1)
+                                    .minimumScaleFactor(0.6)
+                            }
                         // Who requested it shares the artist line, as on the iPad.
                         HStack(spacing: 16) {
-                            Text(current?.track.artist ?? "")
+                            Text(current?.track.artist ?? " ")
                                 .font(.system(size: 36))
                                 .foregroundStyle(.white.opacity(0.65))
                                 .lineLimit(1)

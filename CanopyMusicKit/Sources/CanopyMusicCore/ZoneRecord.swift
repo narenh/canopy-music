@@ -1,9 +1,9 @@
 import Foundation
 
 /// What a hub (iPad or Apple TV) remembers about its own zone between launches, so that after a
-/// crash or a quit by the system it can go straight back in. Only ending the zone clears it, or
-/// a launch finding music never started in it (docs/multi-device.md). The queue itself is saved
-/// by `PartySession`.
+/// crash or a quit by the system it can go straight back in. A zone is recorded only once music
+/// has started in it (Start on an iPad or Mac, a phone's "Start the music" on an Apple TV), and
+/// only ending it clears it (docs/multi-device.md). The queue itself is saved by `PartySession`.
 @MainActor
 public final class ZoneRecord {
     private let defaults: UserDefaults
@@ -20,59 +20,88 @@ public final class ZoneRecord {
     /// or the zone list).
     public var wasHosting: Bool { defaults.bool(forKey: Keys.hosting) }
 
-    /// Music has actually started playing in this zone at least once (not just a playlist loaded).
-    /// A zone recorded by a build from before this was kept counts as started, unless
-    /// `settleStarted` finds otherwise.
+    /// Music has actually started playing in this zone. Always true for a zone this build
+    /// recorded (it's recorded when music starts). Older builds recorded a zone as soon as it was
+    /// created: theirs say false if music never started, or nothing (unknown, counted as started
+    /// unless `settleStarted` finds otherwise).
     public var hasStarted: Bool { defaults.object(forKey: Keys.started) as? Bool ?? true }
 
-    /// The next launch goes straight back into the zone. Only a zone where music had started.
+    /// The next launch goes straight back into the zone.
     public var restoresOnLaunch: Bool { hasZone && wasHosting && hasStarted }
 
-    /// The next launch ends the zone, as End does: music never started in it, so there's nothing
-    /// to come back to, and the device starts at the zone list with nothing to resume.
+    /// The next launch ends the zone, as End does. Only a zone recorded by an older build where
+    /// music never started: there's nothing to come back to, so the device starts at the zone
+    /// list with nothing to resume.
     public var endsOnLaunch: Bool { hasZone && !hasStarted }
 
-    /// The player started a song in this zone.
-    public func started() {
-        guard hasZone else { return }
-        defaults.set(true, forKey: Keys.started)
-    }
-
-    /// Launch: a zone recorded by a build from before `hasStarted` was kept gets it now, from
-    /// whether any song played in it (the party log in its saved queue). Read only if needed.
+    /// Launch: a zone recorded by an older build that didn't say whether music started gets it
+    /// now, from whether any song played in it (the party log in its saved queue). Read only if
+    /// needed.
     public func settleStarted(songsPlayed: @autoclosure () -> Bool) {
         guard hasZone, defaults.object(forKey: Keys.started) == nil else { return }
         defaults.set(songsPlayed(), forKey: Keys.started)
     }
 
     /// iPad: the party screen was locked, so host mode was behind press and hold (and the PIN).
-    /// Unknown counts as locked: coming back in host mode would skip the PIN.
+    /// Unknown counts as locked: coming back in host mode would skip the PIN. Kept only while
+    /// there's a zone.
     public var wasLocked: Bool {
         get { defaults.object(forKey: Keys.locked) as? Bool ?? true }
-        set { defaults.set(newValue, forKey: Keys.locked) }
+        set { if hasZone { defaults.set(newValue, forKey: Keys.locked) } }
     }
 
-    /// Apple TV: a phone had taken Host Control, so the TV was past "Scan to host".
+    /// Apple TV: a phone had taken Host Control, so the TV was past "Scan to host". Kept only
+    /// while there's a zone (`began` takes it for a new one).
     public var hostJoined: Bool {
         get { defaults.bool(forKey: Keys.hostJoined) }
-        set { defaults.set(newValue, forKey: Keys.hostJoined) }
+        set { if hasZone { defaults.set(newValue, forKey: Keys.hostJoined) } }
     }
 
-    /// This device is hosting its zone: a new one (`fresh`), or the one it had.
-    public func hosting(fresh: Bool) {
+    /// Music started in a new zone on this device: from now on it's this device's zone, hosted,
+    /// unlocked, and comes back after a crash. `hostJoined`: a phone has Host Control (TV).
+    public func began(hostJoined: Bool = false) {
         defaults.set(true, forKey: Keys.hasZone)
         defaults.set(true, forKey: Keys.hosting)
-        if fresh {
-            wasLocked = false
-            hostJoined = false
-            defaults.set(false, forKey: Keys.started)
-        }
+        defaults.set(true, forKey: Keys.started)
+        defaults.set(false, forKey: Keys.locked)
+        defaults.set(hostJoined, forKey: Keys.hostJoined)
+    }
+
+    /// The player started a song (Apple TV): the zone begins with its first song, after a phone's
+    /// "Start the music". A zone already recorded (resumed, or restored) is left as it is.
+    public func songStarted(hostJoined: Bool) {
+        guard !hasZone else { return }
+        began(hostJoined: hostJoined)
+    }
+
+    /// Hosting the zone it had again (Resume, or back by itself at launch), keeping its lock and host.
+    public func resumedHosting() {
+        guard hasZone else { return }
+        defaults.set(true, forKey: Keys.hosting)
     }
 
     /// Showing the zone list or another device's zone: the zone is kept, but the next launch
     /// starts at the zone list.
     public func stoppedHosting() {
+        guard hasZone else { return }
         defaults.set(false, forKey: Keys.hosting)
+    }
+
+    /// Apple TV, until it records its zone at the first song: a zone recorded at Create.
+    public func hosting(fresh: Bool) {
+        defaults.set(true, forKey: Keys.hasZone)
+        defaults.set(true, forKey: Keys.hosting)
+        if fresh {
+            defaults.set(false, forKey: Keys.locked)
+            defaults.set(false, forKey: Keys.hostJoined)
+            defaults.set(false, forKey: Keys.started)
+        }
+    }
+
+    /// Apple TV, until it records its zone at the first song.
+    public func started() {
+        guard hasZone else { return }
+        defaults.set(true, forKey: Keys.started)
     }
 
     /// The zone was ended: nothing to resume.

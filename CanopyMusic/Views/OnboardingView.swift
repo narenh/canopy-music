@@ -23,8 +23,7 @@ struct OnboardingView: View {
                     SpotifySetupStep(
                         back: { go(.chooser) },
                         done: {
-                            // Another zone on this Spotify account asks first.
-                            guard model.chooseProvider(.spotify) else { return }
+                            model.chooseProvider(.spotify)
                             if model.isChangingService {
                                 model.finishOnboarding()
                             } else {
@@ -91,7 +90,7 @@ struct OnboardingView: View {
                     ) {
                         // Already set up (e.g. switching back from Apple Music): no need to sign in again.
                         if model.spotifyAuth.isSignedIn, !model.spotifyClientID.isEmpty {
-                            guard model.chooseProvider(.spotify) else { return }
+                            model.chooseProvider(.spotify)
                             if model.isChangingService { model.finishOnboarding() } else { networkBack = .chooser; go(.network) }
                         } else {
                             // Spotify is only chosen once sign-in succeeds in the next step.

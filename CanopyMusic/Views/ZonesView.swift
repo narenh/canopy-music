@@ -60,7 +60,7 @@ struct ZoneListView: View {
             }
         }
         .environment(\.colorScheme, .dark)
-        // The old zone is ended once the new one is created, so Cancel on the next screen keeps it.
+        // Create ends the old zone, and the start screen starts empty.
         .alert("Create a new zone?", isPresented: $confirmingCreate) {
             Button("Create", role: .destructive) { model.beginCreatingZone() }
             Button("Cancel", role: .cancel) {}
@@ -69,13 +69,17 @@ struct ZoneListView: View {
         }
         #if DEBUG
         // `-confirmCreate`: asks that question at launch (the simulator can't be tapped from here).
-        // With `-autoCreate <name>`, presses Create 8 s later and creates <name> without a PIN.
+        // With `-autoCreate <name>`, presses Create 8 s later and goes to the start screen with
+        // <name> and no PIN.
         .task {
             let args = ProcessInfo.processInfo.arguments
-            // `-fakeSpotifyConflict <zone>`: presses "Create a new zone", which asks about that zone.
+            // `-fakeSpotifyConflict <zone>`: creates a zone and presses Start, which asks about that zone.
             if args.contains("-fakeSpotifyConflict") {
                 try? await Task.sleep(for: .seconds(1))
-                createZone()
+                model.beginCreatingZone()
+                model.finishCreatingZone(name: model.zoneName, pin: model.hostPIN)
+                try? await Task.sleep(for: .seconds(1))
+                await model.startZone()
                 return
             }
             guard args.contains("-confirmCreate"), model.canResumeZone else { return }
@@ -100,9 +104,7 @@ struct ZoneListView: View {
         #endif
     }
 
-    /// With Spotify, another zone on the account asks first (`AppModel.spotifyConflict`).
     private func createZone() {
-        guard model.mayCreateZone() else { return }
         if model.canResumeZone { confirmingCreate = true } else { model.beginCreatingZone() }
     }
 

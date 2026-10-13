@@ -34,7 +34,7 @@ struct PartyPlaylistSheet: View {
             Form {
                 if purpose == .end {
                     Section {
-                        Text("The music stops for everyone and the queue is cleared. This \(DeviceKind.noun) goes back to the zone list.")
+                        Text("The music stops for everyone and the queue is cleared.")
                             .foregroundStyle(.secondary)
                     }
                     .listRowBackground(Color.white.opacity(0.08))

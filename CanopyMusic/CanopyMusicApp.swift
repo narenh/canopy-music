@@ -198,7 +198,7 @@ struct RootView: View {
         }
         .animation(.easeInOut(duration: 0.6), value: takeover?.item.id)
         // Spotify plays one stream per account: another zone already on this device's account
-        // asks before this device starts using it (`AppModel.spotifyConflict`).
+        // asks at Start (and Resume, or the restore at launch) (`AppModel.spotifyConflict`).
         .alert("Another zone is using this Spotify account",
                isPresented: Binding(get: { model.spotifyConflict != nil }, set: { _ in }),
                presenting: model.spotifyConflict) { _ in
@@ -207,7 +207,6 @@ struct RootView: View {
         } message: { conflict in
             Text("End \(conflict.zone.name) to start a new one from here, or join it as a display.")
         }
-        .onChange(of: model.otherZones) { model.recheckSpotifyAccount() }
         .task(id: current?.id) {
             model.zoneSongChanged()
             if let current, easterEgg.matches(current.track) { await easterEgg.loadIfNeeded() }
@@ -250,9 +249,9 @@ struct RootView: View {
                let playlist = try? await model.session.catalog.libraryPlaylists().first(where: { $0.id == args[i + 1] }) {
                 await model.load(playlist)
             }
-            // `-autoResume` resumes a restored party, for testing playback without touching the iPad.
+            // `-autoResume` presses Start on the saved queue, for testing playback without touching the iPad.
             if ProcessInfo.processInfo.arguments.contains("-autoResume") {
-                await model.play()
+                await model.startZone()
             }
             // `-autoPrevious` presses back 2 s after starting, to test going back on a device.
             if ProcessInfo.processInfo.arguments.contains("-autoPrevious") {
@@ -267,13 +266,13 @@ struct RootView: View {
                 Task { await session.previous() }
                 Task { await session.skip() }
             }
-            // `-autoParty` starts a demo party and locks, for screenshots and UI work in the simulator.
+            // `-autoParty` starts a demo party (Start: live and locked), for screenshots and UI work
+            // in the simulator.
             if ProcessInfo.processInfo.arguments.contains("-autoParty"), model.isDemo {
                 if model.session.state.current == nil, let first = try? await model.session.catalog.libraryPlaylists().first {
                     await model.load(first)
                 }
-                await model.play()
-                model.lock()
+                await model.startZone()
             }
             // `-fakeSpotifyFollow` poses follow mode (Spotify zones) on the demo party, since
             // Spotify can't be reached from the simulator: a track from outside the queue playing

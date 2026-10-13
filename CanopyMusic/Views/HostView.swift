@@ -16,8 +16,9 @@ struct HostView: View {
 
     private var session: PartySession { model.session }
 
-    private var canStart: Bool {
-        model.isReady && (session.state.current != nil || !session.state.upNext.isEmpty)
+    /// Start on the start screen; Back to party (just locking) in a live zone.
+    private var canPressStart: Bool {
+        model.isLive || model.canStartZone
     }
 
     var body: some View {
@@ -71,7 +72,23 @@ struct HostView: View {
     private var settings: some View {
         @Bindable var model = model
         return VStack(spacing: 0) {
-            HStack {
+            HStack(spacing: 14) {
+                // The start screen (nothing live) goes back to the zone list; a live zone ends
+                // with End Zone instead.
+                if !model.isLive {
+                    Button {
+                        model.leaveStartScreen()
+                    } label: {
+                        Image(systemName: "chevron.left")
+                            .font(.system(size: 18, weight: .semibold))
+                            .frame(width: 32, height: 32)
+                    }
+                    .buttonStyle(.glass)
+                    .tint(.primary)
+                    .buttonBorderShape(.circle)
+                    .disabled(model.isStartingZone)
+                    .accessibilityLabel("Back to zones")
+                }
                 LogoView(height: 36)
                 Spacer()
                 Button {
@@ -110,24 +127,27 @@ struct HostView: View {
                     .listRowBackground(Color.white.opacity(0.08))
                 }
 
-                Section("Guests") {
-                    if !model.phoneQueueEnabled {
-                        Text("Queueing from phones is off. Turn it on in Settings.")
-                            .foregroundStyle(.secondary)
-                    } else if let url = model.guestURL {
-                        LabeledContent("Phone link", value: GuestQRCard.display(model.friendlyURL ?? url))
-                        if model.friendlyURL != nil {
-                            LabeledContent("Also at", value: GuestQRCard.display(url))
+                // The phone page runs only in a live zone.
+                if model.isLive {
+                    Section("Guests") {
+                        if !model.phoneQueueEnabled {
+                            Text("Queueing from phones is off. Turn it on in Settings.")
+                                .foregroundStyle(.secondary)
+                        } else if let url = model.guestURL {
+                            LabeledContent("Phone link", value: GuestQRCard.display(model.friendlyURL ?? url))
+                            if model.friendlyURL != nil {
+                                LabeledContent("Also at", value: GuestQRCard.display(url))
+                            }
+                        } else {
+                            Text("Connect the \(DeviceKind.noun) to Wi\u{2011}Fi so guests can queue from their phones.")
+                                .foregroundStyle(.secondary)
                         }
-                    } else {
-                        Text("Connect the \(DeviceKind.noun) to Wi\u{2011}Fi so guests can queue from their phones.")
-                            .foregroundStyle(.secondary)
                     }
+                    .listRowBackground(Color.white.opacity(0.08))
                 }
-                .listRowBackground(Color.white.opacity(0.08))
 
                 // Other Canopy devices showing this zone (docs/multi-device.md).
-                if !model.session.displays.isEmpty {
+                if model.isLive, !model.session.displays.isEmpty {
                     Section("Connected") {
                         ForEach(model.session.displays) { display in
                             Label {
@@ -144,42 +164,51 @@ struct HostView: View {
                 }
 
                 Section {
+                    // Start makes the zone live (`AppModel.startZone`); in a live zone this just
+                    // goes back to the party screen.
                     Button {
-                        Task {
-                            if !session.isPlaying { await model.play() }
+                        if model.isLive {
                             model.lock()
+                        } else {
+                            Task { await model.startZone() }
                         }
                     } label: {
-                        Text(session.isPlaying ? "Back to party" : "Start")
-                            .font(.headline)
-                            .frame(maxWidth: .infinity)
+                        ZStack {
+                            Text(model.isLive ? "Back to party" : "Start")
+                                .opacity(model.isStartingZone ? 0 : 1)
+                            if model.isStartingZone { ProgressView() }
+                        }
+                        .font(.headline)
+                        .frame(maxWidth: .infinity)
                     }
                     .buttonStyle(.glassProminent)
                     .controlSize(.large)
                     .listRowBackground(Color.clear)
                     // Dimmed rather than `.disabled`, which swaps the prominent glass for a gray style.
-                    .opacity(canStart ? 1 : 0.45)
-                    .allowsHitTesting(canStart)
-                    .accessibilityHint(canStart ? "" : "Choose a playlist first")
+                    .opacity(canPressStart ? 1 : 0.45)
+                    .allowsHitTesting(canPressStart && !model.isStartingZone)
+                    .accessibilityHint(canPressStart ? "" : "Choose a playlist first")
                 } footer: {
                     Text("To unlock later, press and hold the logo. Turn on Guided Access (triple-click the top button) so guests can't leave the app.")
                 }
 
-                Section {
-                    Button(role: .destructive) {
-                        confirmingEnd = true
-                    } label: {
-                        Text("End Zone")
-                            .font(.headline)
-                            .foregroundStyle(.red)
-                            .frame(maxWidth: .infinity, minHeight: 48)
-                            .overlay { Capsule().strokeBorder(.red, lineWidth: 1.5) }
-                            .contentShape(Capsule())
+                if model.isLive {
+                    Section {
+                        Button(role: .destructive) {
+                            confirmingEnd = true
+                        } label: {
+                            Text("End Zone")
+                                .font(.headline)
+                                .foregroundStyle(.red)
+                                .frame(maxWidth: .infinity, minHeight: 48)
+                                .overlay { Capsule().strokeBorder(.red, lineWidth: 1.5) }
+                                .contentShape(Capsule())
+                        }
+                        .buttonStyle(.plain)
+                        .listRowBackground(Color.clear)
+                        // Set apart from Start so it isn't hit by mistake.
+                        .padding(.top, 28)
                     }
-                    .buttonStyle(.plain)
-                    .listRowBackground(Color.clear)
-                    // Set apart from Start so it isn't hit by mistake.
-                    .padding(.top, 28)
                 }
             }
             .scrollContentBackground(.hidden)
@@ -505,7 +534,8 @@ private struct SettingsSheet: View {
                     Text("Music Service")
                 }
                 .listRowBackground(Color.white.opacity(0.08))
-                if model.session.partySaveInfo.offersSave {
+                // A party to save, or a zone to end, only once it's live.
+                if model.isLive, model.session.partySaveInfo.offersSave {
                     Section {
                         Button("Save as Playlist") { savingPlaylist = true }
                     } footer: {
@@ -513,12 +543,14 @@ private struct SettingsSheet: View {
                     }
                     .listRowBackground(Color.white.opacity(0.08))
                 }
-                Section {
-                    Button("End Zone", role: .destructive) { confirmingEnd = true }
-                } footer: {
-                    Text("Stops the music and the phone page, clears the queue, and goes back to the zone list. Your settings stay for the next zone.")
+                if model.isLive {
+                    Section {
+                        Button("End Zone", role: .destructive) { confirmingEnd = true }
+                    } footer: {
+                        Text("Stops the music and the phone page and clears the queue. Your settings stay for the next zone.")
+                    }
+                    .listRowBackground(Color.white.opacity(0.08))
                 }
-                .listRowBackground(Color.white.opacity(0.08))
             }
             .scrollContentBackground(.hidden)
             .endZoneConfirmation(isPresented: $confirmingEnd) { dismiss() }
@@ -542,7 +574,7 @@ private struct SettingsSheet: View {
 
 private extension View {
     /// Asks before ending the zone (hosts can also end it from the web page, which asks too), then
-    /// goes back to the zone list. `before` runs first, e.g. to close a sheet.
+    /// goes back to the start screen. `before` runs first, e.g. to close a sheet.
     func endZoneConfirmation(isPresented: Binding<Bool>, before: @escaping () -> Void = {}) -> some View {
         modifier(EndZoneConfirmation(isPresented: isPresented, before: before))
     }
@@ -574,7 +606,7 @@ private struct EndZoneConfirmation: ViewModifier {
                 Button("End", role: .destructive, action: end)
                 Button("Cancel", role: .cancel) {}
             } message: {
-                Text("The music stops for everyone and the queue is cleared. This \(DeviceKind.noun) goes back to the zone list.")
+                Text("The music stops for everyone and the queue is cleared.")
             }
             #if DEBUG
             // `-autoEnd` (with `-confirmEnd`): presses End 10 s after the alert opens (the sheet

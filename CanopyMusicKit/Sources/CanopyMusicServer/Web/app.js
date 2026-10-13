@@ -1588,10 +1588,11 @@
   function openParty(mode) {
     partyMode = mode;
     partyBusy = false;
-    const device = hubNoun();
+    // An Apple TV goes back to its zone list; an iPad or Mac to its start screen, unnamed here.
+    const back = snap && snap.hubKind === "tv" ? ` The ${hubNoun()} goes back to its zone list.` : "";
     $("party-title").textContent = mode === "end" ? `End ${snap.zoneName || "this zone"}?` : "Save as playlist";
     $("party-sub").textContent = mode === "end"
-      ? `The music stops for everyone and the queue is cleared. The ${device} goes back to its zone list.`
+      ? `The music stops for everyone and the queue is cleared.${back}`
       : "Saves the songs guests added so far, played or still in Up next. The party carries on.";
     $("party-save").checked = true;
     $("party-only").checked = true;

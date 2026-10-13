@@ -148,7 +148,7 @@ public final class ZoneConnection: ZoneRemote {
     /// True once a snapshot has arrived (so the UI can wait before showing the party screen).
     public private(set) var hasSnapshot = false
 
-    @ObservationIgnored private let clientID: String
+    @ObservationIgnored public let clientID: String
     @ObservationIgnored private let name: String
     @ObservationIgnored private let kind: HubKind
     @ObservationIgnored private weak var session: PartySession?
@@ -230,6 +230,12 @@ public final class ZoneConnection: ZoneRemote {
             case .move(let id, let after):
                 struct Move: Encodable { var id: UUID; var after: UUID? }
                 try await post("/api/move", Move(id: id, after: after))
+            case .remove(let id):
+                // The phones' endpoint: the hub removes only requests carrying this client ID
+                // (`/api/add` records it on a display's adds), and never the locked next song.
+                // Hubs from before displays could remove take it the same way.
+                struct Remove: Encodable { var id: UUID; var clientId: String }
+                try await post("/api/remove", Remove(id: id, clientId: clientID))
             case .play, .pause, .next, .previous, .seek:
                 struct Playback: Encodable { var clientId: String; var action: String; var time: TimeInterval? }
                 let (action, time): (String, TimeInterval?) = switch command {

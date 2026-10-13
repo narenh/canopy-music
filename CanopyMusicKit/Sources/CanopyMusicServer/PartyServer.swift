@@ -119,7 +119,8 @@ public final class PartyServer: Sendable {
         await server.appendRoute("POST /api/add") { request in
             let body = try JSONDecoder.api.decode(AddBody.self, from: await request.bodyData)
             // Displays (Canopy devices showing this zone) add as "iPad" requests with their own name
-            // and pick the item ID, so their optimistic copy matches.
+            // and pick the item ID, so their optimistic copy matches. Their client ID (device ID)
+            // is kept as a phone's is, so `/api/remove` lets them remove their own requests.
             let requester = Requester(name: body.name?.cleanedName, clientID: body.clientId, origin: body.origin == "ipad" ? .ipad : .phone)
             // With queueing from phones off, only hosts and displays can add.
             if requester.origin == .phone, !(await session.phonesCanQueue), !(await session.isHost(key: body.key)) {
@@ -144,7 +145,8 @@ public final class PartyServer: Sendable {
 
         await server.appendRoute("POST /api/remove") { request in
             let body = try JSONDecoder.api.decode(RemoveBody.self, from: await request.bodyData)
-            // Host control can remove anything; guests only their own requests.
+            // Host control can remove anything; guests and displays only their own requests (by
+            // client ID), and nobody the locked next song.
             let isHost = await session.isHost(key: body.key)
             let ok = await session.remove(body.id, asClient: isHost ? nil : body.clientId)
             return HTTPResponse(statusCode: ok ? .ok : .forbidden)

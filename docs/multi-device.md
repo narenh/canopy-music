@@ -16,7 +16,7 @@ Status: built on the `tvos-spike` branch (see "Build status" at the end). Screen
 | Search and add | ✓ | ✓ | ✓ | ✓ | |
 | Reorder | ✓ | ✓ | if *Reorder from phones* | if *Reorder from phones* | |
 | Play/pause, skip, scrub | ✓ | ✓ (no scrub) | | if *Playback controls on displays* | remote play/pause if that setting is on |
-| Delete anything | ✓ | ✓ | own requests | | |
+| Delete anything | ✓ | ✓ | own requests | own requests | |
 | Base playlist, settings | ✓ (host mode) | ✓ | | | |
 
 - *Playback controls on displays* is a new hub setting, on by default.
@@ -108,7 +108,7 @@ Status: built on the `tvos-spike` branch (see "Build status" at the end). Screen
   - **The description** credits the people who queued from their phones and gave a name, most songs first: "Queued by Sam, Phil and 6 others · Canopy Music". The hub, displays and unnamed phones aren't credited; with nobody to credit it's just "Canopy Music". It counts the saved songs, so requests still waiting are credited too.
 - **Ending a zone** (iPad, TV or web, all the same) stops the music, the guest server, the Bonjour announcement and the `.local` name, so the zone leaves every device's list at once. It clears the queue, history and base playlist and deletes the saved queue, so the next zone on that device starts empty. Settings stay: zone name, Wi‑Fi, the toggles, Host Control and its phones, and the service sign-in.
 - **"Queue from phones" isn't offered on a TV hub,** since the web page is how a TV zone is run.
-- **Displays add songs as "<zone display name>"** (e.g. "Kitchen iPad"), so the requester pill shows where a song came from. Displays can't delete, including songs they added.
+- **Displays add songs as "<zone display name>"** (e.g. "Kitchen iPad"), so the requester pill shows where a song came from. The hub keeps the display's device ID on them as a phone's client ID, so a display iPad can remove the songs it added (press and hold, **Remove from queue**), through the phones' `POST /api/remove`, which refuses anyone else's and the locked next song. Nothing else can be deleted from a display. A TV display can't add, so it has nothing to remove.
 - **The device-name default needs Apple's user-assigned-device-name entitlement** on iOS 16 and later. Until it's granted, the default is "iPad" / "Apple TV".
 
 - **TV hubs use demo songs in the simulator,** since the simulator can't play Apple Music. On a real Apple TV they use Apple Music and ask for access when you create a zone.

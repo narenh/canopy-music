@@ -6,7 +6,8 @@ struct UpNextList: View {
     let session: PartySession
     /// Which rows get the edit-mode delete control (−). Defaults to none.
     var canDelete: (QueueItem) -> Bool = { _ in false }
-    /// Which rows get a press-and-hold Remove menu instead (keeps artwork aligned).
+    /// Which rows get a press-and-hold Remove menu instead (keeps artwork aligned). On a display,
+    /// the requests it added itself always get it (`PartySession.isOwnRequest`); the hub removes them.
     var canRemoveByMenu: (QueueItem) -> Bool = { _ in false }
     /// False on a display when its hub has turned off reordering from phones.
     var canReorder = true
@@ -68,7 +69,7 @@ struct UpNextList: View {
                     )
                     .opacity(row.kind == .upcoming ? 1 : 0.4)
                     .allowsHitTesting(upcoming)
-                    .modifier(RemoveMenu(enabled: upcoming && canRemoveByMenu(item) && !locked) {
+                    .modifier(RemoveMenu(enabled: upcoming && (canRemoveByMenu(item) || session.isOwnRequest(item)) && !locked) {
                         withAnimation(.spring(duration: 0.4, bounce: 0.1)) { _ = session.remove(item.id) }
                     })
                     .listRowBackground(

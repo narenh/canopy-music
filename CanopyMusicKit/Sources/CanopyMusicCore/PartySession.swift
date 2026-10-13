@@ -464,8 +464,11 @@ public final class PartySession {
     @discardableResult
     public func add(_ track: QueueTrack, by requester: Requester) -> AddResult {
         if let remote {
-            // Show it right away (with the ID the hub will use), then send it.
+            // Show it right away (with the ID the hub will use), then send it. It carries this
+            // display's client ID, as the hub's copy will, so it can be removed straight away.
             let id = UUID()
+            var requester = requester
+            requester.clientID = remote.clientID
             let result = state.addRequest(track, by: requester, id: id)
             if case .added = result { Task { try? await remote.send(.add(track, itemID: id)) } }
             return result
@@ -503,15 +506,28 @@ public final class PartySession {
     }
 
     /// Removes an item. When `clientID` is given (a phone), only that phone's own requests can be removed.
+    /// A display removes only its own requests (`isOwnRequest`): at once, then on the hub, which
+    /// checks again and is followed if it refuses.
     @discardableResult
     public func remove(_ id: UUID, asClient clientID: String? = nil) -> Bool {
-        // Displays can't delete.
-        guard remote == nil else { return false }
+        if let remote {
+            guard let item = state.upNext.first(where: { $0.id == id }), isOwnRequest(item),
+                  state.remove(id) != nil else { return false }
+            Task { try? await remote.send(.remove(id)) }
+            return true
+        }
         if let clientID {
             guard let item = state.upNext.first(where: { $0.id == id }),
                   item.requester?.clientID == clientID else { return false }
         }
         return mutate { $0.remove(id) } != nil
+    }
+
+    /// Whether this display added `item` (the hub records a display's client ID on its requests,
+    /// as it does a phone's), so it may remove it, as a guest can remove theirs. False on a hub.
+    public func isOwnRequest(_ item: QueueItem) -> Bool {
+        guard let remote, let owner = item.requester?.clientID else { return false }
+        return owner == remote.clientID
     }
 
     /// Random key that gives a phone host control (scanned from the iPad's Settings). Phones with it

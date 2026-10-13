@@ -24,6 +24,8 @@ public struct ZoneDisplay: Codable, Hashable, Sendable, Identifiable {
 public enum ZoneCommand: Sendable, Equatable {
     case add(QueueTrack, itemID: UUID)
     case move(UUID, after: UUID?)
+    /// Only a request this display added (the hub checks, as it does for phones).
+    case remove(UUID)
     case play, pause, next, previous
     case seek(TimeInterval)
 }
@@ -31,6 +33,9 @@ public enum ZoneCommand: Sendable, Equatable {
 /// The connection a display's mirrored `PartySession` talks through.
 @MainActor
 public protocol ZoneRemote: AnyObject, Sendable {
+    /// This display's ID with its hub (its device ID). The hub records it on the display's
+    /// requests, like a phone's client ID, so the display can remove them again.
+    var clientID: String { get }
     func send(_ command: ZoneCommand) async throws
     func search(_ term: String) async throws -> [QueueTrack]
     /// The hub's base playlist past its live Up Next (`GET /api/upcoming`).

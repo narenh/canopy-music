@@ -185,6 +185,99 @@ let base = PlaylistSummary(id: "p", name: "Base", kind: .library)
         #expect(session.remove(item.id, asClient: "phone-1"))
     }
 
+    /// A display removes only the requests it added (the hub keeps its client ID on them, as a
+    /// phone's): not a guest's, another display's or a playlist song.
+    @Test func aDisplayRemovesOnlyItsOwnRequests() async throws {
+        let hub = PartySession(catalog: StubCatalog(ids: ["a", "b"]), engine: FakeEngine())
+        try await hub.load(playlist: base)
+        try await hub.play()
+        guard case .added(let mine, _) = hub.add(track("x"), by: Requester(name: "Kitchen iPad", clientID: "kitchen", origin: .ipad), id: UUID()),
+              case .added(let theirs, _) = hub.add(track("y"), by: guest),
+              case .added(let den, _) = hub.add(track("z"), by: Requester(name: "Den iPad", clientID: "den", origin: .ipad), id: UUID())
+        else { Issue.record("not added"); return }
+        let remote = RecordingRemote(clientID: "kitchen")
+        let display = PartySession(remote: remote)
+        display.apply(hub.snapshot())
+        let playlistItem = try #require(display.state.upNext.first { !$0.isRequest })
+
+        #expect(display.isOwnRequest(mine))
+        for item in [theirs, den, playlistItem] {
+            #expect(!display.isOwnRequest(item))
+            #expect(!display.remove(item.id))
+        }
+        #expect(!hub.isOwnRequest(mine)) // a hub's own UI has its own rules
+        #expect(display.remove(mine.id))
+        #expect(!display.state.upNext.contains { $0.id == mine.id })
+        await settle()
+        #expect(remote.sent == [.remove(mine.id)])
+
+        // The hub takes it from that display's ID only.
+        #expect(!hub.remove(mine.id, asClient: "den"))
+        #expect(hub.remove(mine.id, asClient: "kitchen"))
+    }
+
+    /// A display's own new request carries its client ID before the hub's copy arrives.
+    @Test func aDisplaysOwnAddIsItsToRemove() async throws {
+        let remote = RecordingRemote(clientID: "kitchen")
+        let display = PartySession(remote: remote)
+        guard case .added(let item, _) = display.add(track("x"), by: Requester(origin: .ipad)) else { Issue.record("not added"); return }
+        #expect(item.requester?.clientID == "kitchen")
+        #expect(display.isOwnRequest(item))
+        #expect(display.remove(item.id))
+        await settle()
+        #expect(remote.sent == [.add(track("x"), itemID: item.id), .remove(item.id)])
+    }
+
+    /// The locked next song stays, for a display (it doesn't ask) and on the hub, as for phones.
+    @Test func aDisplayCantRemoveTheLockedNextSong() async throws {
+        struct TimedCatalog: MusicCatalog {
+            func searchSongs(_ term: String) async throws -> [QueueTrack] { [] }
+            func libraryPlaylists() async throws -> [PlaylistSummary] { [] }
+            func searchPlaylists(_ term: String) async throws -> [PlaylistSummary] { [] }
+            func tracks(in playlist: PlaylistSummary) async throws -> [QueueTrack] {
+                ["a", "b", "c"].map { QueueTrack(id: $0, title: $0, artist: "Artist", duration: 10) }
+            }
+        }
+        // Late staging locks the next song within a second, the song being nearly over.
+        let hub = PartySession(catalog: TimedCatalog(), engine: FakeEngine(canReplaceStaged: false))
+        try await hub.load(playlist: base)
+        try await hub.play()
+        let kitchen = Requester(name: "Kitchen iPad", clientID: "kitchen", origin: .ipad)
+        guard case .added(let mine, _) = hub.add(track("x"), by: kitchen, id: UUID()) else { Issue.record("not added"); return }
+        let deadline = Date().addingTimeInterval(5)
+        while hub.state.lockedNextID != mine.id, Date() < deadline { try await Task.sleep(for: .milliseconds(50)) }
+        #expect(hub.state.lockedNextID == mine.id)
+
+        let remote = RecordingRemote(clientID: "kitchen")
+        let display = PartySession(remote: remote)
+        display.apply(hub.snapshot())
+        #expect(display.isOwnRequest(mine))
+        #expect(!display.remove(mine.id))
+        await settle()
+        #expect(remote.sent.isEmpty)
+        #expect(!hub.remove(mine.id, asClient: "kitchen"))
+        #expect(hub.state.upNext.contains { $0.id == mine.id })
+    }
+
+    /// Snapshots from older hubs, and the hub's own requests, carry no client ID: they decode,
+    /// and a display can't remove them.
+    @Test func requestsWithoutAClientIDStillDecode() throws {
+        let id = UUID()
+        let json = """
+        {"version": 3, "upNext": [{"id": "\(id.uuidString)", "autoPlaced": true, "addedAt": 0,
+          "track": {"id": "x", "title": "X", "artist": "A", "album": "", "isExplicit": false},
+          "requester": {"name": "Kitchen iPad", "origin": "ipad"}}],
+         "playback": {"isPlaying": false, "position": 0, "capturedAt": 0}, "canReorder": true}
+        """
+        let snapshot = try JSONDecoder().decode(PartySnapshot.self, from: Data(json.utf8))
+        let item = try #require(snapshot.upNext.first)
+        #expect(item.requester?.clientID == nil)
+        let display = PartySession(remote: RecordingRemote(clientID: "kitchen"))
+        display.apply(snapshot)
+        #expect(!display.isOwnRequest(item))
+        #expect(!display.remove(id))
+    }
+
     @Test func reachingTheEndRestartsFromQueue() async throws {
         let engine = FakeEngine()
         let session = PartySession(catalog: StubCatalog(ids: ["a", "b"]), engine: engine)

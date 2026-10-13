@@ -5,7 +5,9 @@ import Testing
 /// A display's connection that records what it sends, taking a moment to answer like a hub.
 @MainActor
 final class RecordingRemote: ZoneRemote {
+    let clientID: String
     var sent: [ZoneCommand] = []
+    init(clientID: String = "kitchen") { self.clientID = clientID }
     func send(_ command: ZoneCommand) async throws {
         sent.append(command)
         try await Task.sleep(for: .milliseconds(50))

@@ -62,9 +62,43 @@ struct ZoneTests {
         await display.skip()
         try? await Task.sleep(for: .milliseconds(300))
         #expect(hub.state.current?.id == current)
+    }
 
-        // Displays can't delete.
-        #expect(display.remove(item.id) == false)
+    /// A display removes the requests it added, like a phone guest: the hub records its client ID
+    /// on them and refuses anything else.
+    @Test func displayRemovesItsOwnRequests() async throws {
+        let (hub, server, task) = try await makeHub(port: 18774)
+        defer { task.cancel(); Task { await server.stop() } }
+        let connection = ZoneConnection(baseURL: URL(string: "http://127.0.0.1:18774")!, clientID: "kitchen", name: "Kitchen iPad", kind: .ipad)
+        let display = PartySession(remote: connection)
+        connection.start(session: display)
+        defer { connection.stop() }
+        #expect(await waitFor { display.state.current != nil })
+
+        guard case .added(let theirs, _) = hub.add(DemoCatalog.track(21), by: Requester(name: "Sam", clientID: "phone-1", origin: .phone)) else {
+            Issue.record("not added"); return
+        }
+        guard case .added(let mine, _) = display.add(DemoCatalog.track(20), by: Requester(origin: .ipad)) else {
+            Issue.record("not added"); return
+        }
+        // Its own copy carries its ID straight away, as the hub's does.
+        #expect(mine.requester?.clientID == "kitchen")
+        #expect(await waitFor { hub.state.upNext.first { $0.id == mine.id }?.requester?.clientID == "kitchen" })
+        #expect(await waitFor { display.state.upNext.contains { $0.id == theirs.id } && display.state.upNext.contains { $0.id == mine.id } })
+
+        #expect(!display.remove(theirs.id))
+        #expect(display.remove(mine.id))
+        #expect(!display.state.upNext.contains { $0.id == mine.id })
+        #expect(await waitFor { !hub.state.upNext.contains { $0.id == mine.id } })
+
+        // The hub checks too: a display's ID doesn't remove someone else's request.
+        var request = URLRequest(url: URL(string: "http://127.0.0.1:18774/api/remove")!)
+        request.httpMethod = "POST"
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.httpBody = try JSONSerialization.data(withJSONObject: ["id": theirs.id.uuidString, "clientId": "kitchen"])
+        let (_, response) = try await URLSession.shared.data(for: request)
+        #expect((response as? HTTPURLResponse)?.statusCode == 403)
+        #expect(hub.state.upNext.contains { $0.id == theirs.id })
     }
 
     @Test func refusedMoveIsUndone() async throws {

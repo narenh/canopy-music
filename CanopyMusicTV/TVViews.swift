@@ -42,7 +42,7 @@ struct TVRootView: View {
             )
                 // Changes evenly to the new song's, starting with the party screen's slide and
                 // settling after it (`TVPartyView.showCurrent`).
-                .animation(.linear(duration: 3), value: backgroundItem?.id)
+                .animation(.linear(duration: 2), value: backgroundItem?.id)
             switch model.role {
             case .choosing:
                 TVZoneListView()

@@ -88,4 +88,13 @@ public protocol FollowingPlaybackEngine: PlaybackEngine {
     func fetchPlayerQueue() async throws -> [QueueTrack]
     /// Moves the player on to the next item in its own queue, whoever put it there.
     func skipInPlayer() async throws
+    /// Starts watching the player without playing anything, expecting `trackID` (a restored
+    /// session's current song): after a relaunch the music may still be playing on the player.
+    /// The next reading reports its state (`.statusChanged`, or `.externalTrack` if it's on
+    /// something else).
+    func attach(expecting trackID: String?)
+}
+
+public extension FollowingPlaybackEngine {
+    func attach(expecting trackID: String?) {}
 }

@@ -36,6 +36,10 @@ final class SpotifyEngine: FollowingPlaybackEngine {
     private var playRequestedAt = Date.distantPast
     private var retriedPlay = false
 
+    /// Watching after a relaunch (`attach`): the next reading decides whether the music is still
+    /// ours and playing, and a paused player stays paused (no "song ended" from it).
+    private var attachedAwaitingFirstReading = false
+
     private var cachedPlaying = false
     private var cachedTime: TimeInterval = 0
     private var cachedAt = Date()
@@ -61,6 +65,18 @@ final class SpotifyEngine: FollowingPlaybackEngine {
 
     private var deviceID: String? { UserDefaults.standard.string(forKey: Self.deviceDefaultsKey) }
     private var deviceQuery: [String: String] { deviceID.map { ["device_id": $0] } ?? [:] }
+
+    /// After a relaunch the music may still be playing on Spotify: watch it, expecting the
+    /// restored current song, without sending anything.
+    func attach(expecting trackID: String?) {
+        guard currentURI == nil, !hasStartedPlayback, let trackID else { return }
+        currentURI = trackID
+        previousURI = nil
+        lastPlaying = nil
+        reportedEnd = false
+        attachedAwaitingFirstReading = true
+        log("attached: expecting \(trackID)")
+    }
 
     private func cache(playing: Bool, time: TimeInterval) {
         cachedPlaying = playing
@@ -186,6 +202,16 @@ final class SpotifyEngine: FollowingPlaybackEngine {
 
         var observation: FollowRules.Observation?
         if let state {
+            if attachedAwaitingFirstReading {
+                // First reading after a relaunch: if Spotify is still playing our song, it's ours
+                // again (and ours to pause later); if it's paused, it stays paused rather than
+                // counting as a song that ended.
+                attachedAwaitingFirstReading = false
+                let ours = state.item?.uri == currentURI
+                if ours, state.is_playing { hasStartedPlayback = true }
+                pausedByUs = !state.is_playing
+                log("attached: Spotify is \(state.is_playing ? "playing" : "paused") on \(ours ? "our song" : state.item?.uri ?? "nothing")")
+            }
             let duration = state.item?.duration_ms.map { Double($0) / 1000 }
             cache(playing: state.is_playing, time: Double(state.progress_ms ?? 0) / 1000)
             playerTrackID = state.item?.uri

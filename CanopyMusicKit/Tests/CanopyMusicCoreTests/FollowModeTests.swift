@@ -65,6 +65,13 @@ final class FakeSpotifyEngine: FollowingPlaybackEngine {
         moveOn()
     }
 
+    /// What a restored session said it expects the player to be on (`attach`).
+    private(set) var attachedTo: String?
+    func attach(expecting trackID: String?) {
+        attachedTo = trackID
+        if ours == nil { ours = trackID }
+    }
+
     func resume() async throws { isPlaying = true }
     func pause() { isPlaying = false }
     func skipToStaged() async throws { moveOn() }
@@ -462,6 +469,38 @@ func longSong(_ id: String) -> QueueTrack { QueueTrack(id: id, title: id, artist
         #expect(!r2.stagedQueued)
         #expect(ids(Rules.foreignUpcoming(in: q(["f1"]), staged: nil)) == ["f1"])
         #expect(Rules.foreignUpcoming(in: q((0..<40).map { "f\($0)" }), staged: nil).items.count == Rules.foreignLimit)
+    }
+
+    /// After a relaunch, Spotify is still playing the restored song: the session watches it, shows
+    /// it playing, and Play after a pause resumes it rather than starting it over.
+    @MainActor @Test func aRelaunchFollowsWhatSpotifyIsStillPlaying() async throws {
+        let url = FileManager.default.temporaryDirectory.appendingPathComponent("canopy-follow-\(UUID()).json")
+        defer { try? FileManager.default.removeItem(at: url) }
+        let first = PartySession(catalog: LongSongsCatalog(ids: ["a", "b", "c"]), engine: FakeSpotifyEngine(), storeURL: url)
+        try await first.load(playlist: base)
+        try await first.play()
+        try await Task.sleep(for: .milliseconds(800))
+        first.shutdown()
+
+        let engine = FakeSpotifyEngine()
+        engine.playing = longSong("a")
+        engine.isPlaying = true
+        engine.currentTime = 42
+        let restored = PartySession(catalog: LongSongsCatalog(ids: []), engine: engine, storeURL: url)
+        #expect(engine.attachedTo == "a")
+        #expect(!restored.isPlaying)
+        // Spotify's first reading after the relaunch.
+        engine.onEvent?(.statusChanged)
+        let playingAfterReading = restored.isPlaying
+        let position = engine.currentTime
+        #expect(playingAfterReading)
+        #expect(position == 42)
+        await restored.pause()
+        try await restored.play()
+        let plays = engine.plays
+        let resumed = engine.isPlaying
+        #expect(plays.isEmpty)
+        #expect(resumed)
     }
 
     /// Seen on a real account with repeat on: after its queue, Spotify lists the song Canopy just

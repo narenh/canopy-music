@@ -239,6 +239,9 @@ public final class PartySession {
         }
         engine.onEvent = { [weak self] event in self?.handle(event) }
         if !engine.canReplaceStaged { startLateStagingTicker() }
+        // A followed player (Spotify) keeps playing while the app is gone: after a relaunch,
+        // watch it so the restored song shows as it really is (playing, and where).
+        if let current = state.current { follower?.attach(expecting: current.track.id) }
     }
 
     /// A display's session: mirrors the hub's queue from snapshots and sends edits to the hub.
@@ -884,6 +887,12 @@ public final class PartySession {
                 Task { try? await serially { try? await self.play(current) } }
             }
         case .statusChanged:
+            // After a relaunch, the followed player is found still on the restored song: it's
+            // loaded, so Play resumes it rather than starting it over.
+            if let follower, loadedItemID == nil, let current = state.current,
+               follower.playerTrackID == current.track.id {
+                loadedItemID = current.id
+            }
             isPlaying = engine.isPlaying
             broadcast()
         case .externalTrack(let track):

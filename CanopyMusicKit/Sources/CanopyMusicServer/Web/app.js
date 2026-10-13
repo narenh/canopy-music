@@ -22,6 +22,45 @@
     });
   }
 
+  // Debug builds of the hub only (they answer /api/debug/log?probe): what this page did with its
+  // splash and first screen, appended to the hub's Library/Caches/web.log. Lines wait until the
+  // probe answers; with a release hub, nothing is sent.
+  const debugLog = (() => {
+    const page = uuid().slice(0, 4);
+    let lines = [], on = null, timer = null;
+    const flush = () => { clearTimeout(timer); if (on && lines.length) navigator.sendBeacon("/api/debug/log", lines.splice(0).join("\n")); };
+    fetch("/api/debug/log?probe").then((r) => { on = r.status === 204; }).catch(() => { on = false; })
+      .finally(() => { if (on) flush(); else lines = null; });
+    addEventListener("pagehide", (e) => { log(`pagehide persisted=${e.persisted}`); flush(); });
+    function log(text) {
+      if (on === false) return;
+      lines.push(`${page} ${location.host} +${Math.round(performance.now())}ms ${text}`);
+      if (on) { clearTimeout(timer); timer = setTimeout(flush, 150); }
+    }
+    return log;
+  })();
+  /** Debug log: what's on screen (the splash and setup sheet as styled, the element at the top,
+   * middle and bottom, the page background and the viewport). */
+  function debugScreen(label) {
+    const splash = $("splash"), setup = $("setup"), s = getComputedStyle(splash), u = getComputedStyle(setup);
+    const at = (y) => {
+      const el = document.elementFromPoint(innerWidth / 2, y), box = el && el.closest("[id]");
+      return el ? `${el.tagName.toLowerCase()}${box ? "#" + box.id : ""}` : "-";
+    };
+    const vv = window.visualViewport, r = setup.getBoundingClientRect();
+    debugLog(`${label}: splash hidden=${splash.hidden} class="${splash.className}" display=${s.display} opacity=${s.opacity} visibility=${s.visibility}` +
+      ` | setup hidden=${setup.hidden} class="${setup.className}" display=${u.display} opacity=${u.opacity} bg=${u.backgroundColor} top=${Math.round(r.top)} h=${Math.round(r.height)}` +
+      ` | at top=${at(4)} mid=${at(innerHeight / 2)} bottom=${at(innerHeight - 4)}` +
+      ` | body bg=${getComputedStyle(document.body).backgroundColor} ${getComputedStyle(document.body).backgroundImage} html bg=${getComputedStyle(document.documentElement).backgroundColor}` +
+      ` | inner=${innerWidth}x${innerHeight} vv=${vv ? `${Math.round(vv.height)}@${Math.round(vv.offsetTop)}` : "-"} ${document.visibilityState}`);
+  }
+  debugLog(`start ${location.href} nav=${(performance.getEntriesByType("navigation")[0] || {}).type} ${navigator.userAgent}`);
+  debugScreen("splash shown");
+  addEventListener("pageshow", (e) => debugLog(`pageshow persisted=${e.persisted}`));
+  document.addEventListener("visibilitychange", () => debugLog(`visibility ${document.visibilityState}`));
+  addEventListener("error", (e) => debugLog(`error ${e.message} ${e.filename}:${e.lineno}`));
+  $("splash").addEventListener("transitionend", (e) => debugScreen(`splash transitionend ${e.propertyName}`));
+
   const params = new URLSearchParams(location.search);
 
   // Saved data (name, phone ID, host key) is per address. QR codes use the IP, which every phone
@@ -29,6 +68,7 @@
   // before saving anything, so everything lives under that one address.
   let initial = null;
   try { initial = await (await fetch("/api/state")).json(); } catch {}
+  debugLog(initial ? `state zone="${initial.zoneName}" kind=${initial.hubKind} address=${initial.address} lan=${initial.lanAddress} playlist="${initial.playlistName || ""}"` : "state failed");
   if (initial && initial.zoneName) $("splash-text").textContent = `Connecting to ${initial.zoneName}`;
   // Which hub this is (older hubs don't say), for keeping host keys per hub.
   const hubID = (initial && initial.hubID) || null;
@@ -36,7 +76,8 @@
     const address = initial && initial.address, lan = initial && initial.lanAddress;
     if (!address || !lan || address === location.host) return;
     // Only if that name reaches this same hub: another zone can answer at music.local too.
-    if (!(await reachable(address, lan))) return;
+    if (!(await reachable(address, lan))) { debugLog(`${address} not reachable: staying`); return; }
+    debugLog(`moving to ${address}`);
     moveTo(address, params, savedHostKey(), location.hash);
     await new Promise(() => {}); // stop here while the browser navigates
   })();
@@ -204,6 +245,7 @@
     // start over, so this hub gets its own host key, not the other's.
     if (hubID && next.hubID && next.hubID !== hubID) { location.reload(); return; }
     if (snap && next.version < snap.version) return;
+    if (!snap) debugLog(`first snapshot v${next.version} playlist="${next.playlistName || ""}" hostChecked=${hostChecked}`);
     snap = next;
     render();
     openSettingsFromLink();
@@ -246,7 +288,12 @@
     // also slide in while the splash fades.
     for (const sheet of document.querySelectorAll(".sheet")) if (!sheet.hidden) sheet.classList.add("instant");
     splash.classList.add("gone");
-    setTimeout(() => { splash.hidden = true; }, 400);
+    debugScreen("splash fading");
+    setTimeout(() => {
+      splash.hidden = true;
+      debugScreen("splash hidden");
+      setTimeout(() => debugScreen("2s later"), 2000);
+    }, 400);
   }
 
   function render() {
@@ -1109,6 +1156,10 @@
     finally { pickerBusy("playlists", button, false, "Use this playlist"); button.disabled = !changePick; }
   });
   $("settings-playlist-change").addEventListener("click", () => {
+    changePick = null;
+    $("playlists-use").disabled = true;
+    $("playlists-shuffle").checked = true;
+    changePicker.select(null);
     $("playlists").hidden = false;
     changePicker.open();
   });
@@ -1118,6 +1169,7 @@
     // The setup sheet asks for this phone's name itself.
     if (!$("name-modal").hidden) { $("name-modal").hidden = true; }
     $("setup").hidden = false;
+    debugScreen("setup opened");
     $("setup-you").value = myName || "";
     $("setup-name").value = snap.zoneName || "";
     $("setup-sub").textContent = `You're hosting ${snap.hubKind === "tv" ? "the Apple TV" : "this zone"}. Guests can join once music is playing.`;
@@ -1152,10 +1204,6 @@
       toast("Couldn't start. Try again.");
     }
   });
-    changePick = null;
-    $("playlists-use").disabled = true;
-    $("playlists-shuffle").checked = true;
-    changePicker.select(null);
 
   // Another host: the hub draws the QR code.
   $("settings-invite").addEventListener("click", () => {
@@ -1452,9 +1500,11 @@
   // A phone with a host key waits to hear from the hub first: a new Apple TV zone's first host
   // gets the setup sheet, which asks for the name itself.
   if (!hostKey) askNameIfNeeded();
+  debugLog(`host key ${hostKey ? "yes" : "no"}`);
   if (hostKey) {
     api("/api/host/check", { key: hostKey, clientId })
       .then(() => {
+        debugLog(`host check ok, snapshot ${snap ? "in" : "not yet"}`);
         hostPaired = true;
         hostChecked = true;
         // The old single key turned out to be this hub's: keep it under this hub from now on.
@@ -1465,6 +1515,7 @@
         hideSplash();
       })
       .catch((error) => {
+        debugLog(`host check failed ${error.message}`);
         hostChecked = true;
         if (snap) render(); else askNameIfNeeded();
         hideSplash();

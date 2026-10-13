@@ -263,8 +263,48 @@ public final class PartyServer: Sendable {
         }
 
         await server.appendRoute("GET /ws", to: .webSocket(SnapshotSocket(session: session)))
+
+        #if DEBUG
+        // Debug builds: the web page's own log (its splash and first screen), for seeing what a
+        // real phone did. The page posts lines once `?probe` answers; `GET` reads the log back.
+        await server.appendRoute("GET /api/debug/log") { request in
+            if request.query["probe"] != nil { return HTTPResponse(statusCode: .noContent) }
+            return HTTPResponse(statusCode: .ok, headers: [.contentType: "text/plain; charset=utf-8", .cacheControl: "no-store"],
+                                body: WebLog.read())
+        }
+        await server.appendRoute("POST /api/debug/log") { request in
+            WebLog.append(String(decoding: try await request.bodyData.prefix(32_768), as: UTF8.self))
+            return HTTPResponse(statusCode: .noContent)
+        }
+        #endif
     }
 }
+
+#if DEBUG
+/// Debug builds: the web page's log, at Library/Caches/web.log in the hub app's container.
+enum WebLog {
+    static let url = URL.cachesDirectory.appending(path: "web.log")
+    private static let queue = DispatchQueue(label: "canopymusic.weblog")
+
+    /// Each line gets the hub's clock in front. Starts over past 1 MB.
+    static func append(_ text: String) {
+        let stamp = Date().formatted(Date.ISO8601FormatStyle(includingFractionalSeconds: true, timeZone: .current))
+        let lines = text.split(separator: "\n").map { "\(stamp) \($0)\n" }.joined()
+        queue.sync {
+            let size = (try? FileManager.default.attributesOfItem(atPath: url.path)[.size] as? Int) ?? 0
+            if size < 1_000_000, let handle = try? FileHandle(forWritingTo: url) {
+                handle.seekToEndOfFile()
+                handle.write(Data(lines.utf8))
+                try? handle.close()
+            } else {
+                try? Data(lines.utf8).write(to: url)
+            }
+        }
+    }
+
+    static func read() -> Data { queue.sync { (try? Data(contentsOf: url)) ?? Data() } }
+}
+#endif
 
 // MARK: - API bodies
 

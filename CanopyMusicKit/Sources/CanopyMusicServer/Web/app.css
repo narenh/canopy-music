@@ -167,7 +167,9 @@ html.sheet-open, html.sheet-open body { overflow: hidden; }
 .offline[hidden] { display: none; }
 .offline .spinner { width: 12px; height: 12px; border-width: 1.5px; }
 
-.splash { position: fixed; inset: 0; z-index: 100; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 30px; padding: 24px; background: #3a1236 url(/splash.jpg) center / cover no-repeat; color: #fff; transition: opacity .35s ease; }
+/* The page's base colour under the image, not the image's purple: Safari 26 tints its status bar
+   and toolbar with this colour as the page loads and keeps it after the splash has gone. */
+.splash { position: fixed; inset: 0; z-index: 100; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 30px; padding: 24px; background: var(--base) url(/splash.jpg) center / cover no-repeat; color: #fff; transition: opacity .35s ease; }
 .splash.gone { opacity: 0; pointer-events: none; }
 .splash[hidden] { display: none; }
 .splash-logo { width: min(62vw, 300px); height: auto; }

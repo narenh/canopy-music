@@ -312,7 +312,7 @@ final class AppModel {
         // "Create a new zone" and Start, which asks.
         if let i = args.firstIndex(of: "-fakeSpotifyConflict"), i + 1 < args.count {
             self.provider = .spotify
-            needsOnboarding = false
+            self.needsOnboarding = false
             let account = SpotifyAccount.fingerprint(userID: "debug-user")
             debugSpotifyAccount = account
             debugZones = [ZoneListing(id: args[i + 1], name: args[i + 1], kind: .ipad, address: "192.0.2.1",

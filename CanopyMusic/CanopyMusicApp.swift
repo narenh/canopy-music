@@ -41,9 +41,10 @@ enum Capture {
 }
 
 /// The window can be resized (iPadOS windowing, and on a Mac), but never smaller than the
-/// two-column layouts need.
+/// two-column layouts need: an iPad mini's portrait width (744 pt), and the height Create Zone's
+/// PIN step needs.
 enum WindowSize {
-    static let minimum = CGSize(width: 1024, height: 700)
+    static let minimum = CGSize(width: 744, height: 700)
 
     @MainActor static func restrict(_ scene: UIWindowScene) {
         scene.sizeRestrictions?.minimumSize = minimum

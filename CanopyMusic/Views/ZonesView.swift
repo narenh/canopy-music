@@ -142,7 +142,7 @@ private struct ZoneRow: View {
 /// Creating a zone on this iPad: a name (defaults to the device name), then an optional host PIN.
 struct CreateZoneView: View {
     @Environment(AppModel.self) private var model
-    @State private var step = 0
+    @State private var step = Self.firstStep
     @State private var name = DeviceKind.name
     @State private var pin = ""
     @FocusState private var nameFocused: Bool
@@ -225,6 +225,15 @@ struct CreateZoneView: View {
                 .font(.system(size: 17, weight: .semibold))
                 .foregroundStyle(.white.opacity(0.7))
         }
+    }
+
+    /// The name step, or the PIN step with `-createZonePIN` (debug builds).
+    private static var firstStep: Int {
+        #if DEBUG
+        ProcessInfo.processInfo.arguments.contains("-createZonePIN") ? 1 : 0
+        #else
+        0
+        #endif
     }
 
     private func next() {

@@ -24,17 +24,20 @@ struct HostView: View {
         @Bindable var model = model
         let theme = ArtworkTheme(session.state.current?.track.colors)
         ContentCap {
-            HStack(spacing: 0) {
-                settings
-                    .frame(width: 440)
-                // Past a 13" iPad's width (a Mac window, up to ContentCap's width) the queue stops
-                // growing and both columns stay together in the middle.
-                queuePanel
-                    .frame(maxWidth: 900)
-                    .padding(.vertical, 24)
-                    .padding(.trailing, 24)
+            GeometryReader { geo in
+                HStack(spacing: 0) {
+                    // Narrower in narrow windows (an iPad mini in portrait), so the queue keeps room.
+                    settings
+                        .frame(width: min(440, max(340, geo.size.width * 0.45)))
+                    // Past a 13" iPad's width (a Mac window, up to ContentCap's width) the queue stops
+                    // growing and both columns stay together in the middle.
+                    queuePanel
+                        .frame(maxWidth: 900)
+                        .padding(.vertical, 24)
+                        .padding(.trailing, 24)
+                }
+                .frame(maxWidth: .infinity)
             }
-            .frame(maxWidth: .infinity)
         }
         .background { ThemedBackground(track: session.state.current?.track, theme: theme) }
         .environment(\.artworkTheme, theme)
@@ -595,49 +598,29 @@ private struct EndZoneConfirmation: ViewModifier {
 // MARK: - Playlist bar
 
 private extension HostView {
+    /// One row; when the queue column is too narrow to leave the name some room beside the buttons
+    /// (an iPad mini in portrait, narrow windows), the buttons go on a second row.
     var playlistBar: some View {
-        HStack(spacing: 14) {
-            Image(systemName: "music.note.list")
-                .font(.system(size: 20, weight: .semibold))
-                .foregroundStyle(.white.opacity(0.7))
-            VStack(alignment: .leading, spacing: 2) {
-                Text("Base playlist")
-                    .font(.system(size: 13, weight: .semibold))
-                    .foregroundStyle(.white.opacity(0.6))
-                Text(session.state.playlistName ?? "None yet")
-                    .font(.system(size: 17, weight: .semibold))
-                    .foregroundStyle(.white)
-                    .lineLimit(1)
-                if !session.skippedOnLoad.isEmpty {
-                    skippedNote
+        ViewThatFits(in: .horizontal) {
+            HStack(spacing: 14) {
+                playlistIcon
+                // The ideal width only decides when to switch to two rows: below it, the name
+                // would be cut short.
+                playlistInfo
+                    .frame(minWidth: 160, idealWidth: 160, maxWidth: .infinity, alignment: .leading)
+                playlistButtons
+            }
+            VStack(alignment: .leading, spacing: 10) {
+                HStack(spacing: 14) {
+                    playlistIcon
+                    playlistInfo
+                        .frame(maxWidth: .infinity, alignment: .leading)
                 }
-                if let current = session.state.current {
-                    Text("Playing \(current.track.title) · \(current.track.artist)")
-                        .font(.system(size: 13))
-                        .foregroundStyle(.white.opacity(0.6))
-                        .lineLimit(1)
+                HStack(spacing: 14) {
+                    Spacer(minLength: 0)
+                    playlistButtons
                 }
             }
-            // The name gets the room before the spacer does (the bar is narrow in portrait).
-            .layoutPriority(1)
-            Spacer()
-            if session.state.playlistName != nil {
-                Button {
-                    withAnimation(.spring(duration: 0.45, bounce: 0.12)) { session.shufflePlaylist() }
-                } label: {
-                    Image(systemName: "shuffle")
-                        .frame(width: 22, height: 22)
-                }
-                .buttonStyle(.glass)
-                .tint(.primary)
-                .buttonBorderShape(.circle)
-                .accessibilityLabel("Shuffle playlist")
-            }
-            Button(session.state.playlistName == nil ? "Choose playlist" : "Change") { showPicker = true }
-                .fixedSize()
-                .buttonStyle(.glass)
-                .tint(.primary)
-                .disabled(!model.isReady)
         }
         .padding(.horizontal, 20)
         .padding(.vertical, 12)
@@ -645,6 +628,54 @@ private extension HostView {
         .padding(.horizontal, 12)
         .padding(.top, 12)
         .padding(.bottom, 8)
+    }
+
+    var playlistIcon: some View {
+        Image(systemName: "music.note.list")
+            .font(.system(size: 20, weight: .semibold))
+            .foregroundStyle(.white.opacity(0.7))
+    }
+
+    var playlistInfo: some View {
+        VStack(alignment: .leading, spacing: 2) {
+            Text("Base playlist")
+                .font(.system(size: 13, weight: .semibold))
+                .foregroundStyle(.white.opacity(0.6))
+                .lineLimit(1)
+            Text(session.state.playlistName ?? "None yet")
+                .font(.system(size: 17, weight: .semibold))
+                .foregroundStyle(.white)
+                .lineLimit(1)
+            if !session.skippedOnLoad.isEmpty {
+                skippedNote
+            }
+            if let current = session.state.current {
+                Text("Playing \(current.track.title) · \(current.track.artist)")
+                    .font(.system(size: 13))
+                    .foregroundStyle(.white.opacity(0.6))
+                    .lineLimit(1)
+            }
+        }
+    }
+
+    @ViewBuilder var playlistButtons: some View {
+        if session.state.playlistName != nil {
+            Button {
+                withAnimation(.spring(duration: 0.45, bounce: 0.12)) { session.shufflePlaylist() }
+            } label: {
+                Image(systemName: "shuffle")
+                    .frame(width: 22, height: 22)
+            }
+            .buttonStyle(.glass)
+            .tint(.primary)
+            .buttonBorderShape(.circle)
+            .accessibilityLabel("Shuffle playlist")
+        }
+        Button(session.state.playlistName == nil ? "Choose playlist" : "Change") { showPicker = true }
+            .fixedSize()
+            .buttonStyle(.glass)
+            .tint(.primary)
+            .disabled(!model.isReady)
     }
 
     /// "3 songs aren't on Apple Music": the base playlist loaded without them. Tap for the list.

@@ -399,9 +399,14 @@ struct NowPlayingView: View {
 
     var body: some View {
         GeometryReader { geo in
+            // The controls are 400 pt wide at their usual spacing. Narrower columns (an iPad mini
+            // in portrait) get slimmer margins and closer controls.
+            let narrow = geo.size.width < 464
+            let inset: CGFloat = narrow ? 20 : 32
+            let width = geo.size.width - inset * 2
             // Artwork takes whatever height is left after the title, progress and controls.
             let reserved: CGFloat = item == nil ? 110 : 284
-            let widthSide = geo.size.width * 0.85
+            let widthSide = width * 0.85
             let side = max(200, min(widthSide, geo.size.height - reserved))
             // When the column's width holds the artwork back (portrait, squarish windows, a 13"
             // in landscape) there's spare height, and the group sits in the middle of it. Only
@@ -438,7 +443,7 @@ struct NowPlayingView: View {
                 .foregroundStyle(.white)
                 .lineLimit(1)
                 .multilineTextAlignment(.center)
-                .frame(maxWidth: side + 120)
+                .frame(maxWidth: min(side + 120, width))
                 if let item {
                     // While disconnected the bar means nothing; say why the controls are off instead.
                     ProgressBar(duration: item.track.duration, session: session)
@@ -454,14 +459,14 @@ struct NowPlayingView: View {
                         }
                     // Displays: transport only while the hub allows it (no AirPlay or crossfade).
                     if showsTransport {
-                        TransportControls(session: session)
+                        TransportControls(session: session, spacing: narrow ? 6 : 20)
                     }
                 }
             }
+            .padding(.horizontal, inset)
             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: centered ? .center : .bottom)
             .animation(.spring(duration: 0.6, bounce: 0.15), value: item?.id)
         }
-        .padding(.horizontal, 32)
         // When bottom-aligned, the controls line up with the Up next panel's bottom edge (the
         // right pane's 24 pt vertical padding).
         .padding(.bottom, Self.bottomInset)
@@ -475,12 +480,13 @@ struct NowPlayingView: View {
 
 private struct TransportControls: View {
     let session: PartySession
+    var spacing: CGFloat = 20
     @Environment(AppModel.self) private var model
 
     var body: some View {
         @Bindable var model = model
-        GlassEffectContainer(spacing: 20) {
-            HStack(spacing: 20) {
+        GlassEffectContainer(spacing: spacing) {
+            HStack(spacing: spacing) {
                 if model.isDisplay {
                     // Speakers are chosen on the hub; keep the controls centered.
                     Color.clear.frame(width: 44, height: 44)

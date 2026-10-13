@@ -218,6 +218,8 @@ final class AppModel {
             // Hosting, as `becomeHub()` records, so ending it and relaunching can be tested.
             record.hosting(fresh: true)
         }
+        // `-createZonePIN`: opens Create Zone at its PIN step, for checking its layout.
+        if ProcessInfo.processInfo.arguments.contains("-createZonePIN") { role = .creating }
         #endif
         zoneRole = role
         isLocked = locked

@@ -52,8 +52,16 @@ struct CanopyMusicTVApp: App {
 @Observable
 final class TVModel {
     enum Role: Equatable { case choosing, hub, display }
+    /// The hub's music service, chosen on the host's setup page (saved as the iPad saves its own).
+    enum Service: String { case appleMusic, spotify }
 
     private(set) var role: Role = .choosing
+    private(set) var service: Service
+    /// Spotify: sign-in from the host's phone, the device music plays on (docs/multi-device.md).
+    let spotify = TVSpotify()
+    /// Why the zone list's Resume didn't go back in (Spotify signed out, or another zone on the
+    /// account). Cleared by the next attempt.
+    private(set) var resumeProblem: String?
     private(set) var session: PartySession
     let browser = ZoneBrowser()
     private(set) var guestURL: URL?
@@ -103,6 +111,11 @@ final class TVModel {
             UserDefaults.standard.set(deviceID, forKey: "deviceID")
         }
         session = PartySession(catalog: DemoOrEmptyCatalog(), engine: SilentEngine())
+        service = Service(rawValue: UserDefaults.standard.string(forKey: "provider") ?? "") ?? .appleMusic
+        #if DEBUG
+        if spotify.fake != nil { service = .spotify }
+        #endif
+        spotify.onChange = { [weak self] in self?.pushSpotifySetup() }
         // The app's own audio is only the motion artwork's silent video; the music plays in the
         // Apple Music player's own session. Left at the default (not mixable), the music starting
         // interrupted this session and paused the video. Ambient mixes, so it never is.
@@ -137,7 +150,21 @@ final class TVModel {
     /// Back into the zone this TV had.
     func resumeZone() async {
         debugLog("resumeZone")
-        guard await authorize() else { return }
+        resumeProblem = nil
+        switch service {
+        case .appleMusic:
+            guard await authorize() else { return }
+        case .spotify:
+            guard spotify.isSignedIn else {
+                resumeProblem = "Spotify is signed out on this TV. Create a new zone to sign in again from your phone."
+                return
+            }
+            // Spotify plays one stream per account: not over another zone's.
+            if let zone = spotifyConflict {
+                resumeProblem = "\(zone.name) is playing from this Spotify account. Join it, or end it first."
+                return
+            }
+        }
         openZone(fresh: false)
         // Its saved queue is gone (tvOS may clear Caches): back to "Scan to host", with its code,
         // rather than "Continue on your phone".
@@ -163,8 +190,11 @@ final class TVModel {
             zoneRecord.ended()
             return
         }
-        guard zoneRecord.restoresOnLaunch, LocalNetwork.lanAddress() != nil,
-              usesDemo || MusicAuthorization.currentStatus == .authorized else { return }
+        let canPlay = switch service {
+        case .appleMusic: usesDemo || MusicAuthorization.currentStatus == .authorized
+        case .spotify: spotify.isSignedIn
+        }
+        guard zoneRecord.restoresOnLaunch, LocalNetwork.lanAddress() != nil, canPlay else { return }
         #if DEBUG
         let args = ProcessInfo.processInfo.arguments
         guard !args.contains("-playTest"), !args.contains("-noRestore") else { return }
@@ -175,6 +205,17 @@ final class TVModel {
         #endif
         openZone(fresh: false)
         Task {
+            if service == .spotify {
+                // Not over another zone on the same Spotify account: the list offers Resume.
+                browser.start()
+                let deadline = Date().addingTimeInterval(3)
+                while !browser.hasSearched, Date() < deadline { try? await Task.sleep(for: .milliseconds(100)) }
+                if let zone = spotifyConflict {
+                    debugLog("restore: \(zone.name) is on this Spotify account; back to the zone list")
+                    closeZone()
+                    return
+                }
+            }
             await startServer()
             if role == .hub, server == nil || guestURL == nil {
                 debugLog("restore failed; back to the zone list")
@@ -192,16 +233,9 @@ final class TVModel {
 
     /// Makes this TV the hub of its zone: a new, empty one, or the one it had (from the saved queue).
     private func openZone(fresh: Bool) {
-        let store = Self.storeURL
         session.shutdown()
-        if usesDemo {
-            #if DEBUG
-            session = PartySession(catalog: DemoCatalog(), engine: DemoPlaybackEngine(), storeURL: store)
-            #endif
-        } else {
-            let cache = SongCache()
-            session = PartySession(catalog: AppleMusicCatalog(cache: cache), engine: AppleMusicEngine(cache: cache), storeURL: store)
-        }
+        let (catalog, engine, serviceName) = serviceParts()
+        session = PartySession(catalog: catalog, engine: engine, storeURL: Self.storeURL)
         if fresh {
             // The same clearing as End. The new zone is recorded once its music starts.
             session.end()
@@ -212,7 +246,7 @@ final class TVModel {
         // A zone that had a host (or a playlist) is past "Scan to host".
         hostJoined = !fresh && (zoneRecord.hostJoined || session.hasParty || session.state.playlistName != nil)
         hostname.rename(to: FriendlyHostname.localName(forZone: zoneName))
-        session.configureHub(kind: .tv, id: deviceID, zoneName: zoneName, serviceName: usesDemo ? "Demo" : "Apple Music")
+        session.configureHub(kind: .tv, id: deviceID, zoneName: zoneName, serviceName: serviceName)
         // Same settings, saved under the same names, as an iPad hub.
         session.phonesCanQueue = defaults.object(forKey: "phoneQueueEnabled") as? Bool ?? true
         session.phonesCanReorder = defaults.object(forKey: "phoneReorderEnabled") as? Bool ?? true
@@ -239,7 +273,10 @@ final class TVModel {
             self.advertise()
         }
         session.onStopRequested = { [weak self] in self?.stopZone() }
-        session.onMusicAccessCheck = { [weak self] in self?.checkMusicAccess(asking: true) }
+        // The setup page asks as it opens and every few seconds until the music can play.
+        session.onMusicAccessCheck = { [weak self] in self?.checkService(asking: true) }
+        session.spotifySignIn = spotify.signIn
+        session.setupHandler = self
         // The zone becomes real when its music starts (a phone's "Start the music"): only then is
         // it recorded, so only then does it come back after a crash or offer Resume.
         session.onSongStarted = { [weak self] in
@@ -247,8 +284,78 @@ final class TVModel {
             self.zoneRecord.songStarted(hostJoined: self.hostJoined)
         }
         role = .hub
+        // Zones on the account (Spotify plays one stream per account).
+        browser.start()
+        pushSpotifySetup()
         // Known before the host's page connects (without asking: that waits for the page).
-        checkMusicAccess(asking: false)
+        checkService(asking: false)
+    }
+
+    /// The catalog, engine and service title for this TV's service. The simulator can't play
+    /// Apple Music or sign in to Spotify: debug builds there use the demo player (and
+    /// `-spotifyFake` stands in for Spotify).
+    private func serviceParts() -> (any MusicCatalog, any PlaybackEngine, String) {
+        switch service {
+        case .appleMusic:
+            #if DEBUG
+            if usesDemo { return (DemoCatalog(), DemoPlaybackEngine(), "Demo") }
+            #endif
+            let cache = SongCache()
+            return (AppleMusicCatalog(cache: cache), AppleMusicEngine(cache: cache), "Apple Music")
+        case .spotify:
+            #if DEBUG
+            // Spotify's engine can't replace a staged song, so neither does this one.
+            if spotify.isFake { return (DemoCatalog(), DemoPlaybackEngine(canReplaceStaged: false), "Spotify") }
+            #endif
+            return (SpotifyCatalog(api: spotify.api), SpotifyEngine(api: spotify.api), "Spotify")
+        }
+    }
+
+    /// The service's readiness for the host's setup page: Apple Music access, or Spotify's
+    /// sign-in and devices (read again, at most every 3 s).
+    func checkService(asking: Bool) {
+        guard role == .hub else { return }
+        switch service {
+        case .appleMusic:
+            checkMusicAccess(asking: asking)
+        case .spotify:
+            pushSpotifySetup()
+            Task {
+                await spotify.refresh()
+                pushSpotifySetup()
+            }
+        }
+    }
+
+    // MARK: Spotify
+
+    #if DEBUG
+    /// `-spotifyFake conflict`: a zone called Upstairs on the network using the same account.
+    private var debugZones: [ZoneListing] {
+        guard spotify.fake == .conflict, let account = spotify.accountFingerprint else { return [] }
+        return [ZoneListing(id: "Upstairs", name: "Upstairs", kind: .ipad, address: "192.0.2.1",
+                            hubID: "debug-other-hub", nowPlaying: "Dreams – Fleetwood Mac", spotifyAccount: account)]
+    }
+    #endif
+
+    /// Another zone on the network already playing from this TV's Spotify account (Spotify plays
+    /// one stream per account; two zones on it would fight over it). Only with Spotify, and only
+    /// once the account is known.
+    var spotifyConflict: ZoneListing? {
+        guard service == .spotify else { return nil }
+        var zones = browser.zones
+        #if DEBUG
+        zones += debugZones
+        #endif
+        return ZoneListing.usingSpotifyAccount(spotify.accountFingerprint, in: zones, ownHubID: deviceID)
+    }
+
+    /// Tells the host's setup page (hosts' snapshots) where Spotify stands.
+    private func pushSpotifySetup() {
+        guard role == .hub else { return }
+        session.spotifySetup = spotify.setup(conflict: spotifyConflict)
+        // The account just became known (a sign-in): the announcement carries it.
+        advertise()
     }
 
     // MARK: Apple Music access
@@ -372,6 +479,7 @@ final class TVModel {
 
     /// Back to the zone list without touching the zone itself (`stopZone` ends it first).
     private func closeZone() {
+        spotify.signIn.cancel()
         session.shutdown()
         session = PartySession(catalog: DemoOrEmptyCatalog(), engine: SilentEngine())
         serverTask?.cancel()
@@ -411,7 +519,7 @@ final class TVModel {
             wasBackgrounded = true
         case .active:
             // Back from Settings, or from the Apple Music prompt: the host's page shows the change.
-            if role == .hub { checkMusicAccess(asking: false) }
+            if role == .hub { checkService(asking: false) }
             guard wasBackgrounded else { return }
             wasBackgrounded = false
             guard role == .hub else { return }
@@ -467,10 +575,14 @@ final class TVModel {
     /// The server and the host's QR link work all along.
     func advertise() {
         guard role == .hub, !session.isWaitingForSetup, let server, let address = session.lanAddress else { return }
-        let playing = session.state.current.map { "\($0.track.title) – \($0.track.artist)" } ?? ""
-        advertiser.advertise(name: zoneName, port: server.port, txt: [
-            "name": zoneName, "kind": HubKind.tv.rawValue, "addr": address, "hub": deviceID, "playing": String(playing.prefix(120)),
-        ])
+        let playing = session.nowPlaying.map { "\($0.track.title) – \($0.track.artist)" } ?? ""
+        var txt = ["name": zoneName, "kind": HubKind.tv.rawValue, "addr": address, "hub": deviceID, "playing": String(playing.prefix(120))]
+        // The Spotify account (a fingerprint, never the id or name), as iPads announce theirs, so
+        // another device sees it's in use before starting a zone on it. Never for Apple Music.
+        if service == .spotify, let account = spotify.accountFingerprint {
+            txt[ZoneService.spotifyAccountKey] = account
+        }
+        advertiser.advertise(name: zoneName, port: server.port, txt: txt)
     }
 
     // MARK: Display
@@ -538,6 +650,53 @@ final class TVModel {
         #endif
     }
 
+}
+
+/// The host's setup page (on their phone): the music service, and Spotify's settings, sign-in
+/// page and device. The sign-in itself goes through `TVSpotify.signIn` (`/spotify/callback`).
+extension TVModel: HubSetupHandler {
+    /// Only while the zone waits for setup (nothing loaded): the session keeps going under the
+    /// new service, so the phone stays connected.
+    func chooseService(_ name: String) -> Bool {
+        guard role == .hub, session.isWaitingForSetup, let next = Service(rawValue: name) else { return false }
+        guard next != service else { return true }
+        let previous = service
+        service = next
+        let (catalog, engine, title) = serviceParts()
+        guard session.replaceService(catalog: catalog, engine: engine, serviceName: title) else {
+            service = previous
+            return false
+        }
+        defaults.set(next.rawValue, forKey: "provider")
+        debugLog("service: \(next.rawValue)")
+        checkService(asking: false)
+        return true
+    }
+
+    func setSpotifyClientID(_ clientID: String) {
+        spotify.setClientID(clientID)
+    }
+
+    func setSpotifySignInPage(_ typed: String) async -> SpotifyRelay.PageCheck {
+        await spotify.setSignInPage(typed)
+    }
+
+    func chooseSpotifyDevice(id: String) -> Bool {
+        spotify.chooseDevice(id: id)
+    }
+
+    /// Shows the zone already on this Spotify account as a display, after the page has its
+    /// answer. This zone was never started, so there's nothing of it to keep.
+    func joinSpotifyConflict() -> String? {
+        guard role == .hub, session.isWaitingForSetup, let zone = spotifyConflict else { return nil }
+        Task {
+            try? await Task.sleep(for: .milliseconds(500))
+            guard role == .hub, session.isWaitingForSetup else { return }
+            stopZone()
+            show(zone)
+        }
+        return zone.address
+    }
 }
 
 /// Placeholders while no zone is running.

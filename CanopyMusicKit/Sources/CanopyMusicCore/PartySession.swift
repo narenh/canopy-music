@@ -1202,6 +1202,21 @@ public final class PartySession {
     /// `-fakeSpotifyFollow` (debug builds): poses follow mode's state on any engine, so the UI can
     /// be seen without Spotify: a foreign track playing, the player's own queue, and our next song
     /// locked; or, with `issue`, the host's issue line (and nothing locked, as after giving up).
+    /// `-fakeSpotifyFollow` on an iPad or Apple TV hub: a track from outside the queue playing
+    /// ("From Spotify"), two songs in Spotify's own queue, and the next song locked; `issue` shows
+    /// the host's "Couldn't queue" line instead of the lock.
+    public func debugPoseSpotifyFollow(issue: Bool) {
+        let colors = { (bg: String, sec: String) in ArtworkColors(background: bg, primary: "#FFFFFF", secondary: sec) }
+        let external = QueueTrack(id: "spotify:track:fake-external", title: "Espresso", artist: "Sabrina Carpenter",
+                                  album: "Short n' Sweet", duration: 175, colors: colors("#5A3A1E", "#E8B07A"))
+        let foreign = [
+            QueueTrack(id: "spotify:track:fake-q1", title: "Good Luck, Babe!", artist: "Chappell Roan", duration: 218, colors: colors("#7A1F3D", "#F29BB8")),
+            QueueTrack(id: "spotify:track:fake-q2", title: "Birds of a Feather", artist: "Billie Eilish", duration: 210, colors: colors("#1E3A5A", "#8CB8E8")),
+        ]
+        serviceName = "Spotify"
+        debugPoseFollow(external: external, foreign: foreign, issue: issue ? "Couldn't queue the next song on Spotify" : nil)
+    }
+
     public func debugPoseFollow(external: QueueTrack?, foreign: [QueueTrack], issue: String? = nil) {
         guard remote == nil else { return }
         if externalCurrent?.track.id != external?.id {

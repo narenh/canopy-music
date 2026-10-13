@@ -134,6 +134,9 @@ public final class PartySession {
     @ObservationIgnored public var onSettingsChanged: (@MainActor () -> Void)?
     /// Called when a host stops the zone from the web page (after the page asked them to confirm).
     @ObservationIgnored public var onStopRequested: (@MainActor () -> Void)?
+    /// Called each time the player actually starts a song (hub only), so the app can record that
+    /// music has started in this zone. Not called for a loaded playlist or a failed start.
+    @ObservationIgnored public var onSongStarted: (@MainActor () -> Void)?
     public let catalog: any MusicCatalog
     @ObservationIgnored public let engine: any PlaybackEngine
 
@@ -601,6 +604,7 @@ public final class PartySession {
             loadedItemID = nil
             throw error
         }
+        onSongStarted?()
         recordPlayed(item)
         isPlaying = engine.isPlaying
         broadcast()
@@ -627,6 +631,7 @@ public final class PartySession {
             stagedItemID = nil
             mutate { $0.advance(to: id) }
             loadedItemID = state.current?.id
+            onSongStarted?()
             recordPlayed(state.current)
         case .reachedEnd:
             stagedItemID = nil

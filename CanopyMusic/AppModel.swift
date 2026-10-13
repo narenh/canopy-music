@@ -186,6 +186,14 @@ final class AppModel {
         self.spotifyDeviceName = UserDefaults.standard.string(forKey: "spotifyDeviceName")
         self.spotifyDeviceType = UserDefaults.standard.string(forKey: "spotifyDeviceType")
         self.spotifyDisplayName = UserDefaults.standard.string(forKey: "spotifyDisplayName")
+        // A zone where music never started isn't one to come back to: it's ended, as End does
+        // (before its saved queue loads), and the list has nothing to resume.
+        let record = ZoneRecord()
+        record.settleStarted(songsPlayed: QueueState.saved(at: Self.storeURL(provider ?? .none))?.log.isEmpty == false)
+        if record.endsOnLaunch {
+            for each in Self.allProviders { try? FileManager.default.removeItem(at: Self.storeURL(each)) }
+            record.ended()
+        }
         self.session = Self.makeSession(provider ?? .none, spotify: spotifyAPI)
         hostPIN = defaults.string(forKey: "hostPIN") ?? ""
         if let id = UserDefaults.standard.string(forKey: "deviceID") {
@@ -197,10 +205,10 @@ final class AppModel {
         zoneName = UserDefaults.standard.string(forKey: "zoneName") ?? DeviceKind.name
         displaysCanControl = UserDefaults.standard.object(forKey: "displaysCanControl") as? Bool ?? true
         // Launches start at the zone list, unless this iPad was hosting a zone that wasn't ended
-        // (a crash, or a quit by the system): then it goes straight back in, locked if it was.
+        // (a crash, or a quit by the system) and music had started in it: then it goes straight
+        // back in, locked if it was.
         var role = ZoneRole.choosing
         var locked = false
-        let record = ZoneRecord()
         if record.restoresOnLaunch, let provider, Self.canRestore(provider, spotifyAuth: spotifyAuth) {
             role = .hub
             locked = record.wasLocked
@@ -343,6 +351,7 @@ final class AppModel {
         defaults.set(next.rawValue, forKey: "provider")
         session = Self.makeSession(next, spotify: spotifyAPI)
         session.phonesCanReorder = phoneReorderEnabled
+        watchZoneStart()
         libraryPlaylistsCache = []
         applyCrossfade()
         Task { await restartServer() }
@@ -685,6 +694,15 @@ final class AppModel {
         }
         // A host stopped the zone from the web page (it asked them first): as ending it here does.
         session.onStopRequested = { [weak self] in self?.endZone() }
+        watchZoneStart()
+    }
+
+    /// Only a zone where music has started comes back after a crash (`ZoneRecord.hasStarted`).
+    private func watchZoneStart() {
+        session.onSongStarted = { [weak self] in
+            guard let self, self.zoneRole == .hub else { return }
+            self.zoneRecord.started()
+        }
     }
 
     #if DEBUG

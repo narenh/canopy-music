@@ -132,7 +132,17 @@ final class TVModel {
 
     /// Launch: straight back into the zone if this TV was hosting it when the app quit or crashed.
     /// Music stays paused. If it can't (no Apple Music access, no network), the list offers Resume.
+    /// A zone where music never started is ended instead: the TV starts at the zone list, with
+    /// nothing to resume.
     private func restoreZoneIfNeeded() {
+        zoneRecord.settleStarted(songsPlayed: QueueState.saved(at: Self.storeURL)?.log.isEmpty == false)
+        if zoneRecord.endsOnLaunch {
+            // As End does. Nothing else is running yet: no server, Bonjour or `.local` name.
+            debugLog("zone never started; ending it")
+            try? FileManager.default.removeItem(at: Self.storeURL)
+            zoneRecord.ended()
+            return
+        }
         guard zoneRecord.restoresOnLaunch, LocalNetwork.lanAddress() != nil,
               usesDemo || MusicAuthorization.currentStatus == .authorized else { return }
         #if DEBUG
@@ -211,6 +221,8 @@ final class TVModel {
             self.advertise()
         }
         session.onStopRequested = { [weak self] in self?.stopZone() }
+        // Only a zone where music has started comes back after a crash.
+        session.onSongStarted = { [weak self] in self?.zoneRecord.started() }
         role = .hub
     }
 

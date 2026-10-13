@@ -38,6 +38,12 @@ public struct QueueState: Codable, Equatable, Sendable {
 
     public init() {}
 
+    /// The queue a hub's `PartySession` saved at `url`, if there is one.
+    public static func saved(at url: URL) -> QueueState? {
+        guard let data = try? Data(contentsOf: url) else { return nil }
+        return try? JSONDecoder().decode(QueueState.self, from: data)
+    }
+
     /// A display's copy of its hub's queue. It has no playlist, so it never refills on its own;
     /// the next snapshot from the hub replaces it.
     public init(mirroring snapshot: PartySnapshot) {

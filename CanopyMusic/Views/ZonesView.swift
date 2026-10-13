@@ -73,13 +73,19 @@ struct ZoneListView: View {
         // <name> and no PIN.
         .task {
             let args = ProcessInfo.processInfo.arguments
-            // `-fakeSpotifyConflict <zone>`: creates a zone and presses Start, which asks about that zone.
+            // `-fakeSpotifyConflict <zone>`: presses "Create a new zone", then Start, which asks
+            // about that zone.
             if args.contains("-fakeSpotifyConflict") {
                 try? await Task.sleep(for: .seconds(1))
                 model.beginCreatingZone()
-                model.finishCreatingZone(name: model.zoneName, pin: model.hostPIN)
                 try? await Task.sleep(for: .seconds(1))
                 await model.startZone()
+                return
+            }
+            // `-pressCreate`: presses "Create a new zone" (setup on a fresh install, else the start screen).
+            if args.contains("-pressCreate") {
+                try? await Task.sleep(for: .seconds(1))
+                createZone()
                 return
             }
             guard args.contains("-confirmCreate"), model.canResumeZone else { return }
@@ -88,7 +94,8 @@ struct ZoneListView: View {
             try? await Task.sleep(for: .seconds(8))
             confirmingCreate = false
             model.beginCreatingZone()
-            model.finishCreatingZone(name: args[i + 1], pin: nil)
+            model.zoneName = args[i + 1]
+            model.hostPIN = ""
         }
         #endif
         .animation(.easeInOut(duration: 0.25), value: zones.map(\.id))
@@ -153,11 +160,12 @@ private struct ZoneRow: View {
     }
 }
 
-/// Creating a zone on this iPad: a name (defaults to the device name), then an optional host PIN.
+/// Setup's second step, after the service (first run only): a name for the zone (defaults to the
+/// device name), then an optional host PIN. Both can be changed later on the start screen.
 struct CreateZoneView: View {
     @Environment(AppModel.self) private var model
     @State private var step = Self.firstStep
-    @State private var name = DeviceKind.name
+    @State private var name = ""
     @State private var pin = ""
     @FocusState private var nameFocused: Bool
 
@@ -188,6 +196,7 @@ struct CreateZoneView: View {
                 }
             }
         }
+        .onAppear { if name.isEmpty { name = model.zoneName } }
     }
 
     private var nameStep: some View {

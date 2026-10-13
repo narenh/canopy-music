@@ -178,13 +178,16 @@ final class AppModel {
 
     init() {
         // Nothing saved (or a choice this build doesn't have, e.g. "demo" in a release build):
-        // start with no service and show setup.
+        // start with no service, and "Create a new zone" runs setup first.
         let saved = Provider(rawValue: defaults.string(forKey: "provider") ?? "")
         let provider = saved == Provider.none ? nil : saved
         self.provider = provider ?? .none
         var needsOnboarding = provider == nil
         #if DEBUG
-        if ProcessInfo.processInfo.arguments.contains("-onboarding") { needsOnboarding = true }
+        let setupFlags = ["-onboarding", "-onboardingSpotify", "-onboardingNetwork"]
+        if ProcessInfo.processInfo.arguments.contains(where: setupFlags.contains) { needsOnboarding = true }
+        // `-createZoneName` and `-createZonePIN` open setup's second step (name and PIN).
+        if ProcessInfo.processInfo.arguments.contains(where: ["-createZoneName", "-createZonePIN"].contains) { needsOnboarding = false }
         #endif
         self.needsOnboarding = needsOnboarding
         let spotifyAuth = SpotifyAuth()
@@ -231,19 +234,27 @@ final class AppModel {
             }
         }
         #if DEBUG
-        // Debug launches that go straight to a party.
+        // Debug launches that go straight to the start screen, with nothing live (`-autoParty` and
+        // `-autoResume` then press Start).
         let debugFlags = ["-autoParty", "-autoSearch", "-autoLoad", "-autoResume", "-autoPrevious", "-autoStress", "-showSettings",
-                          "-showPicker", "-appleMusicState", "-qrGallery", "-backgroundFor", "-screenshotParty", "-onboarding",
-                          "-onboardingSpotify", "-onboardingNetwork", "-easterEggPreview", "-diagnoseMusicKit", "-benchAppleMusic", "-autoLoadPlaylist", "-confirmEnd", "-showSave", "-spotifyState"]
+                          "-showPicker", "-appleMusicState", "-qrGallery", "-backgroundFor", "-screenshotParty",
+                          "-easterEggPreview", "-diagnoseMusicKit", "-benchAppleMusic", "-autoLoadPlaylist", "-confirmEnd", "-showSave", "-spotifyState",
+                          "-switchService"]
         if ProcessInfo.processInfo.arguments.contains(where: debugFlags.contains) {
-            // The start screen, with nothing live (`-autoParty` and `-autoResume` press Start).
             role = .hub
             locked = false
             restoring = false
             restoresAfterSpotifyCheck = false
         }
-        // `-createZonePIN`: opens Create Zone at its PIN step, for checking its layout.
-        if ProcessInfo.processInfo.arguments.contains("-createZonePIN") { role = .creating }
+        // `-onboarding`, `-onboardingSpotify`, `-onboardingNetwork`: setup's first step (the
+        // service), as "Create a new zone" on a fresh install. `-createZoneName`,
+        // `-createZonePIN`: its second step, at the name or the PIN, for checking their layout.
+        if ProcessInfo.processInfo.arguments.contains(where: (setupFlags + ["-createZoneName", "-createZonePIN"]).contains) {
+            role = .creating
+            locked = false
+            restoring = false
+            restoresAfterSpotifyCheck = false
+        }
         #endif
         zoneRole = role
         isRestoringZone = restoring
@@ -301,6 +312,7 @@ final class AppModel {
         // "Create a new zone" and Start, which asks.
         if let i = args.firstIndex(of: "-fakeSpotifyConflict"), i + 1 < args.count {
             self.provider = .spotify
+            needsOnboarding = false
             let account = SpotifyAccount.fingerprint(userID: "debug-user")
             debugSpotifyAccount = account
             debugZones = [ZoneListing(id: args[i + 1], name: args[i + 1], kind: .ipad, address: "192.0.2.1",
@@ -557,7 +569,7 @@ final class AppModel {
     enum ZoneRole: Equatable {
         /// The zone list (every launch).
         case choosing
-        /// Naming a new zone and setting its PIN.
+        /// First-run setup, once ever: the service (`needsOnboarding`), then the zone's name and PIN.
         case creating
         /// This device's own zone: the start screen (pure setup, nothing live) until Start, then
         /// the live zone, where this device plays the music (`isLive`).
@@ -685,18 +697,20 @@ final class AppModel {
     }
     var showsGuestQR: Bool { isDisplay ? guestURL != nil && session.phonesCanQueue : phoneQueueEnabled }
 
-    /// "Create a new zone" on the list. A new zone always starts empty: a zone this device still
-    /// had is ended first (the list asked). Nothing is live until Start.
+    /// "Create a new zone" on the list. The first time (no service ever chosen) it runs setup:
+    /// the service, then the zone's name and PIN (`ZoneRole.creating`). After that it goes straight
+    /// to the start screen with the last name and PIN. A new zone always starts empty: a zone this
+    /// device still had is ended first (the list asked). Nothing is live until Start.
     func beginCreatingZone() {
         clearZone()
-        zoneRole = .creating
+        zoneRole = needsOnboarding ? .creating : .hub
     }
 
     func cancelCreatingZone() {
         zoneRole = .choosing
     }
 
-    /// Name and PIN chosen: on to the start screen.
+    /// Setup's last step, name and PIN: on to the start screen.
     func finishCreatingZone(name: String, pin: String?) {
         let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
         zoneName = trimmed.isEmpty ? DeviceKind.name : String(trimmed.prefix(40))

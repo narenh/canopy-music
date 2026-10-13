@@ -1,7 +1,9 @@
 import SwiftUI
 
-/// First launch: pick Apple Music or Spotify (or the demo). Spotify gets a second step for the
-/// host's own Client ID and sign-in.
+/// Setup's first step, the first time "Create a new zone" is pressed: pick Apple Music or Spotify
+/// (or the demo). Spotify gets a second step for the host's own Client ID and sign-in, then asks
+/// where music plays. Then the phone-queueing step, and setup's second step, the zone's name and
+/// PIN (`CreateZoneView`). It never comes back once a service is chosen.
 struct OnboardingView: View {
     @Environment(AppModel.self) private var model
 
@@ -24,6 +26,7 @@ struct OnboardingView: View {
                         back: { go(.chooser) },
                         done: {
                             model.chooseProvider(.spotify)
+                            model.isPickingSpotifyDevice = true
                             networkBack = .spotify
                             go(.network)
                         }
@@ -39,6 +42,8 @@ struct OnboardingView: View {
         }
         .preferredColorScheme(.dark)
         .foregroundStyle(.white)
+        // After signing in to Spotify: "Where should music play?"
+        .spotifyDevicePicker()
         #if DEBUG
         .onAppear {
             if ProcessInfo.processInfo.arguments.contains("-onboardingSpotify") { step = .spotify }
@@ -83,6 +88,7 @@ struct OnboardingView: View {
                         // Already signed in (e.g. a reinstall kept the sign-in): no need to sign in again.
                         if model.spotifyAuth.isSignedIn, !model.spotifyClientID.isEmpty {
                             model.chooseProvider(.spotify)
+                            model.isPickingSpotifyDevice = true
                             networkBack = .chooser
                             go(.network)
                         } else {

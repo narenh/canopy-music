@@ -174,8 +174,15 @@ struct RootView: View {
                 ZoneListView()
                     .transition(.opacity)
             case .creating:
-                CreateZoneView()
-                    .transition(.opacity)
+                // First-run setup: the service, then the zone's name and PIN.
+                Group {
+                    if model.needsOnboarding {
+                        OnboardingView()
+                    } else {
+                        CreateZoneView()
+                    }
+                }
+                .transition(.opacity)
             case .display:
                 PartyView()
                     .transition(.opacity)
@@ -299,13 +306,10 @@ struct RootView: View {
         }
     }
 
-    /// Today's single-device app: setup, host mode and the party screen.
+    /// This device's own zone: the start screen and host mode (`HostView`), and the party screen.
     @ViewBuilder private var hubContent: some View {
         Group {
-            if model.needsOnboarding {
-                OnboardingView()
-                    .transition(.opacity)
-            } else if model.isLocked {
+            if model.isLocked {
                 PartyView()
                     .transition(.opacity)
             } else {
@@ -314,7 +318,6 @@ struct RootView: View {
             }
         }
         .animation(.easeInOut(duration: 0.4), value: model.isLocked)
-        .animation(.easeInOut(duration: 0.5), value: model.needsOnboarding)
         .tint(model.provider.accent)
     }
 }

@@ -172,6 +172,18 @@ struct HostView: View {
                 }
                 .listRowBackground(Color.white.opacity(0.08))
 
+                // Prefilled from setup or the last zone; editable here and in a live zone (the
+                // `.local` address follows the name). The PIN only guards a live zone's host mode.
+                Section {
+                    ZoneNameRow()
+                    ZonePINRow()
+                } header: {
+                    Text("Zone")
+                } footer: {
+                    Text("Other Canopy Music devices on the Wi\u{2011}Fi see this zone by name. The PIN is asked for when you press and hold the logo on the party screen.")
+                }
+                .listRowBackground(Color.white.opacity(0.08))
+
                 // With Spotify, hidden until a device is chosen, and when it's another device (a
                 // TV, a speaker), where this iPad's AirPlay choice doesn't apply.
                 if model.showsSpeakerChoice {
@@ -457,6 +469,71 @@ struct ServiceChevron: View {
             .frame(width: 24, height: 28)
             .contentShape(Rectangle())
             .accessibilityLabel("Music service")
+    }
+}
+
+// MARK: - Zone
+
+/// The zone's name, applied on return or when the field loses focus, so the zone (and its
+/// `.local` address) isn't re-announced on every keystroke. The address the name gives shows
+/// under it.
+private struct ZoneNameRow: View {
+    @Environment(AppModel.self) private var model
+    @State private var draft = ""
+    @FocusState private var focused: Bool
+
+    /// The zone's address for the saved name, else the one the typed name gives. nil when the
+    /// name is empty or has no letters or digits.
+    private var address: String? {
+        let name = draft.trimmingCharacters(in: .whitespacesAndNewlines)
+        if name == model.zoneName { return model.localAddress }
+        return FriendlyHostname.typedLocalName(forZone: name).map { "\($0).local" }
+    }
+
+    private func commit() {
+        let name = draft.trimmingCharacters(in: .whitespacesAndNewlines)
+        if name.isEmpty { draft = model.zoneName } else if name != model.zoneName { model.zoneName = String(name.prefix(40)) }
+    }
+
+    var body: some View {
+        VStack(alignment: .trailing, spacing: 4) {
+            HStack {
+                Text("Name")
+                Spacer(minLength: 16)
+                TextField(DeviceKind.name, text: $draft)
+                    .multilineTextAlignment(.trailing)
+                    .submitLabel(.done)
+                    .focused($focused)
+                    .onSubmit(commit)
+            }
+            if let address {
+                Text(address)
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
+            }
+        }
+        .onAppear { draft = model.zoneName }
+        .onChange(of: focused) { _, isFocused in if !isFocused { commit() } }
+        // Renamed elsewhere (Settings, a host on the web page).
+        .onChange(of: model.zoneName) { _, name in if !focused { draft = name } }
+    }
+}
+
+/// The host PIN: digits only, since the unlock pad has nothing else. Empty unlocks without asking.
+private struct ZonePINRow: View {
+    @Environment(AppModel.self) private var model
+
+    var body: some View {
+        HStack {
+            Text("PIN")
+            Spacer(minLength: 16)
+            SecureField("Optional", text: Binding(get: { model.hostPIN }, set: { typed in
+                model.hostPIN = String(typed.filter { $0.isASCII && $0.isNumber }.prefix(8))
+            }))
+            .multilineTextAlignment(.trailing)
+            .keyboardType(.numberPad)
+            .textContentType(.oneTimeCode)
+        }
     }
 }
 

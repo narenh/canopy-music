@@ -105,9 +105,7 @@ struct PartyView: View {
                         if model.hostPIN.isEmpty { _ = model.unlock(pin: "") } else { showUnlock = true }
                     }
                 searchField
-                    .frame(maxWidth: 720)
             }
-            .frame(maxWidth: .infinity, alignment: .leading)
             .padding(.horizontal, 32)
             .padding(.top, 28)
             .padding(.bottom, 12)

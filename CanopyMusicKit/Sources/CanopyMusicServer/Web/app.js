@@ -292,7 +292,7 @@
     const wait = setupToastUntil - Date.now();
     if (wait > 0) await new Promise((resolve) => setTimeout(resolve, wait));
     showSplash(`Connecting to ${snap.zoneName || "Canopy Music"}`);
-    if (!(await reachable(address, snap.lanAddress))) { debugLog(`set up; ${address} not reachable: staying`); hideSplash(); return; }
+    if (!(await reachableWhenShown(address))) { debugLog(`set up; ${address} not reachable: staying`); hideSplash(); return; }
     debugLog(`set up; moving to ${address}`);
     moveTo(address, new URLSearchParams(location.search), savedHostKey(), settingsOpen() ? "#settings" : "");
   }
@@ -305,8 +305,33 @@
     if (!address || address === location.host || address === followedAddress) return;
     if (!location.hostname.endsWith(".local")) return; // on the IP address, which still works
     followedAddress = address;
-    if (!(await reachable(address, snap.lanAddress))) return;
+    const ok = await reachableWhenShown(address, () => followedAddress === address);
+    if (followedAddress !== address) return; // renamed again meanwhile: that name is followed
+    if (!ok) { debugLog(`rename: ${address} not reachable: staying`); return; }
+    debugLog(`rename: moving to ${address}`);
     moveTo(address, new URLSearchParams(location.search), hostPaired ? hostKey : null, settingsOpen() ? "#settings" : "");
+  }
+
+  /** `reachable`, checked while the page is showing: Safari fails a background tab's loads from
+   * another address at once, so a hidden page waits until it's shown (again, if it was hidden
+   * during the check). Gives up (false) once `wanted()` is false. */
+  async function reachableWhenShown(address, wanted = () => true) {
+    for (;;) {
+      if (document.visibilityState !== "visible") {
+        debugLog(`${address}: waiting until shown`);
+        await new Promise((resolve) => {
+          const shown = () => {
+            if (document.visibilityState !== "visible") return;
+            document.removeEventListener("visibilitychange", shown);
+            resolve();
+          };
+          document.addEventListener("visibilitychange", shown);
+        });
+      }
+      if (!wanted()) return false;
+      if (await reachable(address, snap.lanAddress)) return true;
+      if (document.visibilityState === "visible") return false;
+    }
   }
 
   // A link to …/#settings opens the zone settings once this phone is a host and the state has loaded.

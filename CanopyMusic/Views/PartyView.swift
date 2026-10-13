@@ -408,12 +408,7 @@ struct NowPlayingView: View {
             let reserved: CGFloat = item == nil ? 110 : 284
             let widthSide = width * 0.85
             let side = max(200, min(widthSide, geo.size.height - reserved))
-            // When the column's width holds the artwork back (portrait, squarish windows, a 13"
-            // in landscape) there's spare height, and the group sits in the middle of it. Only
-            // when the artwork fills the height does it rest on the bottom, so the controls line
-            // up with Up next's bottom edge. Without the controls there's nothing to line up
-            // with, so it's always centred.
-            let centered = widthSide < geo.size.height - reserved || (item != nil && !showsTransport)
+            // Always in the middle of the column's height, whatever the window's shape.
             VStack(spacing: 20) {
                 ArtworkView(track: item?.track, large: true, cornerRadius: 18)
                     .frame(width: side, height: side)
@@ -464,15 +459,12 @@ struct NowPlayingView: View {
                 }
             }
             .padding(.horizontal, inset)
-            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: centered ? .center : .bottom)
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
             .animation(.spring(duration: 0.6, bounce: 0.15), value: item?.id)
         }
-        // When bottom-aligned, the controls line up with the Up next panel's bottom edge (the
-        // right pane's 24 pt vertical padding).
-        .padding(.bottom, Self.bottomInset)
+        // The right pane's 24 pt vertical padding, so a column that's full stops where Up next does.
+        .padding(.bottom, 24)
     }
-
-    static let bottomInset: CGFloat = 24
 
     /// Displays get play/pause, skip and scrubbing only while the hub allows it.
     private var showsTransport: Bool { !model.isDisplay || session.displaysCanControl }

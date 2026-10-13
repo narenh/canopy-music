@@ -463,6 +463,19 @@ func longSong(_ id: String) -> QueueTrack { QueueTrack(id: id, title: id, artist
         #expect(ids(Rules.foreignUpcoming(in: q(["f1"]), staged: nil)) == ["f1"])
         #expect(Rules.foreignUpcoming(in: q((0..<40).map { "f\($0)" }), staged: nil).items.count == Rules.foreignLimit)
     }
+
+    /// Seen on a real account with repeat on: after its queue, Spotify lists the song Canopy just
+    /// played (its one-song context) ten times. Those aren't anyone's requests.
+    @Test func ourOwnSongsReplayedAfterTheQueueArentForeign() {
+        let q = { (ids: [String]) in ids.map(longSong) }
+        let ids = { (r: (items: [QueueTrack], stagedQueued: Bool)) in r.items.map(\.id) }
+        let replay = Array(repeating: "prologue", count: 10)
+        #expect(ids(Rules.foreignUpcoming(in: q(replay), staged: nil, ours: ["prologue", "shire"])) == [])
+        // Someone's real request ahead of the replay still shows; the replay doesn't.
+        #expect(ids(Rules.foreignUpcoming(in: q(["f1"] + replay), staged: nil, ours: ["prologue"])) == ["f1"])
+        // Back-to-back duplicates of a foreign song show once.
+        #expect(ids(Rules.foreignUpcoming(in: q(["f1", "f1", "f2"]), staged: nil)) == ["f1", "f2"])
+    }
 }
 
 /// The follow-mode snapshot fields are optional: older peers ignore them, older hubs omit them.

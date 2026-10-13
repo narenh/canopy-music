@@ -103,11 +103,21 @@ public enum FollowRules {
     /// (all of them when nothing of ours is in it), and whether our staged song is in it. Our song
     /// shows once, as Canopy's locked next item, at its first place in the queue; anything after
     /// it isn't shown (Canopy queues its following song before the player gets there).
-    public static func foreignUpcoming(in queue: [QueueTrack], staged: String?) -> (items: [QueueTrack], stagedQueued: Bool) {
-        if let staged, let index = queue.firstIndex(where: { $0.id == staged }) {
-            return (Array(queue[..<index].prefix(foreignLimit)), true)
+    ///
+    /// `ours` is what Canopy itself has played or is playing. Spotify lists the queue first, then
+    /// what it would play after it, which with repeat on is Canopy's own one-song "context" over
+    /// and over (seen on a real account: the previous song ten times). A song of ours is never
+    /// someone else's request, so the list stops at the first one; back-to-back repeats collapse.
+    public static func foreignUpcoming(in queue: [QueueTrack], staged: String?, ours: Set<String> = []) -> (items: [QueueTrack], stagedQueued: Bool) {
+        let stagedIndex = staged.flatMap { staged in queue.firstIndex { $0.id == staged } }
+        var foreign: [QueueTrack] = []
+        for track in queue[..<(stagedIndex ?? queue.endIndex)] {
+            if ours.contains(track.id) { break }
+            if foreign.last?.id == track.id { continue }
+            foreign.append(track)
+            if foreign.count == foreignLimit { break }
         }
-        return (Array(queue.prefix(foreignLimit)), false)
+        return (foreign, stagedIndex != nil)
     }
 }
 

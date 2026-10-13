@@ -955,7 +955,10 @@ public final class PartySession {
         guard generation == self.generation else { return nil }
         let target = confirming ?? state.upNext.first { $0.id == stagedItemID }
             ?? state.upNext.first { $0.id == state.lockedNextID }
-        let (foreign, queued) = FollowRules.foreignUpcoming(in: queue, staged: target?.track.id)
+        // Songs Canopy played or is playing: Spotify replays them after its queue (repeat).
+        var ours = Set(state.history.map(\.track.id))
+        if let current = state.current { ours.insert(current.track.id) }
+        let (foreign, queued) = FollowRules.foreignUpcoming(in: queue, staged: target?.track.id, ours: ours)
         setForeignUpcoming(foreign)
         if confirming == nil, stagedConfirmed, !queued, let staged = target, stagingTask == nil,
            follower.playerTrackID != staged.track.id {

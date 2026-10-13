@@ -72,6 +72,15 @@ public protocol PlaybackEngine: AnyObject {
     func seek(to time: TimeInterval)
     /// `duration` nil means the system's default crossfade length.
     func setCrossfade(enabled: Bool, duration: TimeInterval?)
+    /// The session is dropping this engine (`PartySession.shutdown`, after `pause()`): it stops
+    /// its own loops and never starts the music again. An engine that never played leaves the
+    /// player alone, unless it's still on this session's song from before a relaunch: that's
+    /// ours, and it's paused.
+    func shutDown()
+}
+
+public extension PlaybackEngine {
+    func shutDown() {}
 }
 
 /// A player that belongs to an account other things also control (Spotify): the session follows

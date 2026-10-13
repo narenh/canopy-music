@@ -39,6 +39,8 @@ final class SpotifyEngine: FollowingPlaybackEngine {
     /// Watching after a relaunch (`attach`): the next reading decides whether the music is still
     /// ours and playing, and a paused player stays paused (no "song ended" from it).
     private var attachedAwaitingFirstReading = false
+    /// The session dropped this engine (`shutDown`).
+    private var isShutDown = false
 
     private var cachedPlaying = false
     private var cachedTime: TimeInterval = 0
@@ -174,6 +176,28 @@ final class SpotifyEngine: FollowingPlaybackEngine {
     /// Spotify's crossfade is a setting in the Spotify app itself.
     func setCrossfade(enabled: Bool, duration: TimeInterval?) {}
 
+    /// Dropped by its session (the music moved to Sonos, the service changed): no more polls,
+    /// so nothing here can start Spotify again (a play retry). The session paused first, which
+    /// sends a pause only if this engine started the music. One restored after a relaunch and
+    /// not read yet may still be playing the session's song: that's ours, so it's paused too.
+    func shutDown() {
+        guard !isShutDown else { return }
+        isShutDown = true
+        poller?.cancel()
+        poller = nil
+        guard !hasStartedPlayback, attachedAwaitingFirstReading, let expected = currentURI else { return }
+        attachedAwaitingFirstReading = false
+        let device = deviceID
+        Task { [api] in
+            // Only on this engine's own device: the same song may be starting on the new output
+            // (a Sonos room can show up as Spotify's active device).
+            guard let device, let state = try? await api.get("/me/player", as: SpotifyPlayerState.self),
+                  state.is_playing, state.item?.uri == expected, state.device?.id == device else { return }
+            try? await api.send("PUT", "/me/player/pause", query: ["device_id": device])
+        }
+        log("shut down: pausing our restored song if it's still playing")
+    }
+
     private func transferToDevice() async throws {
         struct Body: Encodable { var device_ids: [String]; var play: Bool }
         guard let deviceID else { throw SpotifyError.noDevice }
@@ -189,7 +213,7 @@ final class SpotifyEngine: FollowingPlaybackEngine {
 
     private func poll() async {
         // While Spotify has asked us to hold off (a 429's Retry-After), don't read at all.
-        guard api.auth.isSignedIn, currentURI != nil, Date() > settleUntil, !api.isBackingOff else { return }
+        guard !isShutDown, api.auth.isSignedIn, currentURI != nil, Date() > settleUntil, !api.isBackingOff else { return }
         let state: SpotifyPlayerState?
         do {
             state = try await api.get("/me/player", as: SpotifyPlayerState.self)
@@ -197,7 +221,7 @@ final class SpotifyEngine: FollowingPlaybackEngine {
             log("poll failed: \(error)")
             return
         }
-        guard Date() > settleUntil else { return }
+        guard Date() > settleUntil, !isShutDown else { return }
         log("poll: \(state?.item?.name ?? "nil") \(state?.item?.uri ?? "") playing=\(state?.is_playing ?? false) t=\((state?.progress_ms ?? 0) / 1000) | ours=\(currentURI ?? "nil") staged=\(stagedURI ?? "nil") foreign=\(foreignURI ?? "nil")")
 
         var observation: FollowRules.Observation?

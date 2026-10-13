@@ -78,11 +78,13 @@ public enum FollowRules {
         let uri = observation?.trackID
         // Right after asking for our track, a mismatch may mean the player hasn't taken it yet.
         // Retry once, but only if the player is idle or still on the track we had before: an
-        // unfamiliar track playing is someone else's choice, and is followed.
+        // unfamiliar track playing is someone else's choice, and is followed. Never once we've
+        // paused since: a retry would start the music we just stopped (e.g. on the old output
+        // after the music moved to another one).
         if uri != ours, context.sincePlayRequest < playRequestWindow {
             let idle = observation == nil || uri == nil || observation?.isPlaying == false
             if idle || (uri != nil && uri == context.previous) {
-                return context.retriedPlay ? .nothing : .retryPlay
+                return context.retriedPlay || context.pausedByUs ? .nothing : .retryPlay
             }
         }
         guard let observation, let uri else { return .nothing }

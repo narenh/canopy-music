@@ -435,6 +435,14 @@ func longSong(_ id: String) -> QueueTrack { QueueTrack(id: id, title: id, artist
         #expect(Rules.step(nil, .init(ours: "a", sincePlayRequest: 12)) == .nothing) // too late to be our request
     }
 
+    /// Paused since the play request (the music moved to another output, say): a retry would
+    /// start the old output again under the new one.
+    @Test func neverRetriesOncePaused() {
+        #expect(Rules.step(nil, .init(ours: "a", sincePlayRequest: 2, pausedByUs: true)) == .nothing)
+        #expect(Rules.step(.init(trackID: "z", isPlaying: false), .init(ours: "a", sincePlayRequest: 2, pausedByUs: true)) == .nothing)
+        #expect(Rules.step(playing("z"), .init(ours: "a", previous: "z", sincePlayRequest: 2, pausedByUs: true)) == .nothing)
+    }
+
     @Test func ourStagedSongAdvances() {
         #expect(Rules.step(playing("b"), .init(ours: "a", staged: "b")) == .advancedToStaged)
         // After foreign tracks too.

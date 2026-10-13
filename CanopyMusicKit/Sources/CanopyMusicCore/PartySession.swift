@@ -366,6 +366,8 @@ public final class PartySession {
         if remote == nil {
             engine.pause()
             isPlaying = false
+            // No loop of the old engine may start its player again (a play retry) once it's dropped.
+            engine.shutDown()
         }
         engine.onEvent = nil
         if let saveTask, let storeURL {
@@ -790,6 +792,20 @@ public final class PartySession {
         }
         broadcast()
         Task { await syncStaging() }
+    }
+
+    /// Runs an operation on the engine in turn with the session's own (play, stage, skip), so
+    /// neither sees the other half done: e.g. handing a Sonos group to another room while the
+    /// next song is being queued. Hub only. No deadline: keep it to the player's own commands.
+    public func withEngine<T: Sendable>(_ operation: @escaping @MainActor @Sendable () async throws -> T) async throws -> T {
+        let result: Result<T, any Error> = try await serially {
+            do {
+                return .success(try await operation())
+            } catch {
+                return .failure(error)
+            }
+        }
+        return try result.get()
     }
 
     /// Runs engine operations one at a time, in order. Overlapping operations (two quick backs,

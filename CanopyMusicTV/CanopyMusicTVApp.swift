@@ -193,6 +193,7 @@ final class TVModel {
     /// Makes this TV the hub of its zone: a new, empty one, or the one it had (from the saved queue).
     private func openZone(fresh: Bool) {
         let store = Self.storeURL
+        session.shutdown()
         if usesDemo {
             #if DEBUG
             session = PartySession(catalog: DemoCatalog(), engine: DemoPlaybackEngine(), storeURL: store)
@@ -266,7 +267,7 @@ final class TVModel {
 
     /// Back to the zone list without touching the zone itself (`stopZone` ends it first).
     private func closeZone() {
-        if session.engine.isPlaying { session.engine.pause() }
+        session.shutdown()
         session = PartySession(catalog: DemoOrEmptyCatalog(), engine: SilentEngine())
         serverTask?.cancel()
         serverTask = nil
@@ -371,6 +372,7 @@ final class TVModel {
         guard let url = zone.baseURL else { return }
         let connection = ZoneConnection(baseURL: url, clientID: deviceID, name: UIDevice.current.name, kind: .tv)
         let mirror = PartySession(remote: connection)
+        session.shutdown()
         session = mirror
         connection.start(session: mirror)
         self.connection = connection
@@ -384,6 +386,7 @@ final class TVModel {
         connection?.stop()
         connection = nil
         shownZone = nil
+        session.shutdown()
         session = PartySession(catalog: DemoOrEmptyCatalog(), engine: SilentEngine())
         role = .choosing
     }

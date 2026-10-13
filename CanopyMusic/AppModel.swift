@@ -344,7 +344,7 @@ final class AppModel {
 
     func setProvider(_ next: Provider) {
         guard next != provider else { return }
-        if session.engine.isPlaying { session.engine.pause() }
+        session.shutdown()
         provider = next
         defaults.set(next.rawValue, forKey: "provider")
         session = Self.makeSession(next, spotify: spotifyAPI)
@@ -609,7 +609,7 @@ final class AppModel {
     /// Shows another device's zone. Displays don't run a server or play anything.
     func join(_ zone: ZoneListing) {
         guard let url = zone.baseURL else { return }
-        if session.engine.isPlaying { session.pause() }
+        session.shutdown()
         Task { await stopServer() }
         // A Mac shows up as an iPad-kind display (the kind only picks the hub's icon for it; older
         // hubs and displays couldn't decode a new one) with its own name, e.g. "MacBook Air".
@@ -629,6 +629,7 @@ final class AppModel {
         displayConnection?.stop()
         displayConnection = nil
         displayedZone = nil
+        session.shutdown()
         session = Self.makeSession(provider, spotify: spotifyAPI)
         session.phonesCanReorder = phoneReorderEnabled
         configureHubSession()

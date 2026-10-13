@@ -155,6 +155,13 @@ public final class PartySession {
     @ObservationIgnored private var stagedItemID: UUID?
     /// Tail of the serial chain of engine operations (see `serially`).
     @ObservationIgnored private var engineChain: Task<Void, Never>?
+    /// Operations waiting in or running on the chain.
+    @ObservationIgnored private var pendingOperations = 0
+    /// Counts up each time the session starts over (`end`, `load`) or is dropped (`shutdown`).
+    /// An engine call that was in flight across one of those (a song change as the zone ended)
+    /// belongs to the session that was: when it returns, the music is paused and nothing is
+    /// recorded, saved or staged from it.
+    @ObservationIgnored private var generation = 0
     /// The queue item the engine currently has loaded as its current track.
     @ObservationIgnored private var loadedItemID: UUID?
     /// `syncStaging` is running (one at a time; later calls fold into it).
@@ -285,6 +292,7 @@ public final class PartySession {
     /// Settings (zone name, Wi‑Fi, toggles, Host Control) aren't the session's to clear.
     public func end() {
         guard remote == nil else { return }
+        generation += 1
         if engine.isPlaying { engine.pause() }
         saveTask?.cancel()
         saveTask = nil
@@ -296,6 +304,27 @@ public final class PartySession {
         state.clear()
         broadcast()
         if let storeURL { try? FileManager.default.removeItem(at: storeURL) }
+    }
+
+    /// The app is dropping this session (joining a zone as a display, changing service, leaving
+    /// a zone): stops the music and the session's own loops, and writes a save still pending, so
+    /// a chained engine call that finishes later changes nothing, and nothing outlives it.
+    public func shutdown() {
+        generation += 1
+        if remote == nil {
+            engine.pause()
+            isPlaying = false
+        }
+        engine.onEvent = nil
+        if let saveTask, let storeURL {
+            saveTask.cancel()
+            self.saveTask = nil
+            if let data = try? JSONEncoder().encode(state) { try? data.write(to: storeURL, options: .atomic) }
+        }
+        tickTask?.cancel()
+        tickTask = nil
+        driftTask?.cancel()
+        driftTask = nil
     }
 
     public var hasParty: Bool { state.current != nil || !state.upNext.isEmpty }
@@ -355,6 +384,7 @@ public final class PartySession {
         guard remote == nil else { return }
         let tracks = try await catalog.tracks(in: playlist)
         let skipped = await catalog.loadReport(for: playlist)?.skipped ?? []
+        generation += 1
         if engine.isPlaying { engine.pause() }
         stagedItemID = nil
         loadedItemID = nil
@@ -393,6 +423,7 @@ public final class PartySession {
         if state.current == nil { mutate { $0.advance() } }
         guard let current = state.current else { return }
         if loadedItemID == current.id {
+            let generation = generation
             do {
                 try await timed("resume") { try await self.engine.resume() }
             } catch let error as PlaybackEngineError {
@@ -400,6 +431,7 @@ public final class PartySession {
                 loadedItemID = nil
                 throw error
             }
+            guard generation == self.generation else { engine.pause(); return }
             isPlaying = engine.isPlaying
             broadcast()
         } else {
@@ -407,6 +439,9 @@ public final class PartySession {
         }
     }
 
+    /// Pauses at once. A song change still in flight on the chain (a skip's play, say) would
+    /// start the music again when it lands, so the pause is repeated after it, in its turn: a
+    /// play pressed in between is queued behind that and wins, as the order of presses says.
     public func pause() {
         if let remote {
             isPlaying = false
@@ -416,6 +451,14 @@ public final class PartySession {
         engine.pause()
         isPlaying = engine.isPlaying
         broadcast()
+        guard pendingOperations > 0 else { return }
+        Task {
+            try? await serially {
+                self.engine.pause()
+                self.isPlaying = self.engine.isPlaying
+                self.broadcast()
+            }
+        }
     }
 
     public func togglePlayPause() async {
@@ -460,6 +503,9 @@ public final class PartySession {
             Task { try? await remote.send(.seek(max(0, time))) }
             return
         }
+        // Not during a song change: the position belongs to the song going away, and a seek on
+        // a player mid-call is the kind of overlap that wedges it (see `serially`).
+        guard pendingOperations == 0 else { return }
         engine.seek(to: max(0, time))
         broadcast()
     }
@@ -474,7 +520,12 @@ public final class PartySession {
 
     private func skipNow() async {
         let wasPlaying = engine.isPlaying
-        if wasPlaying, stagedItemID != nil, (try? await timed("skipToStaged") { try await self.engine.skipToStaged() }) != nil { return }
+        if wasPlaying, stagedItemID != nil {
+            let generation = generation
+            let skipped = (try? await timed("skipToStaged") { try await self.engine.skipToStaged() }) != nil
+            guard generation == self.generation else { engine.pause(); return }
+            if skipped { return }
+        }
         mutate { $0.advance() }
         if wasPlaying, let current = state.current { try? await play(current) }
     }
@@ -641,6 +692,7 @@ public final class PartySession {
     private func play(_ item: QueueItem) async throws {
         stagedItemID = nil
         loadedItemID = item.id
+        let generation = generation
         do {
             try await timed("play") { try await self.engine.play(item.track) }
         } catch {
@@ -648,6 +700,13 @@ public final class PartySession {
             // play just failed can hang (Apple Music on tvOS reconnects on the main thread).
             loadedItemID = nil
             throw error
+        }
+        guard generation == self.generation else {
+            // The zone ended, or a new playlist loaded, while the player was starting this song:
+            // it isn't this session's to play, record, save or stage behind.
+            engine.pause()
+            if loadedItemID == item.id { loadedItemID = nil }
+            return
         }
         onSongStarted?()
         recordPlayed(item)
@@ -664,8 +723,10 @@ public final class PartySession {
     /// handler past its timeout): it stops waiting, the operation still runs in its turn.
     private func serially<T: Sendable>(_ operation: @escaping @MainActor @Sendable () async -> T) async throws -> T {
         let previous = engineChain
+        pendingOperations += 1
         let task = Task<T, any Error> { @MainActor in
             await previous?.value
+            defer { self.pendingOperations -= 1 }
             return await operation()
         }
         engineChain = Task { _ = try? await task.value }
@@ -720,6 +781,8 @@ public final class PartySession {
             stagedItemID = nil
             mutate { $0.advance(to: id) }
             loadedItemID = state.current?.id
+            // Nothing current (the zone ended as the player moved on): nothing started.
+            guard state.current != nil else { return }
             onSongStarted?()
             recordPlayed(state.current)
         case .reachedEnd:
@@ -761,8 +824,11 @@ public final class PartySession {
             desired = first
         }
         guard desired?.id != stagedItemID else { return }
+        let generation = generation
         do {
             try await timed("stage") { try await self.engine.stage(desired?.track) }
+            // Staged into a session that has since started over: not this queue's next song.
+            guard generation == self.generation else { return }
             stagedItemID = desired?.id
         } catch {
             // Leave stagedItemID alone (a timeout has cleared it); the next change retries, and

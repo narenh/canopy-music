@@ -290,11 +290,14 @@ public final class PartyServer: Sendable {
         }
         // Debug builds: the raw Apple Music responses behind motion artwork (`MotionArtwork`), to
         // check its field names on a real device. `?album=<catalog album id>`, `?song=<catalog
-        // song id>` (its first album), or `?current` (the song playing now).
+        // song id>` (its first album), or `?current` (the song playing now). `&platform=<value>`
+        // and `&extend=<value>` replace those on the album request (empty: leave it out), to try
+        // variants without a rebuild; the response shows each request's full URL.
         await server.appendRoute("GET /api/debug/motion") { request in
             var song = request.query["song"]
             if request.query["current"] != nil { song = await session.state.current?.track.id }
             let album = request.query["album"]
+            let albumQuery = MotionArtwork.albumQuery.overriding(extend: request.query["extend"], platform: request.query["platform"])
             func text(_ status: HTTPStatusCode, _ message: String) -> HTTPResponse {
                 HTTPResponse(statusCode: status, headers: [.contentType: "text/plain; charset=utf-8"], body: Data((message + "\n").utf8))
             }
@@ -306,7 +309,7 @@ public final class PartyServer: Sendable {
             }
             do {
                 return HTTPResponse(statusCode: .ok, headers: [.contentType: "application/json", .cacheControl: "no-store"],
-                                    body: try await lookup.probe(albumID: album, songID: song))
+                                    body: try await lookup.probe(albumID: album, songID: song, albumQuery: albumQuery))
             } catch {
                 return .serviceFailed(error)
             }

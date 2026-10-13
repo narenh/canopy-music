@@ -7,21 +7,50 @@ import Foundation
 ///
 /// Apple Music API albums can carry an `editorialVideo` attribute when asked for it with
 /// `extend=editorialVideo`: HLS (`.m3u8`) videos in several shapes, of which a square one suits
-/// the artwork. Only some albums have one.
+/// the artwork (`attributes.editorialVideo.motionDetailSquare.video`). Only some albums have one.
 ///
-/// The field names here are a best guess, not yet checked against a real response: run
-/// `GET /api/debug/motion?song=<id>` (debug builds) on a real device to see what comes back.
+/// On a real Apple TV our request came back without `editorialVideo`, even for albums with motion
+/// art in the Music app; a public project that gets it adds `platform=web`. Try query variants
+/// with `GET /api/debug/motion?…&platform=<value>&extend=<value>` (debug builds), then set
+/// `albumQuery` to the one that works.
 public enum MotionArtwork {
     /// The feature switch. Off: no lookups and no video; Now Playing shows the still artwork.
     public static let isEnabled = true
 
-    /// Square motion video entries in `editorialVideo`, best first (unverified names). Other keys
-    /// that say "square" or "1x1" come after these.
+    /// The query on the album request. **The switch for request variants**: e.g. `platform: "web"`.
+    public static let albumQuery = AlbumQuery(extend: "editorialVideo", platform: nil)
+
+    /// Query parameters for the album request. nil or empty leaves a parameter out.
+    public struct AlbumQuery: Sendable, Equatable {
+        public var extend: String?
+        public var platform: String?
+
+        public init(extend: String?, platform: String?) {
+            self.extend = extend
+            self.platform = platform
+        }
+
+        /// This query with any given values in place of its own (an empty value removes one).
+        public func overriding(extend: String?, platform: String?) -> AlbumQuery {
+            AlbumQuery(extend: extend ?? self.extend, platform: platform ?? self.platform)
+        }
+    }
+
+    /// Square motion video entries in `editorialVideo`, best first. Other keys that say "square"
+    /// or "1x1" come after these.
     static let preferredSquareKeys = ["motionDetailSquare", "motionSquareVideo1x1"]
 
     /// Catalog API paths, relative to `/v1/catalog/{storefront}/`.
     static func songPath(_ songID: String) -> String { "songs/\(songID)?include=albums" }
-    static func albumPath(_ albumID: String) -> String { "albums/\(albumID)?extend=editorialVideo" }
+    static func albumPath(_ albumID: String, query: AlbumQuery = albumQuery) -> String {
+        var components = URLComponents()
+        components.path = "albums/\(albumID)"
+        let items = [("extend", query.extend), ("platform", query.platform)].compactMap { name, value in
+            value.flatMap { $0.isEmpty ? nil : URLQueryItem(name: name, value: $0) }
+        }
+        components.queryItems = items.isEmpty ? nil : items
+        return components.string ?? "albums/\(albumID)"
+    }
 
     /// Whether `id` is an Apple Music catalog id (all digits). Library ids ("i.…") aren't.
     public static func isCatalogID(_ id: String) -> Bool {
@@ -84,8 +113,10 @@ public enum MotionArtwork {
 public actor MotionArtworkLookup {
     /// Fetches a catalog API path relative to `/v1/catalog/{storefront}/` and returns the raw body.
     public typealias Fetch = @Sendable (_ path: String) async throws -> Data
+    /// Like `Fetch`, also returning the full URL it requested (shown by `probe`).
+    public typealias FetchReportingURL = @Sendable (_ path: String) async throws -> (data: Data, url: String)
 
-    private let fetch: Fetch
+    private let fetchReportingURL: FetchReportingURL
     /// Song id → its album id.
     private var albumIDs: [String: String] = [:]
     /// Album id → its square motion video; `.some(nil)` when it has none.
@@ -93,7 +124,15 @@ public actor MotionArtworkLookup {
     private var inFlight: [String: Task<URL?, Never>] = [:]
 
     public init(fetch: @escaping Fetch) {
-        self.fetch = fetch
+        self.fetchReportingURL = { path in (try await fetch(path), path) }
+    }
+
+    public init(fetchReportingURL: @escaping FetchReportingURL) {
+        self.fetchReportingURL = fetchReportingURL
+    }
+
+    private func fetch(_ path: String) async throws -> Data {
+        try await fetchReportingURL(path).data
     }
 
     /// The square motion video for a catalog song's album, or nil (feature off, not a catalog
@@ -134,32 +173,61 @@ public actor MotionArtworkLookup {
         }
     }
 
+    /// A failed request, with the full URL it was for (thrown by a `FetchReportingURL`, so
+    /// `probe` can show the URL of a request that failed).
+    public struct RequestError: Error, CustomStringConvertible {
+        public var url: String
+        public var description: String
+
+        public init(url: String, description: String) {
+            self.url = url
+            self.description = description
+        }
+    }
+
     /// Debug: the raw responses behind a lookup, to check the field names on a real device.
     /// Given a song, fetches it (with its albums) and uses its first album unless `albumID` is
-    /// given too. Works whether or not the feature is on; uses no cache.
-    public func probe(albumID: String?, songID: String?) async throws -> Data {
+    /// given too. The album request uses `albumQuery` (default: `MotionArtwork.albumQuery`).
+    /// Reports each request's full URL, and its error if it failed. Works whether or not the
+    /// feature is on; uses no cache.
+    public func probe(albumID: String?, songID: String?, albumQuery: MotionArtwork.AlbumQuery = MotionArtwork.albumQuery) async throws -> Data {
         var report: [String: Any] = ["enabled": MotionArtwork.isEnabled]
         var albumID = albumID
         if let songID {
             let path = MotionArtwork.songPath(songID)
-            let data = try await fetch(path)
-            let found = MotionArtwork.albumID(inSongResponse: data)
             report["songRequest"] = path
-            report["songAlbumID"] = found ?? NSNull()
-            report["songResponse"] = Self.jsonValue(data)
-            albumID = albumID ?? found
+            do {
+                let (data, url) = try await fetchReportingURL(path)
+                let found = MotionArtwork.albumID(inSongResponse: data)
+                report["songURL"] = url
+                report["songAlbumID"] = found ?? NSNull()
+                report["songResponse"] = Self.jsonValue(data)
+                albumID = albumID ?? found
+            } catch {
+                Self.note(error, as: "song", in: &report)
+            }
         }
         if let albumID {
-            let path = MotionArtwork.albumPath(albumID)
-            let data = try await fetch(path)
-            let editorialVideo = MotionArtwork.editorialVideo(inAlbumResponse: data)
+            let path = MotionArtwork.albumPath(albumID, query: albumQuery)
             report["albumRequest"] = path
             report["albumID"] = albumID
-            report["editorialVideoKeys"] = editorialVideo.map { Array($0.keys).sorted() } ?? NSNull()
-            report["pickedSquareURL"] = MotionArtwork.squareVideoURL(inAlbumResponse: data)?.absoluteString ?? NSNull()
-            report["albumResponse"] = Self.jsonValue(data)
+            do {
+                let (data, url) = try await fetchReportingURL(path)
+                let editorialVideo = MotionArtwork.editorialVideo(inAlbumResponse: data)
+                report["albumURL"] = url
+                report["editorialVideoKeys"] = editorialVideo.map { Array($0.keys).sorted() } ?? NSNull()
+                report["pickedSquareURL"] = MotionArtwork.squareVideoURL(inAlbumResponse: data)?.absoluteString ?? NSNull()
+                report["albumResponse"] = Self.jsonValue(data)
+            } catch {
+                Self.note(error, as: "album", in: &report)
+            }
         }
         return try JSONSerialization.data(withJSONObject: report, options: [.prettyPrinted, .sortedKeys, .withoutEscapingSlashes])
+    }
+
+    private static func note(_ error: Error, as name: String, in report: inout [String: Any]) {
+        if let error = error as? RequestError { report["\(name)URL"] = error.url }
+        report["\(name)Error"] = String(describing: error)
     }
 
     private static func jsonValue(_ data: Data) -> Any {

@@ -39,7 +39,7 @@ struct AppleMusicCatalog: MusicCatalog {
     /// How the most recent library playlist loads went, including which tracks were left out.
     var reports = PlaylistLoadReports()
     /// Animated album artwork for Now Playing (see `MotionArtwork`).
-    let motionArtwork: MotionArtworkLookup? = MotionArtworkLookup(fetch: AppleMusicCatalog.catalogData)
+    let motionArtwork: MotionArtworkLookup? = MotionArtworkLookup(fetchReportingURL: AppleMusicCatalog.catalogData)
 
     /// Tracks left out of the last library playlist loaded through this catalog (not on Apple Music,
     /// or no confident match). 0 before any library playlist has loaded.
@@ -498,11 +498,19 @@ struct AppleMusicCatalog: MusicCatalog {
         return try await MusicDataRequest(urlRequest: request).response().data
     }
 
-    /// A catalog API path in the account's storefront ("albums/123?extend=editorialVideo"), raw.
-    private static func catalogData(_ path: String) async throws -> Data {
+    /// A catalog API path in the account's storefront ("albums/123?extend=editorialVideo"), raw,
+    /// with the full URL requested. Errors are `MotionArtworkLookup.RequestError`s naming the URL.
+    private static func catalogData(_ path: String) async throws -> (data: Data, url: String) {
         let storefront = try await MusicDataRequest.currentCountryCode
-        guard let url = URL(string: "https://api.music.apple.com/v1/catalog/\(storefront)/\(path)") else { throw AppleMusicError.badResponse }
-        return try await MusicDataRequest(urlRequest: URLRequest(url: url)).response().data
+        let address = "https://api.music.apple.com/v1/catalog/\(storefront)/\(path)"
+        guard let url = URL(string: address) else {
+            throw MotionArtworkLookup.RequestError(url: address, description: "not a valid URL")
+        }
+        do {
+            return (try await MusicDataRequest(urlRequest: URLRequest(url: url)).response().data, url.absoluteString)
+        } catch {
+            throw MotionArtworkLookup.RequestError(url: url.absoluteString, description: describe(error))
+        }
     }
 
     private func fetch<T: Decodable>(_ path: String) async throws -> T {

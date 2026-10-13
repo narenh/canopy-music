@@ -180,8 +180,7 @@ struct TVEndZoneSheet: View {
                     .frame(minWidth: 380)
                 }
                 .focused($focus, equals: .save)
-                // Not `.destructive`: on tvOS its red label sits on a red button, hard to read.
-                Button("End Without Saving") { end() }
+                Button("End Without Saving", role: .destructive) { end() }
                     .focused($focus, equals: .end)
             }
             .disabled(saving)
@@ -198,13 +197,21 @@ struct TVEndZoneSheet: View {
         .onAppear { name = info.suggestedName }
         #if DEBUG
         // `-partyName <text>`: types the rest of the name. `-autoEnd`: presses Save and End 8 s
-        // after the sheet opens (with `-failSave`, the demo library fails it). For the simulator.
+        // after the sheet opens (with `-failSave`, the demo library fails it). `-focusEnd`: focuses
+        // End Without Saving after 2 s (and again 3 s after a failed save). For the simulator.
         .task {
             let args = ProcessInfo.processInfo.arguments
             if let i = args.firstIndex(of: "-partyName"), i + 1 < args.count { name += args[i + 1] }
+            if args.contains("-focusEnd") {
+                try? await Task.sleep(for: .seconds(2))
+                focus = .end
+            }
             guard args.contains("-autoEnd") else { return }
             try? await Task.sleep(for: .seconds(8))
             save()
+            guard args.contains("-focusEnd") else { return }
+            try? await Task.sleep(for: .seconds(3))
+            focus = .end
         }
         #endif
     }

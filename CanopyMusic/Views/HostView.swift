@@ -117,7 +117,7 @@ struct HostView: View {
                             LabeledContent("Also at", value: GuestQRCard.display(url))
                         }
                     } else {
-                        Text("Connect the iPad to Wi\u{2011}Fi so guests can queue from their phones.")
+                        Text("Connect the \(DeviceKind.noun) to Wi\u{2011}Fi so guests can queue from their phones.")
                             .foregroundStyle(.secondary)
                     }
                 }
@@ -334,7 +334,7 @@ private struct SpeakersRow: View {
                 .foregroundStyle(.secondary)
                 .frame(width: 28)
             VStack(alignment: .leading, spacing: 2) {
-                Text(outputs.isEmpty ? "This iPad" : outputs.map(\.portName).joined(separator: ", "))
+                Text(outputs.isEmpty ? "This \(DeviceKind.noun)" : outputs.map(\.portName).joined(separator: ", "))
                     .lineLimit(2)
                 if outputs.contains(where: { $0.portType == .airPlay }) {
                     Text("AirPlay").font(.footnote).foregroundStyle(.secondary)
@@ -438,7 +438,7 @@ private struct SettingsSheet: View {
                         HStack {
                             Text("Zone name")
                             Spacer(minLength: 16)
-                            TextField(UIDevice.current.name, text: $zoneNameDraft)
+                            TextField(DeviceKind.name, text: $zoneNameDraft)
                                 .multilineTextAlignment(.trailing)
                                 .submitLabel(.done)
                                 .onSubmit { commitZoneName() }
@@ -571,7 +571,7 @@ private struct EndZoneConfirmation: ViewModifier {
                 Button("End", role: .destructive, action: end)
                 Button("Cancel", role: .cancel) {}
             } message: {
-                Text("The music stops for everyone and the queue is cleared. This iPad goes back to the zone list.")
+                Text("The music stops for everyone and the queue is cleared. This \(DeviceKind.noun) goes back to the zone list.")
             }
             #if DEBUG
             // `-autoEnd` (with `-confirmEnd`): presses End 10 s after the alert opens (the sheet

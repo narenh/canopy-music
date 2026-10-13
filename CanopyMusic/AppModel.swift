@@ -194,7 +194,7 @@ final class AppModel {
             deviceID = UUID().uuidString
             UserDefaults.standard.set(deviceID, forKey: "deviceID")
         }
-        zoneName = UserDefaults.standard.string(forKey: "zoneName") ?? UIDevice.current.name
+        zoneName = UserDefaults.standard.string(forKey: "zoneName") ?? DeviceKind.name
         displaysCanControl = UserDefaults.standard.object(forKey: "displaysCanControl") as? Bool ?? true
         // Launches start at the zone list, unless this iPad was hosting a zone that wasn't ended
         // (a crash, or a quit by the system): then it goes straight back in, locked if it was.
@@ -537,7 +537,7 @@ final class AppModel {
     func finishCreatingZone(name: String, pin: String?) {
         clearZone()
         let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
-        zoneName = trimmed.isEmpty ? UIDevice.current.name : String(trimmed.prefix(40))
+        zoneName = trimmed.isEmpty ? DeviceKind.name : String(trimmed.prefix(40))
         hostPIN = pin ?? ""
         becomeHub(fresh: true)
     }
@@ -600,7 +600,9 @@ final class AppModel {
         guard let url = zone.baseURL else { return }
         if session.engine.isPlaying { session.pause() }
         Task { await stopServer() }
-        let connection = ZoneConnection(baseURL: url, clientID: deviceID, name: UIDevice.current.name, kind: .ipad)
+        // A Mac shows up as an iPad-kind display (the kind only picks the hub's icon for it; older
+        // hubs and displays couldn't decode a new one) with its own name, e.g. "MacBook Air".
+        let connection = ZoneConnection(baseURL: url, clientID: deviceID, name: DeviceKind.name, kind: .ipad)
         let mirror = PartySession(remote: connection)
         session = mirror
         connection.start(session: mirror)

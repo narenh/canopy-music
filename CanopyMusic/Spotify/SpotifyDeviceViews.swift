@@ -134,7 +134,7 @@ struct SpotifyDevicePicker: View {
     @Environment(AppModel.self) private var model
     @Environment(\.dismiss) private var dismiss
 
-    private static let intro = "Open Spotify on this iPad or another device in your home. That's where music will play from."
+    private static let intro = "Open Spotify on this \(DeviceKind.noun) or another device in your home. That's where music will play from."
 
     var body: some View {
         NavigationStack {
@@ -243,7 +243,7 @@ private struct OpenSpotifyButton: View {
     let prominent: Bool
 
     var body: some View {
-        let button = Button("Open Spotify on this iPad") {
+        let button = Button("Open Spotify on this \(DeviceKind.noun)") {
             if let url = URL(string: "spotify:") { UIApplication.shared.open(url) }
         }
         .controlSize(.large)

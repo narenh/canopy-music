@@ -70,7 +70,7 @@ struct OnboardingView: View {
                     ServiceCard(
                         icon: Image("AppleMusicIcon"), iconCornerRadius: 0.225,
                         name: "Apple Music",
-                        detail: "Plays right on this iPad, to any AirPlay speakers."
+                        detail: "Plays right on this \(DeviceKind.noun), to any AirPlay speakers."
                     ) {
                         model.chooseProvider(.appleMusic)
                         Task {
@@ -86,7 +86,7 @@ struct OnboardingView: View {
                     ServiceCard(
                         icon: Image("SpotifyIcon"), iconCornerRadius: 0.5,
                         name: "Spotify",
-                        detail: "Controls Spotify on this iPad or an Apple TV. Needs Premium and a free developer app."
+                        detail: "Controls Spotify on this \(DeviceKind.noun) or an Apple TV. Needs Premium and a free developer app."
                     ) {
                         // Already set up (e.g. switching back from Apple Music): no need to sign in again.
                         if model.spotifyAuth.isSignedIn, !model.spotifyClientID.isEmpty {

@@ -202,6 +202,7 @@ struct RootView: View {
         .task {
             await model.startOnLaunch()
             #if DEBUG
+            DeviceKind.logRawValues()
             if ProcessInfo.processInfo.arguments.contains("-diagnoseMusicKit") {
                 await model.diagnoseMusicKit()
             }

@@ -266,7 +266,8 @@ struct PartyView: View {
     private func add(_ track: QueueTrack, from frame: CGRect) {
         noteSearchActivity()
         let result = withAnimation(.spring(duration: 0.45, bounce: 0.12)) {
-            session.add(track, by: Requester(origin: .ipad))
+            // Unnamed songs added here show as "iPad" everywhere; a Mac names itself instead.
+            session.add(track, by: Requester(name: DeviceKind.isMac ? DeviceKind.noun : nil, origin: .ipad))
         }
         switch result {
         case .added(let item, let index):
@@ -694,7 +695,7 @@ struct GuestQRCard: View {
                 Spacer(minLength: 0)
                 if !compact, let wifi = model.wifiJoinPayload { wifiQR(wifi) }
             } else {
-                Label("Phone queueing is off. Connect the iPad to Wi\u{2011}Fi.", systemImage: "wifi.slash")
+                Label("Phone queueing is off. Connect the \(DeviceKind.noun) to Wi\u{2011}Fi.", systemImage: "wifi.slash")
                     .font(.system(size: 15))
                     .foregroundStyle(.white.opacity(0.6))
             }

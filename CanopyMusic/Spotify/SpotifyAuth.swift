@@ -46,7 +46,7 @@ enum SpotifyError: LocalizedError {
         case .badResponse(let code, let message): message.isEmpty ? "Spotify returned error \(code)." : "Spotify: \(message)."
         case .rateLimited(let seconds): "Spotify is rate limiting Canopy Music. Try again in \(seconds) s."
         case .noDevice: "Open Spotify on the device music plays from."
-        case .needsPlaylistAccess: "Sign in to Spotify again on the iPad to let Canopy Music save playlists."
+        case .needsPlaylistAccess: "Sign in to Spotify again on the \(DeviceKind.noun) to let Canopy Music save playlists."
         }
     }
 }

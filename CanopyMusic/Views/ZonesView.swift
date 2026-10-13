@@ -27,7 +27,7 @@ struct ZoneListView: View {
                         if !zones.isEmpty || model.canResumeZone {
                             Section("Active Zones") {
                                 if model.canResumeZone {
-                                    ZoneRow(icon: "ipad.landscape", title: model.zoneName, subtitle: "Resume on this iPad") {
+                                    ZoneRow(icon: DeviceKind.symbol, title: model.zoneName, subtitle: "Resume on this \(DeviceKind.noun)") {
                                         model.resumeZone()
                                     }
                                 }
@@ -35,7 +35,7 @@ struct ZoneListView: View {
                             }
                         }
                         Section {
-                            ZoneRow(icon: "plus", title: "Create a new zone", subtitle: "Music plays from this iPad") {
+                            ZoneRow(icon: "plus", title: "Create a new zone", subtitle: "Music plays from this \(DeviceKind.noun)") {
                                 if model.canResumeZone { confirmingCreate = true } else { model.beginCreatingZone() }
                             }
                         }
@@ -143,7 +143,7 @@ private struct ZoneRow: View {
 struct CreateZoneView: View {
     @Environment(AppModel.self) private var model
     @State private var step = 0
-    @State private var name = UIDevice.current.name
+    @State private var name = DeviceKind.name
     @State private var pin = ""
     @FocusState private var nameFocused: Bool
 

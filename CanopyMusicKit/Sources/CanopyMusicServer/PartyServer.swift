@@ -74,6 +74,8 @@ public final class PartyServer: Sendable {
         // The loading splash: the "canopy music" lockup on the Venus background.
         await server.appendRoute("GET /logo-music.png", to: StaticFile("logo-music.png", type: "image/png"))
         await server.appendRoute("GET /splash.jpg", to: StaticFile("splash.jpg", type: "image/jpeg"))
+        // A TV zone's setup: the Music bar (the iPad's own Apple Music icon).
+        await server.appendRoute("GET /apple-music.png", to: StaticFile("apple-music.png", type: "image/png"))
         // icon.png is square (iOS rounds home screen icons itself); favicon.png is already rounded.
         await server.appendRoute("GET /icon.png", to: StaticFile("icon.png", type: "image/png"))
         await server.appendRoute("GET /favicon.png", to: StaticFile("favicon.png", type: "image/png"))
@@ -188,9 +190,11 @@ public final class PartyServer: Sendable {
             let body = try JSONDecoder.api.decode(PlaylistBody.self, from: await request.bodyData)
             guard await session.isHost(key: body.key) else { return HTTPResponse(statusCode: .forbidden) }
             do {
-                // Shuffled before anything plays, so the first song is random too.
+                // Setup (nothing has played): it starts over, shuffled before anything plays, so the
+                // first song is random too, and `play` starts it. A live zone's song plays on and
+                // the new playlist follows it (`PartySession.load`), so there's nothing to start.
                 try await session.load(playlist: body.playlist, shuffled: body.shuffle == true)
-                if body.play == true { try await session.play() }
+                if body.play == true, await !session.isPlaying { try await session.play() }
             } catch {
                 return .serviceFailed(error)
             }
@@ -274,9 +278,22 @@ public final class PartyServer: Sendable {
             return await Self.playback(PlaybackBody(action: body.action ?? "", time: body.time), session: session)
         }
 
+        // An Apple TV hub checks whether it can play Apple Music again, and asks for access on the
+        // TV if it never has (the setup page, as it opens and while it waits). The answer arrives
+        // in hosts' snapshots (`musicAccess`).
+        await server.appendRoute("POST /api/host/music-check") { request in
+            let body = try JSONDecoder.api.decode(HostBody.self, from: await request.bodyData)
+            guard await session.isHost(key: body.key) else { return HTTPResponse(statusCode: .forbidden) }
+            await session.checkMusicAccess()
+            return HTTPResponse(statusCode: .noContent)
+        }
+
         // Displays (`/ws?display=1`) also get the guest Wi‑Fi, to show its QR code; phones don't.
+        // Hosts' pages (`/ws?key=<Host Control key>`) also get what only hosts see.
         await server.appendRoute("GET /ws?display=1", to: .webSocket(SnapshotSocket(session: session, includesWifi: true)))
-        await server.appendRoute("GET /ws", to: .webSocket(SnapshotSocket(session: session)))
+        await server.appendRoute("GET /ws") { request in
+            try await WebSocketHTTPHandler.webSocket(SnapshotSocket(session: session, hostKey: request.query["key"])).handleRequest(request)
+        }
 
         #if DEBUG
         // Debug builds: the web page's own log (its splash and first screen), for seeing what a
@@ -510,9 +527,11 @@ extension PartyServer {
 struct SnapshotSocket: WSMessageHandler {
     let session: PartySession
     var includesWifi = false
+    /// The Host Control key the page connected with, if any.
+    var hostKey: String?
 
     func makeMessages(for client: AsyncStream<WSMessage>) async throws -> AsyncStream<WSMessage> {
-        let snapshots = await session.snapshots(includingWifi: includesWifi)
+        let snapshots = await session.snapshots(includingWifi: includesWifi, hostKey: hostKey)
         return AsyncStream { continuation in
             let pump = Task {
                 for await snapshot in snapshots {

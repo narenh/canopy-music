@@ -22,6 +22,20 @@ public struct WifiDetails: Codable, Equatable, Sendable {
     }
 }
 
+/// Apple TV hubs: whether the TV can play Apple Music, shown to the host setting up its zone so
+/// they know why it can't start. `error` covers everything else (not signed in, offline, a token
+/// request that failed); the TV logs the actual error in debug builds.
+public enum MusicAccess: String, Codable, Sendable {
+    case ok
+    /// The TV hasn't asked yet (it asks when the host's setup page opens).
+    case notDetermined
+    /// Turned off for the app (or restricted) in the TV's settings.
+    case denied
+    /// The TV's Apple Account can't play catalog songs: no Apple Music subscription.
+    case noSubscription
+    case error
+}
+
 /// What phones (and anything else outside the app) see.
 public struct PartySnapshot: Codable, Equatable, Sendable {
     public var version: Int
@@ -81,6 +95,9 @@ public struct PartySnapshot: Codable, Equatable, Sendable {
     public var foreignUpcoming: [QueueItem]?
     /// Something the host should know, e.g. "Couldn't queue the next song on Spotify". nil when fine.
     public var playerIssue: String?
+    /// Apple TV hubs: whether the TV can play Apple Music. Only in snapshots for hosts (a page
+    /// whose socket gave a valid Host Control key); nil for everyone else and from other hubs.
+    public var musicAccess: MusicAccess?
 }
 
 /// Owns the queue and keeps the player in step with it. Both the iPad UI and the phone server
@@ -147,6 +164,13 @@ public final class PartySession {
     public var wifi = WifiDetails() {
         didSet { if wifi != oldValue, remote == nil { broadcast() } }
     }
+    /// Apple TV hubs: whether the TV can play Apple Music (set by the app). Hosts' snapshots carry it.
+    public var musicAccess: MusicAccess? {
+        didSet { if musicAccess != oldValue, remote == nil { broadcast() } }
+    }
+    /// A host's page asked the hub to check its music access again (and, if the TV has never
+    /// asked for Apple Music access, to ask now).
+    @ObservationIgnored public var onMusicAccessCheck: (@MainActor () -> Void)?
     /// A host revoked every other phone's Host Control; returns the new key for that host.
     @ObservationIgnored public var onForgetHostPhones: (@MainActor () -> String?)?
     /// The hub's guest address by IP, from the hub (display) or set by the app (hub).
@@ -194,6 +218,10 @@ public final class PartySession {
     @ObservationIgnored private var gaveUpStaging = false
 
     @ObservationIgnored private var stagedItemID: UUID?
+    /// The music has started in this session (a song actually began playing, or the queue came
+    /// back from disk with one under way) and the session hasn't started over since (`end`, or a
+    /// `load` before anything played). A new base playlist then keeps the party going.
+    @ObservationIgnored private var isUnderWay = false
     /// Tail of the serial chain of engine operations (see `serially`).
     @ObservationIgnored private var engineChain: Task<Void, Never>?
     /// Operations waiting in or running on the chain.
@@ -213,8 +241,9 @@ public final class PartySession {
     /// without a deadline every later command waited behind it for good.
     public static let defaultEngineCallTimeout: TimeInterval = 12
     @ObservationIgnored var engineCallTimeout = PartySession.defaultEngineCallTimeout
-    /// Snapshot listeners, and whether each gets the Wi‑Fi details (displays do, phones don't).
-    @ObservationIgnored private var listeners: [UUID: (continuation: AsyncStream<PartySnapshot>.Continuation, withWifi: Bool)] = [:]
+    /// Snapshot listeners, whether each gets the Wi‑Fi details (displays do, phones don't), and
+    /// the Host Control key it connected with (hosts also get `musicAccess`).
+    @ObservationIgnored private var listeners: [UUID: (continuation: AsyncStream<PartySnapshot>.Continuation, withWifi: Bool, hostKey: String?)] = [:]
     @ObservationIgnored private let storeURL: URL?
     @ObservationIgnored private var saveTask: Task<Void, Never>?
     @ObservationIgnored private var tickTask: Task<Void, Never>?
@@ -234,6 +263,8 @@ public final class PartySession {
             // Nothing is staged in a fresh player.
             restored.unlockNext()
             state = restored
+            // A zone coming back after a relaunch: its music had started.
+            isUnderWay = restored.current != nil || !restored.history.isEmpty
         } else {
             state = QueueState()
         }
@@ -336,6 +367,11 @@ public final class PartySession {
         onStopRequested?()
     }
 
+    /// A host's page asks for the hub's music access to be checked again.
+    public func checkMusicAccess() {
+        onMusicAccessCheck?()
+    }
+
     /// Ends the zone's session (hub only): stops playback, empties the queue, history and base
     /// playlist, and deletes the saved queue, so the next zone on this device starts empty.
     /// Settings (zone name, Wi‑Fi, toggles, Host Control) aren't the session's to clear.
@@ -348,6 +384,7 @@ public final class PartySession {
         stagedItemID = nil
         loadedItemID = nil
         isPlaying = false
+        isUnderWay = false
         skippedOnLoad = []
         displays = []
         resetFollow(keepPlayerQueue: false)
@@ -431,13 +468,27 @@ public final class PartySession {
 
     // MARK: Host actions
 
-    /// Starts over with a new base playlist: stops playback and clears the queue and requests.
-    /// Nothing plays until `play()`. `shuffled` shuffles it in the same change, so the first song
-    /// is random too and nobody sees it in its original order first.
+    /// Sets the base playlist. `shuffled` shuffles it in the same change, so the first song is
+    /// random too and nobody sees it in its original order first.
+    ///
+    /// - Before the music has started (`isUnderWay` false: setup, before Start, or after a Start
+    ///   that failed): starts over. Clears the queue and requests; nothing plays until `play()`.
+    /// - Once it has (a live zone, playing or paused): the song playing goes on, untouched, and
+    ///   the new playlist takes over after it. Guests' requests stay at the top of Up next, and
+    ///   only the old playlist's songs are replaced (`QueueState.replacePlaylist`). A next song
+    ///   already handed to a player that can't take it back (Spotify) stays first, locked; an
+    ///   engine that can swap its staged song (Apple Music) is restaged with the new next song.
     public func load(playlist: PlaylistSummary, shuffled: Bool = false) async throws {
         guard remote == nil else { return }
         let tracks = try await catalog.tracks(in: playlist)
         let skipped = await catalog.loadReport(for: playlist)?.skipped ?? []
+        if isUnderWay {
+            // Not a new session: nothing in flight (a song change, follow mode's staging) is
+            // called off, and `mutate` restages behind the current song.
+            skippedOnLoad = skipped
+            mutate { $0.replacePlaylist(shuffled ? tracks.shuffled() : tracks, name: playlist.name) }
+            return
+        }
         generation += 1
         if engine.isPlaying { engine.pause() }
         stagedItemID = nil
@@ -701,9 +752,10 @@ public final class PartySession {
 
     // MARK: Snapshots
 
-    /// What phones see; `includingWifi` adds the guest Wi‑Fi, for displays.
-    public func snapshot(includingWifi: Bool = false) -> PartySnapshot {
-        PartySnapshot(
+    /// What phones see; `includingWifi` adds the guest Wi‑Fi, for displays, and a valid Host
+    /// Control `hostKey` adds what only hosts see (`musicAccess`).
+    public func snapshot(includingWifi: Bool = false, hostKey key: String? = nil) -> PartySnapshot {
+        var snap = PartySnapshot(
             version: state.version,
             playlistName: state.playlistName,
             current: state.current,
@@ -731,15 +783,24 @@ public final class PartySession {
             foreignUpcoming: foreignUpcoming.isEmpty ? nil : foreignUpcoming,
             playerIssue: playerIssue
         )
+        if isHostKey(key) { snap.musicAccess = musicAccess }
+        return snap
+    }
+
+    /// Whether `key` is the current Host Control key (checked on every snapshot, so a phone whose
+    /// key was revoked stops getting hosts' details without reconnecting).
+    private func isHostKey(_ key: String?) -> Bool {
+        guard let hostKey, let key, !key.isEmpty else { return false }
+        return key == hostKey
     }
 
     /// Emits the current snapshot immediately, then again after every change. `includingWifi`
-    /// adds the guest Wi‑Fi, for displays.
-    public func snapshots(includingWifi: Bool = false) -> AsyncStream<PartySnapshot> {
+    /// adds the guest Wi‑Fi, for displays; `hostKey` adds hosts' details while it's valid.
+    public func snapshots(includingWifi: Bool = false, hostKey: String? = nil) -> AsyncStream<PartySnapshot> {
         let (stream, continuation) = AsyncStream.makeStream(of: PartySnapshot.self, bufferingPolicy: .bufferingNewest(1))
         let id = UUID()
-        listeners[id] = (continuation, includingWifi)
-        let snap = snapshot(includingWifi: includingWifi)
+        listeners[id] = (continuation, includingWifi, hostKey)
+        let snap = snapshot(includingWifi: includingWifi, hostKey: hostKey)
         lastSentPlayback = snap.playback
         continuation.yield(snap)
         if remote == nil { startDriftCheck() }
@@ -781,6 +842,7 @@ public final class PartySession {
             if loadedItemID == item.id { loadedItemID = nil }
             return
         }
+        isUnderWay = true
         onSongStarted?()
         recordPlayed(item)
         isPlaying = engine.isPlaying
@@ -889,6 +951,7 @@ public final class PartySession {
             if follower != nil { readPlayerQueueSoon() }
             // Nothing current (the zone ended as the player moved on): nothing started.
             guard state.current != nil else { return }
+            isUnderWay = true
             onSongStarted?()
             recordPlayed(state.current)
         case .reachedEnd:
@@ -1205,9 +1268,12 @@ public final class PartySession {
         guard !listeners.isEmpty else { return }
         let snap = snapshot()
         lastSentPlayback = snap.playback
-        var withWifi = snap
-        withWifi.wifi = wifi
-        for listener in listeners.values { listener.continuation.yield(listener.withWifi ? withWifi : snap) }
+        for listener in listeners.values {
+            var sent = snap
+            if listener.withWifi { sent.wifi = wifi }
+            if isHostKey(listener.hostKey) { sent.musicAccess = musicAccess }
+            listener.continuation.yield(sent)
+        }
     }
 
     /// Listeners work out the playback time from the last snapshot, but the player's time also

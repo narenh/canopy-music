@@ -124,9 +124,11 @@ final class TVModel {
     /// Creates a new, empty zone: "Scan to host", with the server running for the phone that sets
     /// it up, but not announced and not recorded until its music starts (`ZoneRecord.songStarted`).
     /// A zone this TV still had is ended first (the list asked).
+    /// Apple Music access isn't asked for here: the host's setup page shows whether the TV can
+    /// play Apple Music, and the TV asks for access when that page opens (`checkMusicAccess`).
     func createZone() async {
         debugLog("createZone")
-        guard await authorize() else { return }
+        authorizationDenied = false
         openZone(fresh: true)
         // Not tied to the caller: the zone list (and any task it started) goes away right here.
         await Task { await self.startServer() }.value
@@ -237,6 +239,7 @@ final class TVModel {
             self.advertise()
         }
         session.onStopRequested = { [weak self] in self?.stopZone() }
+        session.onMusicAccessCheck = { [weak self] in self?.checkMusicAccess(asking: true) }
         // The zone becomes real when its music starts (a phone's "Start the music"): only then is
         // it recorded, so only then does it come back after a crash or offer Resume.
         session.onSongStarted = { [weak self] in
@@ -244,6 +247,101 @@ final class TVModel {
             self.zoneRecord.songStarted(hostJoined: self.hostJoined)
         }
         role = .hub
+        // Known before the host's page connects (without asking: that waits for the page).
+        checkMusicAccess(asking: false)
+    }
+
+    // MARK: Apple Music access
+
+    /// The check under way, and whether another was asked for meanwhile (and if it may ask).
+    @ObservationIgnored private var musicCheck: Task<Void, Never>?
+    @ObservationIgnored private var musicCheckAgain: Bool?
+
+    /// Works out whether this TV can play Apple Music, for the host setting the zone up on their
+    /// phone (`musicAccess` in hosts' snapshots). `asking`: the host's setup page is open, so if
+    /// the TV has never asked for Apple Music access, it asks now.
+    func checkMusicAccess(asking: Bool) {
+        guard role == .hub else { return }
+        if musicCheck != nil {
+            musicCheckAgain = (musicCheckAgain ?? false) || asking
+            return
+        }
+        musicCheck = Task { [weak self] in
+            guard let self else { return }
+            let session = self.session
+            let access = await self.currentMusicAccess(asking: asking)
+            if access != session.musicAccess { self.debugLog("Apple Music access: \(access.rawValue)") }
+            session.musicAccess = access
+            self.musicCheck = nil
+            if let again = self.musicCheckAgain {
+                self.musicCheckAgain = nil
+                self.checkMusicAccess(asking: again)
+            }
+        }
+    }
+
+    private func currentMusicAccess(asking: Bool) async -> MusicAccess {
+        #if DEBUG
+        // `-musicAccess ok|notDetermined|denied|noSubscription|error`: what the setup page is told,
+        // whatever the TV's own (the simulator can't play Apple Music). `-musicAccessAfterPrompt
+        // <status>`: a forced notDetermined becomes that 3 s after the page asks, as if the host
+        // had answered the TV's prompt.
+        let defaults = UserDefaults.standard
+        if let forced = defaults.string(forKey: "musicAccess").flatMap(MusicAccess.init(rawValue:)) {
+            if let answered = debugPromptAnswer { return answered }
+            if forced == .notDetermined, asking,
+               let answer = defaults.string(forKey: "musicAccessAfterPrompt").flatMap(MusicAccess.init(rawValue:)) {
+                debugLog("pretending to ask for Apple Music access")
+                try? await Task.sleep(for: .seconds(3))
+                debugPromptAnswer = answer
+                return answer
+            }
+            return forced
+        }
+        #endif
+        if usesDemo { return .ok }
+        var status = MusicAuthorization.currentStatus
+        if status == .notDetermined, asking {
+            debugLog("asking for Apple Music access")
+            status = await MusicAuthorization.request()
+        }
+        switch status {
+        case .authorized: break
+        case .notDetermined: return .notDetermined
+        case .denied, .restricted: return .denied
+        @unknown default: return .error
+        }
+        do {
+            let subscription = try await MusicSubscription.current
+            if subscription.canPlayCatalogContent {
+                // Signed in with a subscription; this also needs the user token and the network.
+                try await Self.requestStorefront()
+                return .ok
+            }
+        } catch {
+            debugLog("Apple Music check failed: \(String(reflecting: error))")
+            return .error
+        }
+        // No subscription, or no Apple Account signed in at all: the user token says which.
+        do {
+            try await Self.requestStorefront()
+        } catch MusicTokenRequestError.userNotSignedIn {
+            debugLog("Apple Music check: no Apple Account signed in")
+            return .error
+        } catch {
+            debugLog("Apple Music check, no subscription: \(String(reflecting: error))")
+        }
+        return .noSubscription
+    }
+
+    #if DEBUG
+    @ObservationIgnored private var debugPromptAnswer: MusicAccess?
+    #endif
+
+    /// The signed-in account's storefront: needs the developer and user tokens and the network.
+    private static func requestStorefront() async throws {
+        let url = URL(string: "https://api.music.apple.com/v1/me/storefront")!
+        _ = try await MusicDataRequest(urlRequest: URLRequest(url: url)).response()
     }
 
     /// Ends the zone (Menu › End, or a host on the web page) and goes back to the zone list: stops
@@ -312,6 +410,8 @@ final class TVModel {
         case .background:
             wasBackgrounded = true
         case .active:
+            // Back from Settings, or from the Apple Music prompt: the host's page shows the change.
+            if role == .hub { checkMusicAccess(asking: false) }
             guard wasBackgrounded else { return }
             wasBackgrounded = false
             guard role == .hub else { return }

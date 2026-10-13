@@ -69,7 +69,8 @@ struct PartyView: View {
         .background { ThemedBackground(track: current?.track, theme: theme) }
         .overlay { FlightLayer(flights: flights, destinations: rowFrames, fallback: fallbackDestination) }
         .environment(\.artworkTheme, theme)
-        .animation(.easeInOut(duration: 1.2), value: theme)
+        // The song's colours change with the background, over the same 2 s.
+        .animation(.linear(duration: 2), value: theme)
         .preferredColorScheme(.dark)
         .statusBarHidden()
         .persistentSystemOverlays(.hidden)
@@ -417,7 +418,7 @@ struct NowPlayingView: View {
             let inset: CGFloat = narrow ? 20 : 32
             let width = geo.size.width - inset * 2
             // Artwork takes whatever height is left after the title, progress and controls.
-            let reserved: CGFloat = item == nil ? 110 : 284
+            let reserved: CGFloat = item != nil ? 284 : startsUpNext ? 194 : 110
             let widthSide = width * 0.85
             let side = max(200, min(widthSide, geo.size.height - reserved))
             // Always in the middle of the column's height, whatever the window's shape.
@@ -441,7 +442,7 @@ struct NowPlayingView: View {
                     }
                     // The requester badge shares the artist line so it never adds height.
                     HStack(spacing: 10) {
-                        Text(item?.track.artist ?? "Search for a song to get things going")
+                        Text(item?.track.artist ?? (startsUpNext ? "Press play to start Up next" : "Search for a song to get things going"))
                             .font(.system(size: 22, weight: .medium))
                             .foregroundStyle(.white.opacity(0.65))
                         if let requester = item?.requester {
@@ -473,6 +474,10 @@ struct NowPlayingView: View {
                     if showsTransport {
                         TransportControls(session: session, spacing: narrow ? 6 : 20)
                     }
+                } else if startsUpNext {
+                    // Nothing current but songs waiting (the queue ran dry, then a guest added
+                    // one): Play starts Up next, so the party is never stuck.
+                    StartUpNextButton()
                 }
             }
             .padding(.horizontal, inset)
@@ -485,6 +490,31 @@ struct NowPlayingView: View {
 
     /// Displays get play/pause, skip and scrubbing only while the hub allows it.
     private var showsTransport: Bool { !model.isDisplay || session.displaysCanControl }
+
+    /// Nothing playing but Up next has songs: a lone Play button starts it.
+    private var startsUpNext: Bool { item == nil && showsTransport && !session.state.upNext.isEmpty }
+}
+
+/// Play, alone, for when nothing is current but Up next has songs: plays its first song.
+private struct StartUpNextButton: View {
+    @Environment(AppModel.self) private var model
+
+    var body: some View {
+        Button {
+            Task { await model.play() }
+        } label: {
+            Image(systemName: "play.fill")
+                .font(.system(size: 30, weight: .semibold))
+                .frame(width: 64, height: 64)
+        }
+        .buttonStyle(.glass)
+        .tint(.primary)
+        .buttonBorderShape(.circle)
+        .foregroundStyle(.white)
+        .disabled(model.spotifyDisconnected)
+        .opacity(model.spotifyDisconnected ? 0.35 : 1)
+        .accessibilityLabel("Play")
+    }
 }
 
 private struct TransportControls: View {

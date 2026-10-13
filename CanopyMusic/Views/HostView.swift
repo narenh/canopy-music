@@ -512,7 +512,7 @@ private struct ZoneNameRow: View {
         }
         .onAppear { draft = model.zoneName }
         .onChange(of: focused) { _, isFocused in if !isFocused { commit() } }
-        // Renamed elsewhere (Settings, a host on the web page).
+        // Renamed elsewhere (a host on the web page).
         .onChange(of: model.zoneName) { _, name in if !focused { draft = name } }
     }
 }
@@ -543,24 +543,8 @@ private struct ZonePINRow: View {
 private struct SettingsSheet: View {
     @Environment(AppModel.self) private var model
     @Environment(\.dismiss) private var dismiss
-    /// Edited locally and applied on return or when the sheet closes, so the zone (and its
-    /// `.local` address) isn't re-announced on every keystroke.
-    @State private var zoneNameDraft = ""
     @State private var confirmingEnd = false
     @State private var savingPlaylist = false
-
-    /// Under the zone name: the zone's address for the saved name, else the `.local` address the
-    /// typed one gives. nil when the name is empty or has no letters or digits.
-    private var zoneNameAddress: String? {
-        let name = zoneNameDraft.trimmingCharacters(in: .whitespacesAndNewlines)
-        if name == model.zoneName { return model.localAddress }
-        return FriendlyHostname.typedLocalName(forZone: name).map { "\($0).local" }
-    }
-
-    private func commitZoneName() {
-        let name = zoneNameDraft.trimmingCharacters(in: .whitespacesAndNewlines)
-        if name.isEmpty { zoneNameDraft = model.zoneName } else if name != model.zoneName { model.zoneName = String(name.prefix(40)) }
-    }
 
     var body: some View {
         @Bindable var model = model
@@ -608,30 +592,7 @@ private struct SettingsSheet: View {
                     Text("Shows a “Join Wi\u{2011}Fi” QR code. Turn on Simple QR Code if a phone has trouble scanning it.")
                 }
                 .listRowBackground(Color.white.opacity(0.08))
-                Section {
-                    VStack(alignment: .trailing, spacing: 4) {
-                        HStack {
-                            Text("Zone name")
-                            Spacer(minLength: 16)
-                            TextField(DeviceKind.name, text: $zoneNameDraft)
-                                .multilineTextAlignment(.trailing)
-                                .submitLabel(.done)
-                                .onSubmit { commitZoneName() }
-                        }
-                        if let address = zoneNameAddress {
-                            Text(address)
-                                .font(.footnote)
-                                .foregroundStyle(.secondary)
-                        }
-                    }
-                    SecureField("Unlock PIN (optional)", text: $model.hostPIN)
-                        .keyboardType(.numberPad)
-                } header: {
-                    Text("Zone")
-                } footer: {
-                    Text("Other Canopy Music devices on the Wi\u{2011}Fi see this zone by name. The PIN is asked for when you press and hold the logo on the party screen.")
-                }
-                .listRowBackground(Color.white.opacity(0.08))
+                // The zone's name and PIN are on the host screen's Zone section.
                 Section {
                     Toggle("Playback controls on displays", isOn: $model.displaysCanControl)
                 } header: {
@@ -688,9 +649,6 @@ private struct SettingsSheet: View {
             #if DEBUG
             .onAppear { if ProcessInfo.processInfo.arguments.contains("-showSave") { savingPlaylist = true } }
             #endif
-            .onAppear { zoneNameDraft = model.zoneName }
-            .onDisappear { commitZoneName() }
-            .onChange(of: model.zoneName) { _, name in zoneNameDraft = name }
             .navigationTitle("Settings")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {

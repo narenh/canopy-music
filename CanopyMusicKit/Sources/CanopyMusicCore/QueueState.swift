@@ -72,6 +72,27 @@ public struct QueueState: Codable, Equatable, Sendable {
         version += 1
     }
 
+    /// Changes the base playlist mid-party (`tracks` already in play order): now playing, history
+    /// and guests' requests stay, and only the old playlist's songs in Up Next are replaced. The
+    /// requests move to the top, in their order, with the new playlist after them. A locked next
+    /// song (already handed to a player that can't take it back) stays first and locked, whatever
+    /// it is. The song playing and the requests aren't repeated by the new playlist's first cycle.
+    public mutating func replacePlaylist(_ tracks: [QueueTrack], name: String?) {
+        playlist = tracks
+        playlistName = name
+        cursor = 0
+        cycle = 0
+        let locked = upNext.first { $0.id == lockedNextID }
+        upNext = upNext.filter { $0.isRequest && $0.id != lockedNextID }
+        let queued = Set(([current, locked].compactMap { $0 } + upNext).map(\.track.id))
+        skipPositions = Set(tracks.indices.filter { queued.contains(tracks[$0].id) })
+        // The new playlist's window is filled without the locked song, which may be one of the
+        // old playlist's (it isn't one of the new playlist's songs).
+        refill()
+        if let locked { upNext.insert(locked, at: 0) } else { lockedNextID = nil }
+        version += 1
+    }
+
     /// Empties everything: base playlist, now playing, Up Next and history (the zone ended). The
     /// version keeps counting up, so pages that stay open don't ignore the next zone's snapshots.
     public mutating func clear() {

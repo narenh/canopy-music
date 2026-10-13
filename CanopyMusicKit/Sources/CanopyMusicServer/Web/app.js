@@ -174,6 +174,9 @@
   const hosting = () => hostPaired && hostMode;
 
   let snap = null;
+  /** An Apple TV hub's Apple Music access ("ok", "notDetermined", "denied", "noSubscription",
+   * "error"), from hosts' snapshots; undefined until one arrives. */
+  let musicAccess;
   let firstRender = true;
   let dragging = null;
   let pendingSnap = null;
@@ -279,6 +282,11 @@
     else if (snap && next.version < snap.version) return;
     if (!snap) debugLog(`first snapshot v${next.version} playlist="${next.playlistName || ""}" hostChecked=${hostChecked}`);
     snap = next;
+    // Hosts' snapshots only (not `/api/state`'s): kept until one says otherwise.
+    if (next.musicAccess !== undefined && next.musicAccess !== musicAccess) {
+      debugLog(`music access ${next.musicAccess}`);
+      musicAccess = next.musicAccess;
+    }
     render();
     openSettingsFromLink();
     hideSplash();
@@ -404,7 +412,7 @@
     renderHost();
     if (settingsOpen()) fillSettings();
     // The hub's address can arrive (or change) while a zone name is being edited.
-    if (!$("setup").hidden) setupAddress();
+    if (!$("setup").hidden) { setupAddress(); renderSetupMusic(); }
     if (!$("edit-modal").hidden) editAddress();
     const playing = !!(current && snap.playback.isPlaying);
     $("t-play").innerHTML = playing ? icons.pause : icons.play;
@@ -473,6 +481,7 @@
     x: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6l12 12M18 6 6 18"/></svg>',
     lock: '<svg viewBox="0 0 24 24" aria-hidden="true"><rect x="5" y="11" width="14" height="10" rx="2"/><path d="M8 11V7a4 4 0 0 1 8 0v4"/></svg>',
     check: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="m5 12 5 5 9-10"/></svg>',
+    warning: '<svg viewBox="0 0 24 24" aria-hidden="true" stroke-linejoin="round"><path d="M12 3.5 2.5 20h19z"/><path d="M12 10v4.5M12 17.5h.01"/></svg>',
     person: '<svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="8" r="4"/><path d="M4 21c1.5-4 4.5-6 8-6s6.5 2 8 6"/></svg>',
     play: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M8 5.5v13l10.5-6.5z" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"/></svg>',
     pause: '<svg viewBox="0 0 24 24" aria-hidden="true"><rect x="6.5" y="5" width="4" height="14" rx="1.2"/><rect x="13.5" y="5" width="4" height="14" rx="1.2"/></svg>',
@@ -759,7 +768,9 @@
   let offlineTimer = null;
   function connect() {
     if (socket && socket.readyState <= 1) return;
-    socket = new WebSocket(`${location.protocol === "https:" ? "wss" : "ws"}://${location.host}/ws`);
+    // With the Host Control key, the hub adds what only hosts see (an Apple TV's music access).
+    const key = hostKey ? `?key=${encodeURIComponent(hostKey)}` : "";
+    socket = new WebSocket(`${location.protocol === "https:" ? "wss" : "ws"}://${location.host}/ws${key}`);
     socket.onopen = () => {
       retries = 0;
       clearTimeout(offlineTimer);
@@ -914,14 +925,13 @@
   }
   // Setup: the field being typed in (with its label) moves to the top of the sheet, once iOS has
   // opened the keyboard and done its own scrolling; the playlist search then has its results below.
-  $("setup-scroll").addEventListener("focusin", (event) => {
-    const search = event.target.closest(".picker-search");
+  for (const scroller of [$("setup-zone-scroll"), $("setup-scroll")]) scroller.addEventListener("focusin", (event) => {
+    const search = event.target.matches('input[type="search"]') ? event.target.closest(".picker-search") : null;
     const field = search || (event.target.matches("input.text-input") ? event.target : null);
     if (!field) return;
     const target = search || field.previousElementSibling || field;
     setTimeout(() => {
       if (document.activeElement !== event.target) return;
-      const scroller = $("setup-scroll");
       const top = target.getBoundingClientRect().top - scroller.getBoundingClientRect().top + scroller.scrollTop;
       const before = scroller.scrollTop;
       scroller.scrollTo({ top: Math.max(0, top - 8), behavior: "smooth" });
@@ -1118,7 +1128,7 @@
 
   // MARK: Host: base playlist, zone settings, another host, first setup
 
-  let playlistsCache = null;
+  let playlistsLoad = null;
   let setupPick = null;
   let setupDismissed = false;
   let setupStarting = false;
@@ -1142,10 +1152,10 @@
     if (!needsSetup) askNameIfNeeded();
   }
 
-  async function loadPlaylists() {
-    if (playlistsCache) return playlistsCache;
-    playlistsCache = await api(`/api/host/playlists?${keyQuery()}`);
-    return playlistsCache;
+  /** The hub's library playlists, loaded once (a load that fails is tried again next time). */
+  function loadPlaylists() {
+    if (!playlistsLoad) playlistsLoad = api(`/api/host/playlists?${keyQuery()}`).catch((error) => { playlistsLoad = null; throw error; });
+    return playlistsLoad;
   }
 
   // A searchable playlist list (Change base playlist, and a TV zone's first setup). Typing filters
@@ -1300,8 +1310,10 @@
   $("playlists-use").addEventListener("click", async () => {
     const sheet = $("playlists"), button = $("playlists-use"), p = changePick;
     if (!p || sheet.classList.contains("busy")) return;
-    const hasQueue = !!(snap && (snap.current || snap.upNext.length));
-    if (hasQueue && !confirm(`Switch to "${p.name}"? The queue starts over and requests are cleared.`)) return;
+    // Once a song has played, the hub keeps it playing and keeps the requests (only the old
+    // playlist's songs go), so there's nothing to ask. Before that, a load starts the queue over.
+    const startsOver = !!(snap && !snap.current && snap.upNext.some((item) => item.requester));
+    if (startsOver && !confirm(`Switch to "${p.name}"? The queue starts over and requests are cleared.`)) return;
     pickerBusy("playlists", button, true, "Loading…");
     try {
       const reply = await api("/api/host/playlist", {
@@ -1322,10 +1334,13 @@
   });
   $("playlists-done").addEventListener("click", () => { $("playlists").hidden = true; });
 
-  async function openSetup() {
+  // Setup has two pages: the zone (names, and whether the TV can play Apple Music), then the
+  // base playlist with Start the music.
+  function openSetup() {
     // The setup sheet asks for this phone's name itself.
     if (!$("name-modal").hidden) { $("name-modal").hidden = true; }
     $("setup").hidden = false;
+    showSetupPage("zone", false);
     debugScreen("setup opened");
     $("setup-you").value = myName || "";
     $("setup-name").value = snap.zoneName || "";
@@ -1333,9 +1348,93 @@
     $("setup-sub").textContent = snap.hubKind === "tv"
       ? "Music will play from your Apple TV. Use Control Center to change audio output."
       : "You're hosting this zone. Guests can join once music is playing.";
+    renderSetupMusic();
+  }
+
+  /** Shows setup's "zone" or "music" page; going back slides in from the other side. */
+  function showSetupPage(page, animated = true) {
+    const zone = page === "zone";
+    const to = zone ? $("setup-zone") : $("setup-music-page"), from = zone ? $("setup-music-page") : $("setup-zone");
+    if (document.activeElement && from.contains(document.activeElement)) document.activeElement.blur();
+    from.hidden = true;
+    to.hidden = false;
+    to.classList.remove("entering", "back");
+    if (animated) {
+      void to.offsetWidth; // restarts the animation
+      to.classList.add("entering");
+      to.classList.toggle("back", zone);
+    }
+    if (zone) checkMusicAccess(true);
+  }
+  for (const page of document.querySelectorAll(".setup-page")) {
+    page.addEventListener("animationend", () => page.classList.remove("entering", "back"));
+  }
+
+  // While the zone page shows, the TV checks its Apple Music access again every few seconds until
+  // it can play (each check also asks for access on the TV if it never has); the answer comes in
+  // snapshots. `now`: check even if it's fine (the page just opened, or came back into view).
+  let musicCheckTimer = null;
+  function checkMusicAccess(now = false) {
+    clearTimeout(musicCheckTimer);
+    musicCheckTimer = null;
+    if ($("setup").hidden || $("setup-zone").hidden || !hosting()) return;
+    if (now || musicAccess !== "ok") {
+      api("/api/host/music-check", { key: hostKey }).catch((error) => debugLog(`music check failed: ${error.message}`));
+    }
+    musicCheckTimer = setTimeout(checkMusicAccess, 4000);
+  }
+  document.addEventListener("visibilitychange", () => { if (!document.hidden) checkMusicAccess(true); });
+
+  // What the Music bar says when the TV can't play Apple Music: what's wrong, then what to do.
+  const musicNotes = {
+    notDetermined: ["Allow Apple Music on the TV.", "Choose Allow when the Apple TV asks."],
+    denied: ["Apple Music isn't allowed on the TV.",
+      "On the Apple TV, go to Settings › General › Privacy & Security › Media & Apple Music and turn on Canopy Music."],
+    noSubscription: ["No Apple Music subscription.", "The Apple Account on this Apple TV needs an Apple Music subscription."],
+    error: ["Couldn't reach Apple Music.", "Check the Apple TV is signed in and online."],
+  };
+  /** A zone name the hub can use: something besides spaces and punctuation. */
+  const setupNameValid = () => /[\p{L}\p{N}]/u.test($("setup-name").value);
+
+  /** The Music bar (Apple Music, and whether the TV can play it) and Continue. */
+  function renderSetupMusic() {
+    const bar = $("setup-music"), note = $("setup-music-note"), state = $("setup-music-state");
+    const ok = musicAccess === "ok", checking = musicAccess == null;
+    const shown = String(musicAccess);
+    if (bar.dataset.access !== shown) {
+      bar.dataset.access = shown;
+      bar.dataset.state = ok ? "ok" : checking ? "checking" : "problem";
+      state.innerHTML = ok ? '<span class="dot"></span>Ready' : checking ? '<span class="spinner"></span>Checking…' : icons.warning;
+      note.hidden = ok || checking;
+      note.textContent = "";
+      if (!note.hidden) {
+        const [what, todo] = musicNotes[musicAccess] || musicNotes.error;
+        const lead = document.createElement("b");
+        lead.textContent = what;
+        note.append(lead, ` ${todo}`);
+      }
+    }
+    $("setup-continue").disabled = !ok || !setupNameValid();
+    // Ready: the playlists can load while the host finishes the names.
+    if (ok) loadPlaylists().catch(() => {});
+    // It stopped being able to play while the playlist page showed: back to say why.
+    if (!ok && !checking && !$("setup-music-page").hidden && !setupStarting) showSetupPage("zone");
+  }
+  $("setup-name").addEventListener("input", renderSetupMusic);
+  // Return in Your name goes on to Zone name; in Zone name it closes the keyboard.
+  $("setup-you").addEventListener("keydown", (event) => {
+    if (event.key === "Enter") { event.preventDefault(); $("setup-name").focus(); }
+  });
+  $("setup-name").addEventListener("keydown", (event) => {
+    if (event.key === "Enter") { event.preventDefault(); $("setup-name").blur(); }
+  });
+  $("setup-continue").addEventListener("click", async () => {
+    if ($("setup-continue").disabled) return;
+    showSetupPage("music");
     await setupPicker.open();
     if (setupPick) setupPicker.select(setupPick.id);
-  }
+  });
+  $("setup-back").addEventListener("click", () => showSetupPage("zone"));
   /** Keeps `line` showing the `.local` address that the zone name typed in `input` gives (the
    * hub works it out, as it names itself), or for the saved name, the hub's actual address.
    * Hidden when the name is empty or has no letters or digits. Returns the update function. */
@@ -1383,6 +1482,8 @@
       debugLog(`setup start failed: ${error.message}`);
       setupBusy(false);
       toast("Couldn't start. Try again.");
+      // In case it's Apple Music: if the TV can't play it now, the zone page comes back to say why.
+      api("/api/host/music-check", { key: hostKey }).catch(() => {});
     }
   });
 

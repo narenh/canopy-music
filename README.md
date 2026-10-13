@@ -34,14 +34,14 @@ The simulator can't play Apple Music or Spotify, so use **Demo** (Settings → M
 2. Pick speakers with the **Speakers** row (AirPlay).
 3. Press **Start**. It begins playback and locks into the party screen.
 4. Triple-click the top button to turn on Guided Access so guests can't leave the app.
-5. To get back to host mode, press and hold the logo (asks for the PIN if you set one in Settings).
+5. To get back to host mode, press and hold the logo (asks for the PIN if you set one in host mode's Zone section).
 
 ## Phones
 
 The iPad runs a small web server on your Wi-Fi so guests can search and queue from their phones. Turn it off with **Settings → Queue from phones**.
 
 - The QR code always uses the iPad's IP address, so it works on any phone.
-- The iPad also announces `music.local` over Bonjour (change the name in Settings). Some Android phones don't resolve `.local` names; the QR code covers them.
+- The iPad also announces `music.local` over Bonjour (it follows the zone name, set in host mode's Zone section). Some Android phones don't resolve `.local` names; the QR code covers them.
 - It listens on port 80 when it can, so the URL has no `:port` (falls back to 8080).
 
 Guests can add songs, drag to reorder, and remove their own requests. Names are optional. **Settings → Reorder from phones** turns off dragging for guests.

@@ -35,7 +35,7 @@ struct ArtworkView: View {
 }
 
 /// Full-bleed blurred artwork over the theme's base color, drifting slowly as on the Apple TV
-/// (`ArtworkBackground`, shared with it). Song changes cross-fade over 1.2 s.
+/// (`ArtworkBackground`, shared with it). Song changes cross-fade over 2 s, linear, as on the TV.
 struct ThemedBackground: View {
     let track: QueueTrack?
     let theme: ArtworkTheme
@@ -45,7 +45,7 @@ struct ThemedBackground: View {
             track: track, artworkURL: ArtworkURL.url(for: track, large: true),
             theme: theme, source: ArtworkCache.shared
         )
-        .animation(.easeInOut(duration: 1.2), value: track?.id)
+        .animation(.linear(duration: 2), value: track?.id)
     }
 }
 

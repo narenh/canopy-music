@@ -256,10 +256,37 @@ html.sheet-open, html.sheet-open body { overflow: hidden; }
 }
 /* While typing in setup, the keyboard has the room: Shuffle and Start come back when it closes.
    Room below the content too, so the field being typed in can scroll to the top (app.js). */
-#setup:has(input.text-input:focus, input[type="search"]:focus) .picker-foot { display: none; }
-#setup:has(input.text-input:focus, input[type="search"]:focus) .picker-scroll::after {
+.setup-page:has(input.text-input:focus, input[type="search"]:focus) .picker-foot { display: none; }
+.setup-page:has(input.text-input:focus, input[type="search"]:focus) .picker-scroll::after {
   content: ""; display: block; height: var(--vvh, 100dvh);
 }
+/* Setup's two pages (the zone, then the base playlist), each a picker sheet's column. */
+.setup-page { flex: 1 1 auto; min-height: 0; display: flex; flex-direction: column; }
+.setup-page[hidden] { display: none; }
+.setup-page.entering { animation: page-in 0.28s var(--ease); }
+.setup-page.entering.back { animation-name: page-back; }
+@keyframes page-in { from { opacity: 0; transform: translateX(24px); } }
+@keyframes page-back { from { opacity: 0; transform: translateX(-24px); } }
+.setup-music-title { margin-top: 6px; }
+/* The base playlist page: Back sits with the search, so both stay at the top. */
+.setup-search { display: flex; align-items: center; gap: 10px; }
+.back-btn { flex: none; width: 44px; height: 44px; border-radius: 50%; display: grid; place-items: center; background: var(--surface-2); color: var(--text); }
+.back-btn svg { width: 20px; height: 20px; stroke-width: 2.4; }
+/* Which music the zone plays (Apple Music on an Apple TV), and whether the TV can play it. */
+.music-bar { display: flex; align-items: center; gap: 12px; padding: 12px 14px; border-radius: 12px; background: var(--surface-2); }
+.music-bar-icon { flex: none; width: 34px; height: 34px; border-radius: 22.5%; }
+.music-bar-text { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+.music-bar-title { font-size: 16px; font-weight: 600; }
+.music-bar-note { font-size: 13px; color: var(--text-2); }
+.music-bar-note[hidden] { display: none; }
+.music-bar-note b { color: var(--text); font-weight: 600; }
+.music-bar-state { flex: none; display: flex; align-items: center; gap: 6px; font-size: 13px; color: var(--text-2); }
+.music-bar-state .dot { width: 8px; height: 8px; border-radius: 50%; background: #30d158; }
+.music-bar-state .spinner { width: 14px; height: 14px; border-width: 1.5px; }
+.music-bar-state svg { width: 18px; height: 18px; color: #ffb340; }
+/* A problem: the note explains it, so the bar lines up at the top. */
+.music-bar[data-state="problem"] { align-items: flex-start; }
+.music-bar[data-state="problem"] .music-bar-state { margin-top: 8px; }
 .picker-shuffle { display: flex; justify-content: space-between; align-items: center; gap: 12px; padding: 8px 2px 12px; font-size: 15px; }
 .picker-sheet.busy .playlist-row, .picker-sheet.busy .picker-shuffle { pointer-events: none; }
 .picker-sheet.busy .playlist-row:not(.selected), .picker-sheet.busy .picker-shuffle { opacity: .5; }

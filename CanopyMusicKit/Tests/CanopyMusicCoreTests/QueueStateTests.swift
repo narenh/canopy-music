@@ -180,6 +180,43 @@ func titles(_ items: [QueueItem]) -> [String] { items.map(\.track.id) }
         #expect(!s.upNext.contains { $0.isRequest })
     }
 
+    /// Mid-party: the song playing, history and requests stay; requests go to the top, and the
+    /// new playlist's first cycle leaves out what's playing or requested.
+    @Test func replacingThePlaylistKeepsTheParty() {
+        var s = started(["a", "b", "c", "d"])
+        let a = s.current
+        s.addRequest(track("x"), by: guest)
+        let b = s.upNext.first { $0.track.id == "b" }!.id
+        s.move(b, to: 0) // a playlist song above the request
+        s.addRequest(track("m"), by: guest)
+        s.replacePlaylist(["m", "a", "n", "o"].map(track), name: "Other")
+        #expect(s.current == a)
+        #expect(s.playlistName == "Other")
+        // (A playlist this short loops straight into its next cycle, which has every song.)
+        #expect(titles(s.upNext).prefix(4) == ["x", "m", "n", "o"])
+        #expect(s.upNext.prefix(2).map(\.isRequest) == [true, true])
+        #expect(s.lockedNextID == nil)
+        s.advance()
+        #expect(s.history.first == a)
+        #expect(s.current?.track.id == "x")
+    }
+
+    /// The locked next song (handed to a player that can't take it back) stays first and locked,
+    /// even though it's the old playlist's.
+    @Test func replacingThePlaylistKeepsTheLockedSong() {
+        var s = started(["a", "b", "c"])
+        s.lockNext()
+        let locked = s.upNext[0]
+        s.addRequest(track("x"), by: guest)
+        s.replacePlaylist(["m", "n"].map(track), name: "Other")
+        #expect(s.lockedNextID == locked.id)
+        #expect(titles(s.upNext) == ["b", "x", "m", "n"])
+        s.advance()
+        #expect(s.current?.id == locked.id)
+        #expect(s.lockedNextID == nil)
+        #expect(titles(s.upNext) == ["x", "m", "n"])
+    }
+
     @Test func shuffleKeepsRequestsAndAllSongs() {
         let ids = (0..<20).map { "t\($0)" }
         var s = started(ids)

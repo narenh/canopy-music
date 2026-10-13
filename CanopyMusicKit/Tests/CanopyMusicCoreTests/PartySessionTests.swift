@@ -92,11 +92,12 @@ let base = PlaylistSummary(id: "p", name: "Base", kind: .library)
         #expect(engine.staged == nil)
     }
 
-    @Test func loadingANewPlaylistStopsAndClears() async throws {
+    /// Before anything has played (setup, the start screen) a new playlist starts over, requests
+    /// and all. Once the music has started it keeps the party going (`PlaylistChangeTests`).
+    @Test func loadingANewPlaylistBeforePlayingClears() async throws {
         let engine = FakeEngine()
         let session = PartySession(catalog: StubCatalog(ids: ["a", "b", "c"]), engine: engine)
         try await session.load(playlist: base)
-        try await session.play()
         session.add(track("x"), by: guest)
         try await session.load(playlist: PlaylistSummary(id: "q", name: "Other", kind: .library))
         #expect(!engine.isPlaying)

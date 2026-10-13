@@ -281,6 +281,14 @@ struct RootView: View {
                 }
                 await model.startZone()
             }
+            // `-autoChangePlaylist <id>` (with `-autoParty`): 8 s into the party, picks that demo
+            // playlist as host mode's picker does, to check that the song plays on.
+            if let i = args.firstIndex(of: "-autoChangePlaylist"), i + 1 < args.count, model.isDemo {
+                try? await Task.sleep(for: .seconds(8))
+                if let playlist = try? await model.session.catalog.libraryPlaylists().first(where: { $0.id == args[i + 1] }) {
+                    await model.load(playlist)
+                }
+            }
             // `-fakeSpotifyFollow` poses follow mode (Spotify zones) on the demo party, since
             // Spotify can't be reached from the simulator: a track from outside the queue playing
             // ("From Spotify"), two songs in Spotify's own queue above Up next, and the next song

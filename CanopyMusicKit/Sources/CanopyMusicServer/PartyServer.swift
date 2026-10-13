@@ -190,9 +190,11 @@ public final class PartyServer: Sendable {
             let body = try JSONDecoder.api.decode(PlaylistBody.self, from: await request.bodyData)
             guard await session.isHost(key: body.key) else { return HTTPResponse(statusCode: .forbidden) }
             do {
-                // Shuffled before anything plays, so the first song is random too.
+                // Setup (nothing has played): it starts over, shuffled before anything plays, so the
+                // first song is random too, and `play` starts it. A live zone's song plays on and
+                // the new playlist follows it (`PartySession.load`), so there's nothing to start.
                 try await session.load(playlist: body.playlist, shuffled: body.shuffle == true)
-                if body.play == true { try await session.play() }
+                if body.play == true, await !session.isPlaying { try await session.play() }
             } catch {
                 return .serviceFailed(error)
             }

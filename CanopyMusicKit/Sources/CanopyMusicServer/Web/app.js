@@ -1310,8 +1310,10 @@
   $("playlists-use").addEventListener("click", async () => {
     const sheet = $("playlists"), button = $("playlists-use"), p = changePick;
     if (!p || sheet.classList.contains("busy")) return;
-    const hasQueue = !!(snap && (snap.current || snap.upNext.length));
-    if (hasQueue && !confirm(`Switch to "${p.name}"? The queue starts over and requests are cleared.`)) return;
+    // Once a song has played, the hub keeps it playing and keeps the requests (only the old
+    // playlist's songs go), so there's nothing to ask. Before that, a load starts the queue over.
+    const startsOver = !!(snap && !snap.current && snap.upNext.some((item) => item.requester));
+    if (startsOver && !confirm(`Switch to "${p.name}"? The queue starts over and requests are cleared.`)) return;
     pickerBusy("playlists", button, true, "Loading…");
     try {
       const reply = await api("/api/host/playlist", {

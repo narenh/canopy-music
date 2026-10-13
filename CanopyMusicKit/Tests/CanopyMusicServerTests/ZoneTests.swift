@@ -378,10 +378,15 @@ struct HostSettingsTests {
         #expect(hub.state.current?.track.id == shuffled.first)
         #expect(hub.state.upNext.prefix(5).map(\.track.id) == Array(shuffled.dropFirst().prefix(5)))
 
+        // Changed mid-party (the page sends `play` as it was): the song playing plays on, and the
+        // new order follows it, without that song.
+        let playing = try #require(hub.state.current)
         let (again, _) = try await post(18799, "/api/host/playlist", ["key": "secret", "playlist": json, "play": true])
         #expect(again == 200)
         #expect(hub.state.playlist.map(\.id) == original)
-        #expect(hub.state.current?.track.id == original.first)
+        #expect(hub.state.current?.id == playing.id)
+        #expect(hub.isPlaying)
+        #expect(hub.state.upNext.prefix(5).map(\.track.id) == Array(original.filter { $0 != playing.track.id }.prefix(5)))
     }
 
     @Test func localNamePreview() async throws {

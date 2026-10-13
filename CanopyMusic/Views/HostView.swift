@@ -101,9 +101,9 @@ struct HostView: View {
                 }
                 .listRowBackground(Color.white.opacity(0.08))
 
-                // When Spotify plays on another device (a TV, a speaker), the iPad's AirPlay choice
-                // doesn't apply.
-                if model.provider != .spotify || model.spotifyPlaysOnThisIPad {
+                // With Spotify, hidden until a device is chosen, and when it's another device (a
+                // TV, a speaker), where this iPad's AirPlay choice doesn't apply.
+                if model.showsSpeakerChoice {
                     Section("Speakers") {
                         SpeakersRow()
                     }

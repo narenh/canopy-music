@@ -568,7 +568,7 @@ private struct TransportControls: View {
         }
     }
 
-    private var airPlayApplies: Bool { model.provider != .spotify || model.spotifyPlaysOnThisIPad }
+    private var airPlayApplies: Bool { model.provider != .spotify || model.spotifyPlaysOnThisDevice }
 }
 
 /// Four bars bouncing at different rates; they settle low when paused.

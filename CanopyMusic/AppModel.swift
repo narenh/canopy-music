@@ -83,11 +83,20 @@ final class AppModel {
         !isDisplay && provider == .spotify && spotifyDevicesLoaded && !spotifyDeviceAvailable
     }
 
-    /// Music plays from this iPad (so its AirPlay speaker choice matters). Spotify reports the
-    /// iPad's own app as a "Tablet"; unknown counts as this iPad.
-    var spotifyPlaysOnThisIPad: Bool {
+    /// Music plays from this iPad or Mac (so its AirPlay speaker choice matters). Spotify reports
+    /// the iPad's own app as a "Tablet" and the Mac's desktop app as a "Computer", so on a Mac
+    /// only "Computer" counts. Spotify gives no way to tell this device's own app from another of
+    /// the same type on the account, so another iPad (or computer) counts too. Unknown counts as
+    /// this device.
+    var spotifyPlaysOnThisDevice: Bool {
         guard let type = spotifyDeviceType else { return true }
-        return type.lowercased() == "tablet"
+        return type.lowercased() == (DeviceKind.isMac ? "computer" : "tablet")
+    }
+
+    /// Host mode's Speakers section. With Spotify: only once a device is chosen and it's this
+    /// iPad or Mac, even while Spotify there is asleep (picking speakers is part of getting ready).
+    var showsSpeakerChoice: Bool {
+        provider != .spotify || (spotifyDeviceID != nil && spotifyPlaysOnThisDevice)
     }
 
     private(set) var provider: Provider
@@ -216,7 +225,7 @@ final class AppModel {
         // Debug launches that go straight to a party.
         let debugFlags = ["-autoParty", "-autoSearch", "-autoLoad", "-autoResume", "-autoPrevious", "-autoStress", "-showSettings",
                           "-showPicker", "-appleMusicState", "-qrGallery", "-backgroundFor", "-screenshotParty", "-onboarding",
-                          "-onboardingSpotify", "-onboardingNetwork", "-easterEggPreview", "-diagnoseMusicKit", "-benchAppleMusic", "-autoLoadPlaylist", "-confirmEnd", "-showSave"]
+                          "-onboardingSpotify", "-onboardingNetwork", "-easterEggPreview", "-diagnoseMusicKit", "-benchAppleMusic", "-autoLoadPlaylist", "-confirmEnd", "-showSave", "-spotifyState"]
         if ProcessInfo.processInfo.arguments.contains(where: debugFlags.contains) {
             role = .hub
             locked = false
@@ -256,6 +265,25 @@ final class AppModel {
             case "denied": authorization = .denied
             default: authorization = .authorized
             }
+        }
+        // `-spotifyState none|self|selfOffline|other`: Spotify with no device chosen, this
+        // iPad's (or, with `-device`, this Mac's) Spotify available or asleep, or a TV. Fakes
+        // what the device list would say; no sign-in, so nothing refreshes it.
+        if let i = args.firstIndex(of: "-spotifyState"), i + 1 < args.count {
+            self.provider = .spotify
+            let state = args[i + 1]
+            let own = SpotifyDevice(id: "debug-self", name: DeviceKind.noun, type: DeviceKind.isMac ? "Computer" : "Tablet", is_active: true)
+            let tv = SpotifyDevice(id: "debug-tv", name: "Living Room TV", type: "TV", is_active: false)
+            let chosen: SpotifyDevice? = switch state {
+            case "self", "selfOffline": own
+            case "other": tv
+            default: nil
+            }
+            spotifyDeviceID = chosen?.id
+            spotifyDeviceName = chosen?.name
+            spotifyDeviceType = chosen?.type
+            spotifyDevices = state == "selfOffline" ? [tv] : [own, tv]
+            spotifyDevicesLoaded = true
         }
         #endif
 

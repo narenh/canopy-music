@@ -334,11 +334,15 @@
     }
   }
 
-  // A link to …/#settings opens the zone settings once this phone is a host and the state has loaded.
-  let settingsLinkPending = location.hash === "#settings";
+  // A link to …/#settings opens the zone settings once this phone is a host and the state has loaded;
+  // …/#wifi opens the Wi‑Fi dialog on top of them, once the Wi‑Fi details have loaded.
+  const settingsLinked = () => location.hash === "#settings" || location.hash === "#wifi";
+  let settingsLinkPending = settingsLinked();
+  let wifiLinkPending = location.hash === "#wifi";
   // The same page opened again with #settings only changes the hash.
   window.addEventListener("hashchange", () => {
-    settingsLinkPending = location.hash === "#settings";
+    settingsLinkPending = settingsLinked();
+    wifiLinkPending = location.hash === "#wifi";
     openSettingsFromLink();
   });
   function openSettingsFromLink() {
@@ -1056,7 +1060,7 @@
     const on = hosting();
     $("settings-btn").hidden = !on;
     if (!on) {
-      for (const id of ["setup", "settings-modal", "edit-modal", "invite-modal", "playlists"]) $(id).hidden = true;
+      for (const id of ["setup", "settings-modal", "edit-modal", "wifi-modal", "invite-modal", "playlists"]) $(id).hidden = true;
       if (hostChecked) askNameIfNeeded();
       return;
     }
@@ -1372,11 +1376,9 @@
   function fillWifi() {
     const w = wifiDetails;
     $("settings-wifi-ssid").textContent = !w ? "" : w.ssid || "Not set";
-    $("settings-wifi-password").textContent = !w ? "" : w.password ? "••••" : "Not set";
-    $("settings-wifi-ssid-btn").textContent = w && w.ssid ? "Change" : "Set";
-    $("settings-wifi-password-btn").textContent = w && w.password ? "Change" : "Set";
+    $("settings-wifi-btn").textContent = w && w.ssid ? "Change" : "Set";
     // Until they've loaded, so a save can't blank the others.
-    for (const id of ["settings-wifi-ssid-btn", "settings-wifi-password-btn", "settings-wifi-simple"]) $(id).disabled = !w;
+    for (const id of ["settings-wifi-btn", "settings-wifi-simple"]) $(id).disabled = !w;
     if (w) $("settings-wifi-simple").checked = w.simpleQR;
   }
 
@@ -1389,6 +1391,7 @@
     loadHostDetails().then((details) => {
       wifiDetails = details.wifi;
       fillWifi();
+      if (wifiLinkPending) { wifiLinkPending = false; $("settings-wifi-btn").click(); }
       for (const d of details.displays) {
         const li = document.createElement("li");
         li.innerHTML = d.kind === "tv" ? icons.tv : icons.ipad;
@@ -1426,19 +1429,35 @@
     if (await saveSetting({ wifi: next })) wifiDetails = next; else event.target.checked = !next.simpleQR;
   });
 
+  // The Wi‑Fi dialog: network and password together, saved as one change. Empty fields clear
+  // them (no network: no "Join Wi‑Fi" code; no password: an open network).
+  $("settings-wifi-btn").addEventListener("click", () => {
+    $("wifi-ssid").value = wifiDetails.ssid;
+    $("wifi-password").value = wifiDetails.password;
+    $("wifi-modal").hidden = false;
+    setTimeout(() => $("wifi-ssid").focus(), 50);
+  });
+  // Return in the network field goes on to the password.
+  $("wifi-ssid").addEventListener("keydown", (event) => {
+    if (event.key !== "Enter") return;
+    event.preventDefault();
+    $("wifi-password").focus();
+  });
+  $("wifi-cancel").addEventListener("click", () => { $("wifi-modal").hidden = true; });
+  $("wifi-form").addEventListener("submit", async (event) => {
+    event.preventDefault();
+    const next = { ...wifiDetails, ssid: $("wifi-ssid").value.trim(), password: $("wifi-password").value };
+    if (!(await saveSetting({ wifi: next }))) return;
+    wifiDetails = next;
+    $("wifi-modal").hidden = true;
+    fillWifi();
+  });
+
   // The edit dialog: one value at a time, on top of the sheet.
   const editors = {
     name: {
       title: "Zone name", max: 40, value: () => snap.zoneName || "",
       save: (v) => v ? saveSetting({ zoneName: v }) : true,
-    },
-    ssid: {
-      title: "Network name", max: 32, value: () => wifiDetails.ssid,
-      save: async (v) => { const next = { ...wifiDetails, ssid: v }; if (await saveSetting({ wifi: next })) { wifiDetails = next; return true; } return false; },
-    },
-    password: {
-      title: "Wi‑Fi password", max: 63, value: () => wifiDetails.password, trim: false,
-      save: async (v) => { const next = { ...wifiDetails, password: v }; if (await saveSetting({ wifi: next })) { wifiDetails = next; return true; } return false; },
     },
   };
   let editing = null;
@@ -1456,12 +1475,7 @@
   $("edit-cancel").addEventListener("click", () => { $("edit-modal").hidden = true; });
   $("edit-form").addEventListener("submit", async (event) => {
     event.preventDefault();
-    const raw = $("edit-input").value;
-    const value = editing.trim === false ? raw : raw.trim();
-    if (await editing.save(value)) {
-      $("edit-modal").hidden = true;
-      fillWifi();
-    }
+    if (await editing.save($("edit-input").value.trim())) $("edit-modal").hidden = true;
   });
 
   $("settings-forget").addEventListener("click", async () => {

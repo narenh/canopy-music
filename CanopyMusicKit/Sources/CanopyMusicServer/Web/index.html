@@ -142,8 +142,7 @@
     <label class="setting-row"><span>Queue from phones</span><input type="checkbox" class="switch" id="settings-queue"></label>
     <label class="setting-row"><span>Reorder from phones</span><input type="checkbox" class="switch" id="settings-reorder"></label>
     <p class="settings-head">Wi&#8209;Fi information</p>
-    <div class="setting-row"><span class="setting-label">Network name</span><span class="setting-value" id="settings-wifi-ssid"></span><button type="button" class="pill-btn" data-edit="ssid" id="settings-wifi-ssid-btn">Change</button></div>
-    <div class="setting-row"><span class="setting-label">Password</span><span class="setting-value" id="settings-wifi-password"></span><button type="button" class="pill-btn" data-edit="password" id="settings-wifi-password-btn">Change</button></div>
+    <div class="setting-row"><span class="setting-label">Network</span><span class="setting-value" id="settings-wifi-ssid"></span><button type="button" class="pill-btn" id="settings-wifi-btn">Change</button></div>
     <label class="setting-row"><span>Simple QR code</span><input type="checkbox" class="switch" id="settings-wifi-simple"></label>
     <p class="small">Shows a “Join Wi&#8209;Fi” QR code next to the guest one. Turn on Simple QR code if a phone has trouble scanning it.</p>
     <p class="settings-head">Displays</p>
@@ -170,6 +169,21 @@
     <p class="field-note" id="edit-address" hidden></p>
     <div class="modal-actions">
       <button type="button" class="text-btn" id="edit-cancel">Cancel</button>
+      <button type="submit" class="primary-btn">Save</button>
+    </div>
+  </form>
+</div>
+
+<!-- Host: the guest Wi‑Fi, network and password together, on top of the settings sheet. -->
+<div id="wifi-modal" class="modal over" hidden>
+  <form class="modal-card" id="wifi-form">
+    <h2>Wi&#8209;Fi</h2>
+    <label class="field-label" for="wifi-ssid">Network</label>
+    <input id="wifi-ssid" maxlength="32" placeholder="Network name" autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck="false" enterkeyhint="next" data-1p-ignore data-lpignore="true">
+    <label class="field-label" for="wifi-password">Password</label>
+    <input id="wifi-password" maxlength="63" placeholder="Optional" autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck="false" enterkeyhint="done" data-1p-ignore data-lpignore="true">
+    <div class="modal-actions">
+      <button type="button" class="text-btn" id="wifi-cancel">Cancel</button>
       <button type="submit" class="primary-btn">Save</button>
     </div>
   </form>

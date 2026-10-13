@@ -188,6 +188,8 @@ html.sheet-open, html.sheet-open body { overflow: hidden; }
 .modal-card { width: 100%; max-width: 360px; background: #1f1f1f; border-radius: 18px; padding: 22px 20px 16px; }
 .modal-card p { color: var(--text-2); font-size: 14px; margin: 6px 0 16px; }
 .modal-card input { width: 100%; font: inherit; color: var(--text); background: var(--surface-2); border: 0; border-radius: 10px; padding: 12px 14px; outline: none; }
+/* Above each field of a dialog with more than one (Wi‑Fi). */
+.modal-card .field-label { display: block; font-size: 12px; color: var(--text-2); margin: 14px 2px 6px; }
 .modal-actions { display: flex; justify-content: flex-end; gap: 16px; align-items: center; margin-top: 16px; }
 .primary-btn { background: var(--accent); color: var(--base); font-weight: 600; padding: 10px 20px; border-radius: 999px; }
 

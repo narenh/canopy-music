@@ -142,6 +142,7 @@ private struct SpotifyDevicePickerPresenter: ViewModifier {
         @Bindable var model = model
         content.sheet(isPresented: $model.isPickingSpotifyDevice) {
             SpotifyDevicePicker()
+                .environment(model)
                 .presentationBackground(.ultraThinMaterial)
                 .preferredColorScheme(.dark)
         }

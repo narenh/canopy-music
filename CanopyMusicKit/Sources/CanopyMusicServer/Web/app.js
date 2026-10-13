@@ -928,7 +928,7 @@
   }
   // Setup: the field being typed in (with its label) moves to the top of the sheet, once iOS has
   // opened the keyboard and done its own scrolling; the playlist search then has its results below.
-  for (const scroller of [$("setup-zone-scroll"), $("setup-scroll")]) scroller.addEventListener("focusin", (event) => {
+  for (const scroller of [$("setup-zone-scroll"), $("setup-spotify-scroll"), $("setup-scroll")]) scroller.addEventListener("focusin", (event) => {
     const search = event.target.matches('input[type="search"]') ? event.target.closest(".picker-search") : null;
     const field = search || (event.target.matches("input.text-input") ? event.target : null);
     if (!field) return;
@@ -1363,7 +1363,26 @@
     } catch {}
     setupAddress();
     spotifyFieldsFilled = false;
+    returnPending = true;
     renderSetupMusic();
+  }
+
+  /** Back from Spotify's sign-in (the page reloaded at `/`): signed in, to the zone page with
+   * Spotify chosen (it's chosen only now, when the sign-in left from Apple Music); still signed
+   * out, to Spotify's page again, which says what to check. Once, when the TV's Spotify state
+   * has arrived (hosts' snapshots). */
+  let returnPending = false;
+  function returnFromSpotify() {
+    if (!returnPending || !spotify) return;
+    returnPending = false;
+    const intent = spotifySignInIntent();
+    if (!intent) return;
+    if (spotify.account === "signedIn") {
+      try { sessionStorage.removeItem("canopymusic.spotifySignIn"); } catch {}
+      if (intent === "switch" && !isSpotify()) chooseService("spotify");
+    } else {
+      showSetupPage("spotify", false);
+    }
   }
 
   /** What was typed on the zone page, kept while the phone visits Spotify's sign-in page. */
@@ -1371,18 +1390,31 @@
     try { sessionStorage.setItem("canopymusic.setupDraft", JSON.stringify({ you: $("setup-you").value, name: $("setup-name").value })); } catch {}
   }
 
-  /** Shows setup's "zone" or "music" page; going back slides in from the other side. */
+  /** Setup's pages: the zone; Spotify's setup (from the Music bar); the base playlist. */
+  const setupPages = { zone: "setup-zone", spotify: "setup-spotify-page", music: "setup-music-page" };
+
+  /** Shows one of setup's pages; going back to the zone page slides in from the other side. */
   function showSetupPage(page, animated = true) {
-    const zone = page === "zone";
-    const to = zone ? $("setup-zone") : $("setup-music-page"), from = zone ? $("setup-music-page") : $("setup-zone");
-    if (document.activeElement && from.contains(document.activeElement)) document.activeElement.blur();
-    from.hidden = true;
+    const zone = page === "zone", to = $(setupPages[page]);
+    for (const id of Object.values(setupPages)) {
+      const from = $(id);
+      if (from === to) continue;
+      if (document.activeElement && from.contains(document.activeElement)) document.activeElement.blur();
+      from.hidden = true;
+    }
+    closeServiceMenu();
     to.hidden = false;
     to.classList.remove("entering", "back");
     if (animated) {
       void to.offsetWidth; // restarts the animation
       to.classList.add("entering");
       to.classList.toggle("back", zone);
+    }
+    if (page === "spotify") {
+      // Filled again from the TV each time it opens (a sign-in elsewhere may have changed them).
+      spotifyFieldsFilled = false;
+      $("setup-spotify-scroll").scrollTop = 0;
+      renderSpotifySetup();
     }
     if (zone) checkMusicAccess(true);
   }
@@ -1414,11 +1446,11 @@
     if (s.conflictZone) {
       return { state: "problem", what: `${s.conflictZone} is using this Spotify account.`, todo: "End it to start a zone here, or join it as a display." };
     }
-    if (s.account === "notSetUp") return { state: "problem", what: "Not set up.", todo: "Follow the steps below." };
+    if (s.account === "notSetUp") return { state: "problem", what: "Not connected.", todo: "" };
     if (s.account === "signedOut") {
       if (s.signingIn) return { state: "checking", what: "Signing in…", todo: "Finish on Spotify's page." };
       if (s.signInError) return { state: "problem", what: "Couldn't sign in.", todo: s.signInError };
-      return { state: "problem", what: "Not signed in.", todo: "Sign in below." };
+      return { state: "problem", what: "Not connected.", todo: "" };
     }
     const who = s.displayName ? `Signed in as ${s.displayName}` : "Signed in";
     if (!s.devices) return { state: "checking", what: `${who}.`, todo: "Looking for devices…" };
@@ -1487,16 +1519,15 @@
       } else if (status.todo) {
         note.textContent = status.todo;
       }
-      for (const item of $("setup-service-menu").children) {
-        item.setAttribute("aria-checked", String((item.dataset.service === "spotify") === spotifyZone));
-      }
     }
+    renderServiceOption();
     // Spotify can't play on the TV itself (its tvOS app is only a Connect device while it's on
     // screen, and Canopy Music is), so the music plays wherever the host chooses.
     $("setup-sub").textContent = spotifyZone
       ? "Music plays from a speaker, phone, or computer with Spotify open, chosen below."
       : "Music will play from your Apple TV. Use Control Center to change audio output.";
     renderSpotifySetup();
+    returnFromSpotify();
     const ready = setupReady();
     $("setup-continue").disabled = !ready || !setupNameValid();
     // Ready: the playlists can load while the host finishes the names.
@@ -1517,48 +1548,83 @@
 
   // MARK: Setup: the service menu, and Spotify on an Apple TV
 
+  /** The menu's one option: the service that isn't chosen, with its state on a second line. */
+  function renderServiceOption() {
+    const toSpotify = !isSpotify();
+    const icon = $("setup-option-icon");
+    icon.src = toSpotify ? "/spotify.png" : "/apple-music.png";
+    icon.classList.toggle("round", toSpotify);
+    $("setup-option-title").textContent = toSpotify ? "Spotify" : "Apple Music";
+    $("setup-option-note").textContent = toSpotify ? spotifyOptionNote(spotify) : appleMusicOptionNote();
+  }
+  /** Spotify's line in the menu: who's signed in, or that choosing it goes to its setup. */
+  function spotifyOptionNote(s) {
+    if (!spotifySignedIn(s)) return "Not connected. Tap to sign in.";
+    return s.displayName ? `Signed in as ${s.displayName}` : "Signed in";
+  }
+  /** Apple Music's line in the menu: what's wrong on the TV, if anything (as the bar says it). */
+  function appleMusicOptionNote() {
+    if (musicAccess == null || musicAccess === "ok") return "";
+    return (musicNotes[musicAccess] || musicNotes.error)[0];
+  }
+  const spotifySignedIn = (s) => !!s && s.account === "signedIn";
+
   function closeServiceMenu() {
     $("setup-service-menu").hidden = true;
-    $("setup-service-btn").setAttribute("aria-expanded", "false");
+    $("setup-music").setAttribute("aria-expanded", "false");
   }
-  $("setup-service-btn").addEventListener("click", (event) => {
+  $("setup-music").addEventListener("click", (event) => {
     event.stopPropagation();
     const menu = $("setup-service-menu");
+    if (menu.hidden) renderServiceOption();
     menu.hidden = !menu.hidden;
-    $("setup-service-btn").setAttribute("aria-expanded", String(!menu.hidden));
+    $("setup-music").setAttribute("aria-expanded", String(!menu.hidden));
   });
   document.addEventListener("click", (event) => {
     if (!event.target.closest("#setup-service-menu")) closeServiceMenu();
   });
-  $("setup-service-menu").addEventListener("click", async (event) => {
-    const item = event.target.closest("[data-service]");
-    if (!item) return;
+  addEventListener("keydown", (event) => { if (event.key === "Escape") closeServiceMenu(); });
+  // Spotify, not signed in: its setup page first. The service changes only once the sign-in
+  // succeeds (`returnFromSpotify`); Back keeps Apple Music.
+  $("setup-service-option").addEventListener("click", () => {
     closeServiceMenu();
-    if ((item.dataset.service === "spotify") === isSpotify()) return;
+    if (isSpotify()) chooseService("appleMusic");
+    else if (spotifySignedIn(spotify)) chooseService("spotify");
+    else showSetupPage("spotify");
+  });
+  async function chooseService(service) {
     try {
-      await api("/api/host/service", { key: hostKey, service: item.dataset.service });
+      await api("/api/host/service", { key: hostKey, service });
       checkMusicAccess(true);
     } catch (error) {
       debugLog(`service change failed: ${error.message}`);
       toast("Couldn't change the music service");
     }
+  }
+  $("spotify-open").addEventListener("click", () => showSetupPage("spotify"));
+  $("spotify-change").addEventListener("click", () => showSetupPage("spotify"));
+  $("spotify-back").addEventListener("click", () => {
+    // Backing out: nothing changes, and a reload stays on the zone page.
+    try { sessionStorage.removeItem("canopymusic.spotifySignIn"); } catch {}
+    showSetupPage("zone");
   });
 
-  /** Sign in again or change the Client ID, once signed in. */
-  let spotifyPanelOpen = false;
-  /** The Client ID and sign-in page fields have been filled from the TV since setup opened. */
+  /** The Client ID and sign-in page fields have been filled from the TV since Spotify's page opened. */
   let spotifyFieldsFilled = false;
   /** The sign-in page field's check: "ok", "checking", or another `PageCheck`. */
   let spotifyPageCheck = "ok";
   let spotifyBusy = false;
 
+  /** Under the Music bar (Spotify chosen): Sign in (not signed in) or the link to its page, and
+   * where music plays; and Spotify's page itself. */
   function renderSpotifySetup() {
-    const s = spotify, on = isSpotify() && !!s;
-    const signedIn = on && s.account === "signedIn";
-    $("setup-spotify").hidden = !on || (signedIn && !spotifyPanelOpen);
-    $("spotify-change").hidden = !signedIn || spotifyPanelOpen;
-    $("setup-spotify-device").hidden = !signedIn;
-    if (!on) return;
+    const s = spotify, chosen = isSpotify() && !!s;
+    const signedIn = spotifySignedIn(s);
+    $("spotify-open").hidden = !chosen || signedIn || !!s.signingIn;
+    $("spotify-change").hidden = !chosen || !signedIn;
+    $("setup-spotify-device").hidden = !chosen || !signedIn;
+    if (!s) return;
+    if (chosen && signedIn) renderSpotifyDevices(s);
     $("spotify-uri").textContent = s.signInPage;
     if (!spotifyFieldsFilled) {
       spotifyFieldsFilled = true;
@@ -1567,18 +1633,18 @@
       setAdvanced(!!s.ownSignInPage);
     }
     // Spotify shows "Invalid redirect URI" on its own page, which nothing here can see. If the
-    // phone came back without signing in, say what to check.
+    // phone came back without signing in, say what to check (or what the TV was told).
     const hint = $("spotify-hint");
-    if (signedIn) { try { sessionStorage.removeItem("canopymusic.spotifySignIn"); } catch {} }
-    hint.hidden = !(s.account === "signedOut" && spotifySignInStarted());
-    hint.textContent = `Did Spotify say “Invalid redirect URI”? Add ${s.signInPage} to your Spotify app's Redirect URIs.`;
+    const cameBack = s.account === "signedOut" && !!spotifySignInIntent();
+    hint.hidden = !cameBack && !s.signInError;
+    hint.textContent = s.signInError ? `Couldn't sign in. ${s.signInError}`
+      : `Did Spotify say “Invalid redirect URI”? Add ${s.signInPage} to your Spotify app's Redirect URIs.`;
     // Not held off while the TV waits: Back from Spotify's page leaves a sign-in pending, and
     // signing in again starts over.
     const button = $("spotify-signin");
     button.disabled = spotifyBusy || !$("spotify-client").value.trim() || spotifyPageCheck !== "ok";
     button.querySelector(".spinner").hidden = !spotifyBusy;
     button.querySelector(".label").textContent = signedIn ? "Sign in again" : "Sign in to Spotify";
-    renderSpotifyDevices(s);
   }
 
   /** Where music plays: Spotify's devices now, in a native picker under the bar. */
@@ -1626,7 +1692,6 @@
     $("spotify-advanced-btn").setAttribute("aria-expanded", String(open));
   }
   $("spotify-advanced-btn").addEventListener("click", () => setAdvanced($("spotify-advanced").hidden));
-  $("spotify-change").addEventListener("click", () => { spotifyPanelOpen = true; renderSpotifySetup(); });
   $("spotify-client").addEventListener("input", () => renderSpotifySetup());
   // The Client ID is saved on the TV when it's done (changing it signs the TV out of Spotify).
   $("spotify-client").addEventListener("change", saveSpotifyClientID);
@@ -1655,7 +1720,7 @@
     lead.className = kind;
     lead.textContent = text;
     note.append(lead);
-    if (help) note.append(" Only change this if you host your own copy. Leave it empty to use the default.");
+    if (help) note.append(" Leave it empty to use the default.");
   }
   $("spotify-page").addEventListener("input", () => {
     clearTimeout(pageTimer);
@@ -1693,9 +1758,10 @@
     setTimeout(() => { $("spotify-copy").textContent = "Copy"; }, 1500);
   });
 
-  /** A sign-in left from this page and hasn't come back signed in (kept across the reload). */
-  function spotifySignInStarted() {
-    try { return sessionStorage.getItem("canopymusic.spotifySignIn") === "1"; } catch { return false; }
+  /** A sign-in left from this page and hasn't come back signed in (kept across the reload):
+   * "switch" when it left from Apple Music (Spotify is chosen once it succeeds), else "again". */
+  function spotifySignInIntent() {
+    try { return sessionStorage.getItem("canopymusic.spotifySignIn"); } catch { return null; }
   }
 
   // Sign in: the TV makes the sign-in (its verifier and nonce stay there) and answers with
@@ -1709,7 +1775,7 @@
       await saveSpotifyClientID();
       const reply = await api("/api/host/spotify/sign-in", { key: hostKey });
       saveSetupDraft();
-      try { sessionStorage.setItem("canopymusic.spotifySignIn", "1"); } catch {}
+      try { sessionStorage.setItem("canopymusic.spotifySignIn", isSpotify() ? "again" : "switch"); } catch {}
       location.href = reply.url;
     } catch (error) {
       debugLog(`spotify sign-in failed: ${error.message}`);

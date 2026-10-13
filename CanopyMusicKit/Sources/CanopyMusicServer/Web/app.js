@@ -204,6 +204,8 @@
     document.documentElement.style.setProperty("--base", base);
     document.documentElement.style.setProperty("--accent", accent);
     document.querySelector('meta[name="theme-color"]').setAttribute("content", base);
+    // Safari 26 ignores theme-color. The splash keeps its purple bars until it fades.
+    if ($("splash").classList.contains("gone")) tintBars();
 
     const img = $("backdrop-img");
     img.classList.remove("shown");
@@ -212,6 +214,18 @@
     const loader = new Image();
     loader.onload = () => { if (themedTrackId === id) { img.src = url; img.classList.add("shown"); } };
     loader.src = url;
+  }
+
+  /** Sets Safari's status bar and toolbar to the page's colour: Safari 26 takes it from a fixed
+   * element appearing at the screen's edges, and keeps it after (see .bar-tint). */
+  function tintBars() {
+    const tints = ["top", "bottom"].map((edge) => {
+      const tint = document.createElement("div");
+      tint.className = "bar-tint";
+      tint.style[edge] = "0";
+      return document.body.appendChild(tint);
+    });
+    requestAnimationFrame(() => requestAnimationFrame(() => tints.forEach((tint) => tint.remove())));
   }
 
   function setArt(el, track, large) {
@@ -287,6 +301,7 @@
     // A sheet that opened as the first screen is already in place under the splash; it doesn't
     // also slide in while the splash fades.
     for (const sheet of document.querySelectorAll(".sheet")) if (!sheet.hidden) sheet.classList.add("instant");
+    tintBars(); // from the splash's purple to the page's colour
     splash.classList.add("gone");
     debugScreen("splash fading");
     setTimeout(() => {

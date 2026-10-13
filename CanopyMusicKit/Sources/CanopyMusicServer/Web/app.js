@@ -1135,6 +1135,8 @@
   let setupPick = null;
   let setupDismissed = false;
   let setupStarting = false;
+  /** Continue was pressed and the TV is checking for another zone on the Spotify account. */
+  let checkingConflict = false;
   const keyQuery = () => `key=${encodeURIComponent(hostKey || "")}`;
 
   function renderHost() {
@@ -1529,7 +1531,7 @@
     renderSpotifySetup();
     returnFromSpotify();
     const ready = setupReady();
-    $("setup-continue").disabled = !ready || !setupNameValid();
+    $("setup-continue").disabled = checkingConflict || !ready || !setupNameValid();
     // Ready: the playlists can load while the host finishes the names.
     if (ready) loadPlaylists().catch(() => {});
     // It stopped being able to play while the playlist page showed: back to say why.
@@ -1793,9 +1795,19 @@
   });
 
   // Another zone already plays from this Spotify account: end it first, or join it as a display.
-  function askAboutConflict() {
-    if (!isSpotify() || !spotify || !spotify.conflictZone) return false;
-    $("conflict-text").textContent = `End ${spotify.conflictZone} to start a new one on this Apple TV, or join it as a display.`;
+  // The TV asks that zone first (up to about 2 s): one that announced itself but no longer
+  // answers (quit without a goodbye) doesn't count. If the TV can't be asked, what it last said.
+  let conflictZone = null;
+  async function askAboutConflict() {
+    if (!isSpotify()) return false;
+    try {
+      conflictZone = (await api("/api/host/spotify/conflict", { key: hostKey }) || {}).zone || null;
+    } catch (error) {
+      debugLog(`conflict check failed: ${error.message}`);
+      conflictZone = (spotify && spotify.conflictZone) || null;
+    }
+    if (!conflictZone) return false;
+    $("conflict-text").textContent = `End ${conflictZone} to start a new one on this Apple TV, or join it as a display.`;
     $("conflict-modal").hidden = false;
     return true;
   }
@@ -1805,7 +1817,7 @@
       const reply = await api("/api/host/spotify/join", { key: hostKey });
       $("conflict-modal").hidden = true;
       // The TV shows that zone now; this phone goes on to its page.
-      showSplash(`Connecting to ${spotify.conflictZone}`);
+      showSplash(`Connecting to ${conflictZone}`);
       location.replace(`http://${reply.address}/`);
     } catch {
       toast("Couldn't join that zone");
@@ -1819,7 +1831,14 @@
     if (event.key === "Enter") { event.preventDefault(); $("setup-name").blur(); }
   });
   $("setup-continue").addEventListener("click", async () => {
-    if ($("setup-continue").disabled || askAboutConflict()) return;
+    if ($("setup-continue").disabled) return;
+    // Disabled while the TV checks for another zone on the Spotify account.
+    checkingConflict = true;
+    $("setup-continue").disabled = true;
+    const asked = await askAboutConflict();
+    checkingConflict = false;
+    $("setup-continue").disabled = !setupReady() || !setupNameValid();
+    if (asked) return;
     showSetupPage("music");
     await setupPicker.open();
     if (setupPick) setupPicker.select(setupPick.id);
@@ -1855,8 +1874,13 @@
     pickerBusy("setup", $("setup-start"), busy, busy ? "Starting…" : "Start the music");
   }
   $("setup-start").addEventListener("click", async () => {
-    if (!setupPick || setupStarting || askAboutConflict()) return;
+    if (!setupPick || setupStarting) return;
+    // The spinner shows while the TV checks for another zone on the Spotify account, too.
     setupBusy(true);
+    if (await askAboutConflict()) {
+      setupBusy(false);
+      return;
+    }
     // This phone's name, saved as the name prompt saves it.
     saveMyName($("setup-you").value);
     try {

@@ -159,11 +159,14 @@ final class TVModel {
                 resumeProblem = "Spotify is signed out on this TV. Create a new zone to sign in again from your phone."
                 return
             }
-            // Spotify plays one stream per account: not over another zone's.
-            if let zone = spotifyConflict {
+            // Spotify plays one stream per account: not over another zone's (one that answers;
+            // a stale announcement doesn't count).
+            if let zone = await confirmSpotifyConflict() {
                 resumeProblem = "\(zone.name) is playing from this Spotify account. Join it, or end it first."
                 return
             }
+            // Something else was chosen during the check.
+            guard role == .choosing else { return }
         }
         openZone(fresh: false)
         // Its saved queue is gone (tvOS may clear Caches): back to "Scan to host", with its code,
@@ -210,7 +213,7 @@ final class TVModel {
                 browser.start()
                 let deadline = Date().addingTimeInterval(3)
                 while !browser.hasSearched, Date() < deadline { try? await Task.sleep(for: .milliseconds(100)) }
-                if let zone = spotifyConflict {
+                if let zone = await confirmSpotifyConflict() {
                     debugLog("restore: \(zone.name) is on this Spotify account; back to the zone list")
                     closeZone()
                     return
@@ -323,6 +326,9 @@ final class TVModel {
             Task {
                 await spotify.refresh()
                 pushSpotifySetup()
+                // The Music bar names another zone on the account only once it has answered
+                // (again each time the page checks, so one that went away drops off).
+                await confirmSpotifyConflict()
             }
             // The page's service menu says what's wrong with Apple Music, if anything. Checked
             // once (without asking): choosing Apple Music checks it again.
@@ -342,21 +348,45 @@ final class TVModel {
     #endif
 
     /// Another zone on the network already playing from this TV's Spotify account (Spotify plays
-    /// one stream per account; two zones on it would fight over it). Only with Spotify, and only
-    /// once the account is known.
-    var spotifyConflict: ZoneListing? {
+    /// one stream per account; two zones on it would fight over it), as last confirmed by
+    /// `confirmSpotifyConflict`: only a zone that answered counts, never a stale announcement.
+    /// What the host's setup page is told.
+    private(set) var spotifyConflict: ZoneListing?
+    @ObservationIgnored private let zoneProbe = ZoneProbe()
+    /// The latest check, so an older one finishing late doesn't overwrite it.
+    @ObservationIgnored private var conflictCheck = 0
+
+    /// Asks the zones announcing this TV's Spotify account whether they're really there
+    /// (`ZoneProbe`, up to about 2 s), and returns the first that is. Only with Spotify, and only
+    /// once the account is known. Keeps the answer in `spotifyConflict` for the setup page.
+    @discardableResult
+    func confirmSpotifyConflict() async -> ZoneListing? {
+        conflictCheck += 1
+        let check = conflictCheck
+        let zone = await zoneUsingSpotifyAccount()
+        if check == conflictCheck, zone != spotifyConflict {
+            spotifyConflict = zone
+            pushSpotifySetup()
+        }
+        return zone
+    }
+
+    private func zoneUsingSpotifyAccount() async -> ZoneListing? {
         guard service == .spotify else { return nil }
-        var zones = browser.zones
+        let fingerprint = spotify.accountFingerprint
         #if DEBUG
-        zones += debugZones
+        // `-spotifyFake conflict`: the made-up zone has no server to ask, so it isn't probed; it
+        // counts as answering.
+        if let fake = ZoneListing.usingSpotifyAccount(fingerprint, in: debugZones, ownHubID: deviceID).first { return fake }
         #endif
-        return ZoneListing.usingSpotifyAccount(spotify.accountFingerprint, in: zones, ownHubID: deviceID)
+        let log: @Sendable (String) -> Void = { [weak self] line in Task { @MainActor in self?.debugLog(line) } }
+        return await zoneProbe.zoneUsingSpotifyAccount(fingerprint, in: browser.zones, ownHubID: deviceID, log: log)
     }
 
     /// Tells the host's setup page (hosts' snapshots) where Spotify stands.
     private func pushSpotifySetup() {
         guard role == .hub else { return }
-        session.spotifySetup = spotify.setup(conflict: spotifyConflict)
+        session.spotifySetup = spotify.setup(conflict: service == .spotify ? spotifyConflict : nil)
         // The account just became known (a sign-in): the announcement carries it.
         advertise()
     }
@@ -585,6 +615,8 @@ final class TVModel {
         if service == .spotify, let account = spotify.accountFingerprint {
             txt[ZoneService.spotifyAccountKey] = account
         }
+        // `GET /api/zone` answers the same, for devices checking this zone is really here.
+        session.announcedSpotifyAccount = txt[ZoneService.spotifyAccountKey]
         advertiser.advertise(name: zoneName, port: server.port, txt: txt)
     }
 
@@ -686,6 +718,13 @@ extension TVModel: HubSetupHandler {
 
     func chooseSpotifyDevice(id: String) -> Bool {
         spotify.chooseDevice(id: id)
+    }
+
+    /// Continue and Start the music on the setup page: the zone that's really on this Spotify
+    /// account now, if any (its name).
+    func checkSpotifyConflict() async -> String? {
+        guard role == .hub, session.isWaitingForSetup else { return nil }
+        return await confirmSpotifyConflict()?.name
     }
 
     /// Shows the zone already on this Spotify account as a display, after the page has its

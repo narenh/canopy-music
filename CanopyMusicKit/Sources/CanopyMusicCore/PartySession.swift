@@ -129,6 +129,10 @@ public final class PartySession {
     public private(set) var hubDevice: String?
     /// The hub device's ID (stable across launches and renames).
     public private(set) var hubID: String?
+    /// Hub only: the Spotify account fingerprint this zone announces (set by the app as it
+    /// announces the zone; nil for Apple Music). `GET /api/zone` answers it, so a device that sees
+    /// the announcement can check the zone is really there before it blocks anything.
+    @ObservationIgnored public var announcedSpotifyAccount: String?
     public var zoneName: String? {
         didSet { if zoneName != oldValue, remote == nil { broadcast() } }
     }

@@ -44,13 +44,125 @@ public struct ZoneListing: Identifiable, Hashable, Sendable {
 
     public var baseURL: URL? { URL(string: "http://\(address)") }
 
-    /// Another zone already using this Spotify account (`fingerprint`), from the zones on the
-    /// network. Every zone listed counts as active: a hub announces its zone only while it's
-    /// running. A device's own zone (`ownHubID`) never counts, and an unknown account (not
-    /// fetched yet) matches nothing.
-    public static func usingSpotifyAccount(_ fingerprint: String?, in zones: [ZoneListing], ownHubID: String) -> ZoneListing? {
-        guard let fingerprint, !fingerprint.isEmpty else { return nil }
-        return zones.first { $0.hubID != ownHubID && $0.spotifyAccount == fingerprint }
+    /// Other zones announcing this Spotify account (`fingerprint`), in list order. Only what the
+    /// announcements say: a hub that quit without a Bonjour goodbye stays listed for a while, so
+    /// before anything is blocked, `ZoneProbe` asks each one whether it's really there. A
+    /// device's own zone (`ownHubID`) never counts, and an unknown account (not fetched yet)
+    /// matches nothing.
+    public static func usingSpotifyAccount(_ fingerprint: String?, in zones: [ZoneListing], ownHubID: String) -> [ZoneListing] {
+        guard let fingerprint, !fingerprint.isEmpty else { return [] }
+        return zones.filter { $0.hubID != ownHubID && $0.spotifyAccount == fingerprint }
+    }
+}
+
+/// What a hub answers at `GET /api/zone`: which hub it is, and the Spotify account fingerprint
+/// it announces now (nil for Apple Music, or before the account is known). Both are public
+/// already, in its TXT record.
+public struct ZoneCheck: Codable, Equatable, Sendable {
+    public var hub: String?
+    public var spotify: String?
+
+    public init(hub: String?, spotify: String?) {
+        self.hub = hub
+        self.spotify = spotify
+    }
+}
+
+/// Asks zones whose announcement says they use a Spotify account whether they really are, before
+/// that blocks anything: a Bonjour announcement outlives a hub that quit without a goodbye (quit
+/// from Xcode, or asleep), and a stale one must never block anyone. A zone counts only if its
+/// hub answers `GET /api/zone` within `timeout` as the same hub, on the same account.
+public struct ZoneProbe: Sendable {
+    /// One GET: the body and HTTP status. Throws if nothing answers.
+    public typealias Fetch = @Sendable (URL) async throws -> (Data, Int)
+
+    /// How a zone answered.
+    public enum Answer: Equatable, Sendable {
+        /// The same hub, still on the account.
+        case there
+        /// No answer (refused, unreachable or too slow), or not a hub's answer.
+        case silent
+        /// Another hub answers at that address now.
+        case otherHub
+        /// The hub answers, but isn't on that account any more.
+        case otherAccount
+    }
+
+    public let timeout: Duration
+    private let fetch: Fetch
+
+    /// `fetch` replaces the network (tests); by default an ephemeral `URLSession`.
+    public init(timeout: Duration = .seconds(2), fetch: Fetch? = nil) {
+        self.timeout = timeout
+        if let fetch {
+            self.fetch = fetch
+        } else {
+            let config = URLSessionConfiguration.ephemeral
+            config.timeoutIntervalForRequest = Double(timeout.components.seconds) + 1
+            config.waitsForConnectivity = false
+            config.requestCachePolicy = .reloadIgnoringLocalCacheData
+            let session = URLSession(configuration: config)
+            self.fetch = { url in
+                let (data, response) = try await session.data(from: url)
+                return (data, (response as? HTTPURLResponse)?.statusCode ?? 0)
+            }
+        }
+    }
+
+    /// The first of the zones announcing this account (`ZoneListing.usingSpotifyAccount`) that
+    /// answers as itself, still on it; nil if none does. They're asked at once, and the first to
+    /// confirm wins, so this takes at most `timeout`. Zones that turn out to be gone go to `log`.
+    public func zoneUsingSpotifyAccount(_ fingerprint: String?, in zones: [ZoneListing], ownHubID: String,
+                                        log: (@Sendable (String) -> Void)? = nil) async -> ZoneListing? {
+        let candidates = ZoneListing.usingSpotifyAccount(fingerprint, in: zones, ownHubID: ownHubID)
+        guard let fingerprint, !candidates.isEmpty else { return nil }
+        return await withTaskGroup(of: (ZoneListing, Answer).self) { group in
+            for zone in candidates {
+                group.addTask { (zone, await self.ask(zone, fingerprint: fingerprint)) }
+            }
+            for await (zone, answer) in group {
+                if answer == .there {
+                    group.cancelAll()
+                    return zone
+                }
+                log?("\(zone.name) (\(zone.address)) announces this Spotify account but isn't using it (\(answer)); ignored")
+            }
+            return nil
+        }
+    }
+
+    /// Whether `zone` is really there, as its announcement says, on `fingerprint`. No answer
+    /// within `timeout` is `.silent`.
+    public func ask(_ zone: ZoneListing, fingerprint: String) async -> Answer {
+        await withTaskGroup(of: Answer?.self) { group in
+            group.addTask { await self.answer(zone, fingerprint: fingerprint) }
+            group.addTask {
+                try? await Task.sleep(for: timeout)
+                return nil
+            }
+            let first = await group.next() ?? nil
+            group.cancelAll()
+            return first ?? .silent
+        }
+    }
+
+    private func answer(_ zone: ZoneListing, fingerprint: String) async -> Answer {
+        guard let base = zone.baseURL,
+              let (data, status) = try? await fetch(base.appending(path: "api/zone")) else { return .silent }
+        switch status {
+        case 200:
+            guard let check = try? JSONDecoder().decode(ZoneCheck.self, from: data) else { return .silent }
+            if check.hub != zone.hubID { return .otherHub }
+            return check.spotify == fingerprint ? .there : .otherAccount
+        case 404:
+            // A hub from before `/api/zone`: it answers, so it's there; its snapshot says which hub
+            // it is, and the account is the one it announces.
+            guard let (data, status) = try? await fetch(base.appending(path: "api/state")), status == 200,
+                  let snapshot = try? JSONDecoder.api.decode(PartySnapshot.self, from: data) else { return .silent }
+            return snapshot.hubID == zone.hubID ? .there : .otherHub
+        default:
+            return .silent
+        }
     }
 }
 

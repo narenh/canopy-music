@@ -452,6 +452,10 @@ public protocol HubSetupHandler: AnyObject, Sendable {
     /// default). Returns the check.
     func setSpotifySignInPage(_ typed: String) async -> SpotifyRelay.PageCheck
     func chooseSpotifyDevice(id: String) -> Bool
+    /// Before Continue or Start the music: asks the zones announcing this Spotify account whether
+    /// they're really there (`ZoneProbe`, at most about 2 s), and returns the name of the first one
+    /// that is; nil if none (a stale announcement never blocks). Snapshots follow the answer.
+    func checkSpotifyConflict() async -> String?
     /// Join the zone already using this Spotify account as a display; returns its address.
     func joinSpotifyConflict() -> String?
 }

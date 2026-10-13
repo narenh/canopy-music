@@ -13,6 +13,7 @@ import Testing
         func setSpotifyClientID(_ clientID: String) {}
         func setSpotifySignInPage(_ typed: String) async -> SpotifyRelay.PageCheck { .ok }
         func chooseSpotifyDevice(id: String) -> Bool { true }
+        func checkSpotifyConflict() async -> String? { nil }
         func joinSpotifyConflict() -> String? { nil }
     }
 

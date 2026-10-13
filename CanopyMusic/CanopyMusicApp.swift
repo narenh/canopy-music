@@ -2,23 +2,34 @@ import CanopyMusicCore
 import SwiftUI
 import UIKit
 
-// UIKit lifecycle so the root view controller can lock the scene to landscape. On iPadOS 26+,
-// Info.plist orientations alone don't stop rotation for resizable apps; the root view controller
-// has to ask for the lock (`prefersInterfaceOrientationLocked`).
+// UIKit lifecycle (a scene delegate) so the window scene can be given a minimum size.
 
 @main
 final class AppDelegate: UIResponder, UIApplicationDelegate {
     @MainActor let model = AppModel()
+}
 
-    func application(_ application: UIApplication, supportedInterfaceOrientationsFor window: UIWindow?) -> UIInterfaceOrientationMask {
-        .landscape
+/// Lays `content` out at the landscape size and turns it 90° to fill a portrait screen.
+struct CaptureRotated<Content: View>: View {
+    @ViewBuilder let content: Content
+
+    var body: some View {
+        GeometryReader { geo in
+            content
+                .frame(width: geo.size.height, height: geo.size.width)
+                .rotationEffect(.degrees(90))
+                .position(x: geo.size.width / 2, y: geo.size.height / 2)
+        }
+        .ignoresSafeArea()
+        // The portrait status bar and home indicator would end up on the side once turned.
+        .statusBarHidden()
+        .persistentSystemOverlays(.hidden)
     }
 }
 
 /// `-capture` (debug builds): screenshot mode (no easter-egg takeover, no demo button). In a
-/// portrait simulator (which this Mac can't rotate) iPadOS shows the landscape-only app
-/// letterboxed and scaled down, so take full-resolution landscape screenshots with
-/// `WindowSnapshot` rather than `simctl io screenshot`.
+/// portrait simulator (which this Mac can't rotate) it draws the landscape UI turned 90°, so
+/// `simctl io screenshot` gives full-resolution landscape screenshots once the image is turned back.
 enum Capture {
     static var isOn: Bool {
         #if DEBUG
@@ -28,32 +39,6 @@ enum Capture {
         #endif
     }
 }
-
-#if DEBUG
-/// `xcrun simctl spawn <sim> notifyutil -p com.canopysf.CanopyMusic.snapshot` writes the window,
-/// at full resolution, to Library/Caches/snapshot.png.
-@MainActor enum WindowSnapshot {
-    private static weak var window: UIWindow?
-
-    static func listen(_ window: UIWindow) {
-        self.window = window
-        CFNotificationCenterAddObserver(CFNotificationCenterGetDarwinNotifyCenter(), nil, { _, _, _, _, _ in
-            Task { @MainActor in WindowSnapshot.write() }
-        }, "com.canopysf.CanopyMusic.snapshot" as CFString, nil, .deliverImmediately)
-    }
-
-    private static func write() {
-        guard let window else { return }
-        let bounds = window.bounds
-        let image = UIGraphicsImageRenderer(bounds: bounds).image { _ in
-            window.drawHierarchy(in: bounds, afterScreenUpdates: true)
-        }
-        let url = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask)[0].appendingPathComponent("snapshot.png")
-        try? image.pngData()?.write(to: url)
-        print("[debug] snapshot \(Int(bounds.width))x\(Int(bounds.height)) @\(window.screen.scale)x → \(url.path)")
-    }
-}
-#endif
 
 /// The window can be resized (iPadOS windowing, and on a Mac), but never smaller than the
 /// two-column layouts need.
@@ -120,18 +105,12 @@ final class SceneDelegate: UIResponder, UIWindowSceneDelegate {
         let window = UIWindow(windowScene: windowScene)
         let app = AnyView(RootView(model: model))
         let root = WindowSize.canvas.map { size in AnyView(CanvasScaled(size: size) { app }) } ?? app
-        window.rootViewController = LandscapeHostingController(rootView: root)
+        window.rootViewController = UIHostingController(rootView: Capture.isOn ? AnyView(CaptureRotated { root }) : root)
         window.makeKeyAndVisible()
         self.window = window
-        #if DEBUG
-        WindowSnapshot.listen(window)
-        #endif
     }
 
     func sceneDidBecomeActive(_ scene: UIScene) {
-        if let windowScene = scene as? UIWindowScene {
-            windowScene.requestGeometryUpdate(.iOS(interfaceOrientations: .landscape))
-        }
         // iOS tears down listening sockets while suspended; bring the phone server back.
         if wasBackgrounded {
             wasBackgrounded = false
@@ -143,27 +122,6 @@ final class SceneDelegate: UIResponder, UIWindowSceneDelegate {
 
     func sceneDidEnterBackground(_ scene: UIScene) {
         wasBackgrounded = true
-    }
-}
-
-/// Landscape only, and asks iPadOS to lock rotation once it's in landscape.
-final class LandscapeHostingController<Content: View>: UIHostingController<Content> {
-    override var supportedInterfaceOrientations: UIInterfaceOrientationMask { .landscape }
-
-    override var prefersInterfaceOrientationLocked: Bool {
-        view.window?.windowScene?.effectiveGeometry.interfaceOrientation.isLandscape ?? false
-    }
-
-    override func viewDidAppear(_ animated: Bool) {
-        super.viewDidAppear(animated)
-        setNeedsUpdateOfPrefersInterfaceOrientationLocked()
-    }
-
-    override func viewWillTransition(to size: CGSize, with coordinator: any UIViewControllerTransitionCoordinator) {
-        super.viewWillTransition(to: size, with: coordinator)
-        coordinator.animate(alongsideTransition: nil) { [weak self] _ in
-            self?.setNeedsUpdateOfPrefersInterfaceOrientationLocked()
-        }
     }
 }
 

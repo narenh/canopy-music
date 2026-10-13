@@ -44,13 +44,19 @@ struct PartyView: View {
     var body: some View {
         let theme = ArtworkTheme(current?.track.colors)
         GeometryReader { geo in
+            // Windows wider than 16:10 (a Mac) keep the columns together in the middle, and Up next
+            // stops growing past its width on a 13" iPad; Now Playing takes the rest.
+            let width = min(geo.size.width, geo.size.height * 1.6)
+            let right = min(width * 0.46, 640)
             HStack(spacing: 0) {
                 leftPane
-                    .frame(width: geo.size.width * 0.54)
+                    .frame(width: width - right)
                 rightPane
                     .padding(.vertical, 24)
                     .padding(.trailing, 24)
             }
+            .frame(width: width)
+            .frame(maxWidth: .infinity)
         }
         .background { ThemedBackground(track: current?.track, theme: theme) }
         .overlay { FlightLayer(flights: flights, destinations: rowFrames, fallback: fallbackDestination) }
@@ -99,7 +105,9 @@ struct PartyView: View {
                         if model.hostPIN.isEmpty { _ = model.unlock(pin: "") } else { showUnlock = true }
                     }
                 searchField
+                    .frame(maxWidth: 720)
             }
+            .frame(maxWidth: .infinity, alignment: .leading)
             .padding(.horizontal, 32)
             .padding(.top, 28)
             .padding(.bottom, 12)

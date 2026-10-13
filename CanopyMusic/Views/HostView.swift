@@ -25,10 +25,14 @@ struct HostView: View {
         HStack(spacing: 0) {
             settings
                 .frame(width: 440)
+            // Past a 13" iPad's width (a Mac window) the queue stops growing and both columns
+            // stay together in the middle.
             queuePanel
+                .frame(maxWidth: 900)
                 .padding(.vertical, 24)
                 .padding(.trailing, 24)
         }
+        .frame(maxWidth: .infinity)
         .background { ThemedBackground(track: session.state.current?.track, theme: theme) }
         .environment(\.artworkTheme, theme)
         .preferredColorScheme(.dark)

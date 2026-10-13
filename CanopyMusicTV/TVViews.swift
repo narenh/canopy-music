@@ -120,6 +120,15 @@ struct TVRootView: View {
             try? await Task.sleep(for: .seconds(6))
             model.leave()
         }
+        // `-autoParty`: a new hub loads the first demo playlist and plays, as if a host had
+        // picked it on their phone.
+        .task(id: model.role) {
+            let session = model.session
+            guard model.role == .hub, ProcessInfo.processInfo.arguments.contains("-autoParty"), session.isWaitingForSetup,
+                  let first = try? await session.catalog.libraryPlaylists().first else { return }
+            try? await session.load(playlist: first)
+            try? await session.play()
+        }
         #endif
     }
 
@@ -475,6 +484,8 @@ struct TVPartyView: View {
     @Environment(TVModel.self) private var model
     /// Height of everything in the now-playing column under the artwork, which takes the rest.
     @State private var footerHeight: CGFloat = 200
+    /// The remote's left and right, one at a time.
+    @State private var stepper = RemoteStepper()
     /// The logo's visible top and left margin from the screen edges, level with the capitals in
     /// "Up next". The image has 6.5pt of empty space above the arc and 1pt to its left.
     static let logoInset: CGFloat = 71
@@ -573,6 +584,35 @@ struct TVPartyView: View {
                 .padding(.top, Self.logoInset - 6.5)
                 .padding(.leading, Self.logoInset - 1)
                 .ignoresSafeArea()
+        }
+        // Left and right on the remote: previous and skip. They reach here through "Up next",
+        // which holds focus (it's the only focusable view, so they can't move focus instead).
+        .onMoveCommand(perform: move)
+        #if DEBUG
+        // `-autoStep`: 6 s after the party shows, presses right three times at once, then left
+        // 2 s later (simctl can't press the remote's buttons). Only the first right should go,
+        // and the left goes back to the song before.
+        .task {
+            guard ProcessInfo.processInfo.arguments.contains("-autoStep") else { return }
+            try? await Task.sleep(for: .seconds(6))
+            move(.right)
+            move(.right)
+            move(.left)
+            try? await Task.sleep(for: .seconds(2))
+            move(.left)
+        }
+        #endif
+    }
+
+    /// Previous or skip, as the back and skip buttons elsewhere; ignored while one is still going,
+    /// and on a display while its hub doesn't let displays control playback (`RemoteStepper`).
+    private func move(_ direction: MoveCommandDirection) {
+        guard direction == .left || direction == .right else { return }
+        let forward = direction == .right
+        let session = model.session
+        Task {
+            let went = await stepper.step(session, forward: forward)
+            model.debugLog("remote \(forward ? "right" : "left"): \(went ? "now \(session.state.current?.track.title ?? "-")" : "ignored")")
         }
     }
 }

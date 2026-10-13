@@ -1,0 +1,12 @@
+{
+  "images" : [
+    {
+      "filename" : "front_AppStore_1x_1280x768.png",
+      "idiom" : "tv"
+    }
+  ],
+  "info" : {
+    "author" : "xcode",
+    "version" : 1
+  }
+}

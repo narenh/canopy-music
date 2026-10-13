@@ -602,6 +602,47 @@ struct SkippingCatalog: MusicCatalog {
     }
 }
 
+/// An Apple TV's Apple Music access reaches hosts' pages only, and live.
+@MainActor
+@Suite struct MusicAccessTests {
+    @Test func onlyHostsSeeIt() {
+        let tv = PartySession(catalog: StubCatalog(ids: ["a"]), engine: FakeEngine())
+        tv.configureHub(kind: .tv, zoneName: "Den", serviceName: "Apple Music")
+        tv.hostKey = "secret"
+        tv.musicAccess = .denied
+        #expect(tv.snapshot().musicAccess == nil)
+        #expect(tv.snapshot(hostKey: "wrong").musicAccess == nil)
+        #expect(tv.snapshot(hostKey: "").musicAccess == nil)
+        #expect(tv.snapshot(hostKey: "secret").musicAccess == .denied)
+    }
+
+    @Test func hostListenersHearChangesAndGuestsDont() async {
+        let tv = PartySession(catalog: StubCatalog(ids: ["a"]), engine: FakeEngine())
+        tv.configureHub(kind: .tv, zoneName: "Den", serviceName: "Apple Music")
+        tv.hostKey = "secret"
+        tv.musicAccess = .notDetermined
+        var host = tv.snapshots(hostKey: "secret").makeAsyncIterator()
+        var guest = tv.snapshots().makeAsyncIterator()
+        #expect(await host.next()?.musicAccess == .notDetermined)
+        #expect(await guest.next()?.musicAccess == nil)
+        tv.musicAccess = .ok
+        #expect(await host.next()?.musicAccess == .ok)
+        #expect(await guest.next()?.musicAccess == nil)
+        // A revoked key stops getting it, without reconnecting.
+        tv.hostKey = "new"
+        tv.musicAccess = .error
+        #expect(await host.next()?.musicAccess == nil)
+    }
+
+    @Test func aHostsPageAsksForACheck() {
+        let tv = PartySession(catalog: StubCatalog(ids: ["a"]), engine: FakeEngine())
+        var asked = 0
+        tv.onMusicAccessCheck = { asked += 1 }
+        tv.checkMusicAccess()
+        #expect(asked == 1)
+    }
+}
+
 /// Ending a zone clears the session and its saved queue, so the next zone starts empty.
 @MainActor
 @Suite struct EndZoneTests {

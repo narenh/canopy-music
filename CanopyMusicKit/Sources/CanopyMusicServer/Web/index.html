@@ -70,29 +70,53 @@
   <p class="empty" id="queue-empty" hidden>The queue's empty. Search for something to get it going.</p>
 </main>
 
-<!-- Host: first setup of a zone run by an Apple TV (it has no screens of its own for this). -->
-<!-- Both pickers: everything above the footer scrolls as one (so the list gets the whole screen),
-     the search sticks to the top once the header has gone, and the footer stays put. -->
+<!-- Host: first setup of a zone run by an Apple TV (it has no screens of its own for this), in two
+     pages: the zone and whether the TV can play Apple Music, then the base playlist. -->
+<!-- Each page (and the other picker): everything above the footer scrolls as one, the search
+     sticks to the top once the header has gone (so the list gets the whole screen), and the
+     footer stays put. -->
 <section id="setup" class="sheet picker-sheet" hidden>
-  <div class="picker-scroll" id="setup-scroll">
-    <img class="brand-logo" src="/logo.png" alt="Canopy Music">
-    <h2 class="sheet-title">Set up this zone</h2>
-    <p class="sheet-sub" id="setup-sub">Music will play from your Apple TV. Use Control Center to change audio output.</p>
-    <p class="muted-label">Your name</p>
-    <input class="text-input" id="setup-you" maxlength="24" placeholder="Optional" autocomplete="given-name" enterkeyhint="next">
-    <p class="muted-label" style="margin-top:18px">Zone name</p>
-    <input class="text-input" id="setup-name" maxlength="40" autocomplete="off" enterkeyhint="done">
-    <p class="field-note" id="setup-address" hidden></p>
-    <p class="muted-label" style="margin-top:18px">Base playlist</p>
-    <div class="picker-search"><label class="search-field"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg><input id="setup-search" type="search" placeholder="Find a playlist" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false" enterkeyhint="search"></label></div>
-    <ul class="playlists" id="setup-playlists"></ul>
-    <p class="empty" id="setup-empty" hidden></p>
-    <p class="muted-label picker-catalog-head" id="setup-catalog-head" hidden></p>
-    <ul class="playlists" id="setup-catalog"></ul>
+  <div class="setup-page" id="setup-zone">
+    <div class="picker-scroll" id="setup-zone-scroll">
+      <img class="brand-logo" src="/logo.png" alt="Canopy Music">
+      <h2 class="sheet-title">Set up this zone</h2>
+      <p class="sheet-sub" id="setup-sub">Music will play from your Apple TV. Use Control Center to change audio output.</p>
+      <p class="muted-label">Your name</p>
+      <input class="text-input" id="setup-you" maxlength="24" placeholder="Optional" autocomplete="given-name" enterkeyhint="next">
+      <p class="muted-label" style="margin-top:18px">Zone name</p>
+      <input class="text-input" id="setup-name" maxlength="40" autocomplete="off" enterkeyhint="done">
+      <p class="field-note" id="setup-address" hidden></p>
+      <p class="muted-label" style="margin-top:18px">Music</p>
+      <div class="music-bar" id="setup-music" data-state="checking" aria-live="polite">
+        <img class="music-bar-icon" src="/apple-music.png" alt="">
+        <span class="music-bar-text">
+          <span class="music-bar-title">Apple Music</span>
+          <span class="music-bar-note" id="setup-music-note" hidden></span>
+        </span>
+        <span class="music-bar-state" id="setup-music-state"></span>
+      </div>
+    </div>
+    <div class="picker-foot">
+      <button class="primary-btn wide" id="setup-continue" type="button" disabled><span class="label">Continue</span></button>
+    </div>
   </div>
-  <div class="picker-foot">
-    <label class="picker-shuffle"><span>Shuffle</span><input type="checkbox" class="switch" id="setup-shuffle" checked></label>
-    <button class="primary-btn wide" id="setup-start" type="button" disabled><span class="spinner" hidden></span><span class="label">Start the music</span></button>
+  <div class="setup-page" id="setup-music-page" hidden>
+    <div class="picker-scroll" id="setup-scroll">
+      <h2 class="sheet-title setup-music-title">Base playlist</h2>
+      <p class="sheet-sub">Plays whenever nobody has asked for a song.</p>
+      <div class="picker-search setup-search">
+        <button class="back-btn" id="setup-back" type="button" aria-label="Back"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m15 5-7 7 7 7"/></svg></button>
+        <label class="search-field"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg><input id="setup-search" type="search" placeholder="Find a base playlist" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false" enterkeyhint="search"></label>
+      </div>
+      <ul class="playlists" id="setup-playlists"></ul>
+      <p class="empty" id="setup-empty" hidden></p>
+      <p class="muted-label picker-catalog-head" id="setup-catalog-head" hidden></p>
+      <ul class="playlists" id="setup-catalog"></ul>
+    </div>
+    <div class="picker-foot">
+      <label class="picker-shuffle"><span>Shuffle</span><input type="checkbox" class="switch" id="setup-shuffle" checked></label>
+      <button class="primary-btn wide" id="setup-start" type="button" disabled><span class="spinner" hidden></span><span class="label">Start the music</span></button>
+    </div>
   </div>
 </section>
 

@@ -325,7 +325,7 @@ struct TVZoneListView: View {
             }
             .frame(width: 900)
             if model.authorizationDenied {
-                Text("Canopy Music needs Apple Music access to play here. Turn it on in Settings › Apps › Canopy Music.")
+                Text("Canopy Music needs Apple Music access to play here. Turn it on in Settings › General › Privacy & Security › Media & Apple Music.")
                     .font(.system(size: 24))
                     .foregroundStyle(.orange)
                     .frame(width: 900)

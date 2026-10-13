@@ -600,6 +600,8 @@ private extension HostView {
                         .lineLimit(1)
                 }
             }
+            // The name gets the room before the spacer does (the bar is narrow in portrait).
+            .layoutPriority(1)
             Spacer()
             if session.state.playlistName != nil {
                 Button {
@@ -614,6 +616,7 @@ private extension HostView {
                 .accessibilityLabel("Shuffle playlist")
             }
             Button(session.state.playlistName == nil ? "Choose playlist" : "Change") { showPicker = true }
+                .fixedSize()
                 .buttonStyle(.glass)
                 .tint(.primary)
                 .disabled(!model.isReady)

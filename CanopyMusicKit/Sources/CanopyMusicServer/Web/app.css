@@ -228,8 +228,9 @@ html.sheet-open, html.sheet-open body { overflow: hidden; }
 .sheet.picker-sheet {
   overflow: hidden; display: flex; flex-direction: column; padding: env(safe-area-inset-top) 0 0;
   top: var(--vvt, 0px); bottom: auto; height: 100vh; height: 100dvh; height: var(--vvh, 100dvh);
-  /* While Safari pans for the keyboard the sheet's top can trail the screen's: no page behind it. */
-  box-shadow: 0 -100vh 0 var(--base);
+  /* While Safari pans for the keyboard the sheet can trail the screen's top, and the keyboard's
+     glass bar shows what's below it: the page colour all round, never the party page behind. */
+  box-shadow: 0 0 0 100vh var(--base);
 }
 .sheet.picker-sheet[hidden] { display: none; }
 .picker-scroll {

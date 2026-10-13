@@ -873,7 +873,10 @@
       if (document.activeElement !== event.target) return;
       const scroller = $("setup-scroll");
       const top = target.getBoundingClientRect().top - scroller.getBoundingClientRect().top + scroller.scrollTop;
+      const before = scroller.scrollTop;
       scroller.scrollTo({ top: Math.max(0, top - 8), behavior: "smooth" });
+      const vv = window.visualViewport;
+      setTimeout(() => debugLog(`focus ${event.target.id}: scroll ${Math.round(before)}→${Math.round(top - 8)} now ${Math.round(scroller.scrollTop)} of ${scroller.scrollHeight - scroller.clientHeight} vv=${vv && Math.round(vv.height)}@${vv && Math.round(vv.offsetTop)} inner=${innerHeight} winY=${Math.round(scrollY)}`), 800);
     }, 350);
   });
 

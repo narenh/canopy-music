@@ -71,7 +71,7 @@ public actor CatalogMatchMemory {
     /// Kept in Application Support/catalog-matches.json; in Caches on Apple TV, which doesn't let
     /// apps write Application Support.
     public static let shared = CatalogMatchMemory(
-        url: Self.directory.appending(path: "catalog-matches.json")
+        url: CatalogMatchMemory.directory.appending(path: "catalog-matches.json")
     )
 
     private static var directory: URL {

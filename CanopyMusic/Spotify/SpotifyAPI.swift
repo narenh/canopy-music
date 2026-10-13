@@ -1,3 +1,4 @@
+import CanopyMusicCore
 import Foundation
 import Observation
 
@@ -9,7 +10,13 @@ final class SpotifyAPI {
     let auth: SpotifyAuth
     private(set) var requestCount = 0
     private(set) var rateLimitedCount = 0
+    /// Until when Spotify asked us to hold off (its last 429's `Retry-After`). Background reads
+    /// (polling the player and its queue) wait it out.
+    @ObservationIgnored private(set) var retryAfterUntil = Date.distantPast
     @ObservationIgnored let startedAt = Date()
+
+    var isBackingOff: Bool { Date() < retryAfterUntil }
+    var secondsUntilRetry: Int { max(0, Int(retryAfterUntil.timeIntervalSinceNow.rounded(.up))) }
 
     init(auth: SpotifyAuth) {
         self.auth = auth
@@ -51,6 +58,7 @@ final class SpotifyAPI {
             case 429:
                 rateLimitedCount += 1
                 let retry = Int((response as? HTTPURLResponse)?.value(forHTTPHeaderField: "Retry-After") ?? "") ?? 5
+                retryAfterUntil = max(retryAfterUntil, Date().addingTimeInterval(TimeInterval(retry)))
                 throw SpotifyError.rateLimited(retryAfter: retry)
             // "NO_ACTIVE_DEVICE" (nothing active) or "Device not found" (the chosen device went to sleep).
             case 404 where String(decoding: data, as: UTF8.self).localizedCaseInsensitiveContains("device"):
@@ -121,14 +129,64 @@ struct SpotifyDevice: Decodable, Identifiable, Hashable, Sendable {
     var supports_volume: Bool?
 }
 
+/// A track (or episode) the player is on or has queued. Every field but the URI is optional and
+/// decoded leniently, so podcast episodes, ads and local files still decode.
+struct SpotifyPlayableItem: Decodable, Sendable {
+    struct Artist: Decodable, Sendable { var name: String }
+    struct Album: Decodable, Sendable { var name: String?; var images: [SpotifyImage]? }
+    var uri: String
+    var name: String?
+    var duration_ms: Int?
+    var explicit: Bool?
+    var artists: [Artist]?
+    var album: Album?
+    /// Episodes: the show, and their own images.
+    var show: Album?
+    var images: [SpotifyImage]?
+
+    init(from decoder: any Decoder) throws {
+        enum Keys: String, CodingKey { case uri, name, duration_ms, explicit, artists, album, show, images }
+        let container = try decoder.container(keyedBy: Keys.self)
+        uri = try container.decode(String.self, forKey: .uri)
+        name = try? container.decodeIfPresent(String.self, forKey: .name)
+        duration_ms = try? container.decodeIfPresent(Int.self, forKey: .duration_ms)
+        explicit = try? container.decodeIfPresent(Bool.self, forKey: .explicit)
+        artists = try? container.decodeIfPresent([Artist].self, forKey: .artists)
+        album = try? container.decodeIfPresent(Album.self, forKey: .album)
+        show = try? container.decodeIfPresent(Album.self, forKey: .show)
+        images = try? container.decodeIfPresent([SpotifyImage].self, forKey: .images)
+    }
+
+    /// As Canopy shows it (a foreign track in Now Playing or Up next).
+    var queueTrack: QueueTrack {
+        let images = (album?.images ?? self.images ?? show?.images ?? []).sorted { ($0.width ?? 0) > ($1.width ?? 0) }
+        let artist = artists.map { $0.map(\.name).joined(separator: ", ") } ?? show?.name ?? ""
+        return QueueTrack(
+            id: uri, title: name ?? "", artist: artist, album: album?.name ?? show?.name ?? "",
+            duration: duration_ms.map { Double($0) / 1000 },
+            artworkURL: images.first?.url,
+            thumbnailURL: images.last { ($0.width ?? 0) >= 60 }?.url ?? images.last?.url,
+            isExplicit: explicit ?? false
+        )
+    }
+}
+
+/// `GET /me/player/queue`: what the player will play next, in order. Items that don't decode are
+/// dropped rather than failing the whole read.
+struct SpotifyQueueReply: Decodable, Sendable {
+    var queue: [SpotifyPlayableItem]
+
+    init(from decoder: any Decoder) throws {
+        struct Lossy: Decodable { var item: SpotifyPlayableItem?; init(from decoder: any Decoder) { item = try? SpotifyPlayableItem(from: decoder) } }
+        enum Keys: String, CodingKey { case queue }
+        let container = try decoder.container(keyedBy: Keys.self)
+        queue = ((try? container.decodeIfPresent([Lossy].self, forKey: .queue)) ?? []).compactMap(\.item)
+    }
+}
+
 struct SpotifyPlayerState: Decodable, Sendable {
     struct Device: Decodable, Sendable { var id: String? }
-    /// Only what the engine needs, so podcast episodes, ads or local files still decode.
-    struct Item: Decodable, Sendable {
-        var uri: String
-        var name: String?
-        var duration_ms: Int?
-    }
+    typealias Item = SpotifyPlayableItem
     var is_playing: Bool
     var progress_ms: Int?
     var item: Item?

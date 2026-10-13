@@ -2,18 +2,26 @@ import CanopyMusicCore
 import Foundation
 
 /// Controls playback on a Spotify Connect device (the iPad's Spotify app, an Apple TV…) through
-/// the Web API. Spotify's queue can be added to but not edited, so this engine can't replace a
-/// staged track; `PartySession` stages late and shows the next song as locked.
+/// the Web API. Spotify's player belongs to the account, so this engine follows it rather than
+/// drives it (follow mode, docs/multi-device.md): a track it didn't start or stage is reported as
+/// foreign (`FollowRules`), never treated as "our song ended" and never played over. Spotify's
+/// queue can be added to but not edited, so `PartySession` stages late, confirms the song is in
+/// the queue, and shows the next song as locked.
 @MainActor
-final class SpotifyEngine: PlaybackEngine {
+final class SpotifyEngine: FollowingPlaybackEngine {
     static let deviceDefaultsKey = "spotifyDeviceID"
 
     let canReplaceStaged = false
     var onEvent: (@MainActor (PlaybackEvent) -> Void)?
 
     private let api: SpotifyAPI
+    /// Our song: the one we started, or the staged one Spotify advanced to.
     private var currentURI: String?
+    /// Our song before the last play request; Spotify sometimes stays on it.
+    private var previousURI: String?
     private var stagedURI: String?
+    /// The foreign track reported as playing, if one is.
+    private var foreignURI: String?
     private var pausedByUs = false
     private var reportedEnd = false
     private var lastPlaying: Bool?
@@ -31,6 +39,9 @@ final class SpotifyEngine: PlaybackEngine {
     private var cachedPlaying = false
     private var cachedTime: TimeInterval = 0
     private var cachedAt = Date()
+    /// What Spotify is on as last seen (ours or not), and its length.
+    private(set) var playerTrackID: String?
+    private(set) var playerDuration: TimeInterval?
 
     /// Each poll is one Web API request, so this sets most of the request rate.
     private static let pollInterval: Duration = .seconds(3)
@@ -71,17 +82,35 @@ final class SpotifyEngine: PlaybackEngine {
             try await transferToDevice()
             try await api.send("PUT", "/me/player/play", query: deviceQuery, body: Body(uris: [track.id]))
         }
+        previousURI = currentURI
         currentURI = track.id
+        foreignURI = nil
+        playerTrackID = track.id
+        playerDuration = track.duration
         playRequestedAt = Date()
         retriedPlay = false
         cache(playing: true, time: 0)
     }
 
     func stage(_ track: QueueTrack?) async throws {
-        // Spotify can't remove queued items; a nil stage just means nothing new is queued.
-        guard let track else { return }
-        try await api.send("POST", "/me/player/queue", query: deviceQuery.merging(["uri": track.id]) { $1 })
+        // Spotify can't remove queued items; a nil stage just means we stop expecting ours.
+        guard let track else { stagedURI = nil; return }
+        if api.isBackingOff { throw SpotifyError.rateLimited(retryAfter: api.secondsUntilRetry) }
+        // Expected from now on, even if the request fails: a request that reached Spotify but
+        // whose answer didn't reach us still lands, and is then ours when it plays.
         stagedURI = track.id
+        try await api.send("POST", "/me/player/queue", query: deviceQuery.merging(["uri": track.id]) { $1 })
+    }
+
+    func fetchPlayerQueue() async throws -> [QueueTrack] {
+        if api.isBackingOff { throw SpotifyError.rateLimited(retryAfter: api.secondsUntilRetry) }
+        guard let reply = try await api.get("/me/player/queue", as: SpotifyQueueReply.self) else { return [] }
+        return reply.queue.map(\.queueTrack)
+    }
+
+    func skipInPlayer() async throws {
+        settleUntil = Date().addingTimeInterval(1.5)
+        try await api.send("POST", "/me/player/next", query: deviceQuery)
     }
 
     func resume() async throws {
@@ -143,58 +172,65 @@ final class SpotifyEngine: PlaybackEngine {
     }
 
     private func poll() async {
-        guard api.auth.isSignedIn, currentURI != nil, Date() > settleUntil else { return }
-        let state: SpotifyPlayerState
+        // While Spotify has asked us to hold off (a 429's Retry-After), don't read at all.
+        guard api.auth.isSignedIn, currentURI != nil, Date() > settleUntil, !api.isBackingOff else { return }
+        let state: SpotifyPlayerState?
         do {
-            guard let fetched = try await api.get("/me/player", as: SpotifyPlayerState.self) else {
-                log("poll: no player state (204)")
-                return
-            }
-            state = fetched
+            state = try await api.get("/me/player", as: SpotifyPlayerState.self)
         } catch {
             log("poll failed: \(error)")
             return
         }
         guard Date() > settleUntil else { return }
-        log("poll: \(state.item?.name ?? "nil") \(state.item?.uri ?? "") playing=\(state.is_playing) t=\((state.progress_ms ?? 0) / 1000) | canopy current=\(currentURI ?? "nil") staged=\(stagedURI ?? "nil")")
-        cache(playing: state.is_playing, time: Double(state.progress_ms ?? 0) / 1000)
+        log("poll: \(state?.item?.name ?? "nil") \(state?.item?.uri ?? "") playing=\(state?.is_playing ?? false) t=\((state?.progress_ms ?? 0) / 1000) | ours=\(currentURI ?? "nil") staged=\(stagedURI ?? "nil") foreign=\(foreignURI ?? "nil")")
 
-        if state.is_playing != lastPlaying {
-            lastPlaying = state.is_playing
-            onEvent?(.statusChanged)
+        var observation: FollowRules.Observation?
+        if let state {
+            let duration = state.item?.duration_ms.map { Double($0) / 1000 }
+            cache(playing: state.is_playing, time: Double(state.progress_ms ?? 0) / 1000)
+            playerTrackID = state.item?.uri
+            playerDuration = duration
+            observation = FollowRules.Observation(trackID: state.item?.uri, isPlaying: state.is_playing,
+                                                  position: Double(state.progress_ms ?? 0) / 1000, duration: duration)
+            if state.is_playing != lastPlaying {
+                lastPlaying = state.is_playing
+                onEvent?(.statusChanged)
+            }
         }
 
-        let uri = state.item?.uri
-        // Spotify sometimes ignores a play request (e.g. its app was just waking up). Right
-        // after asking for a track, a mismatch means "retry", not "the song ended".
-        if uri != currentURI, let expected = currentURI, Date().timeIntervalSince(playRequestedAt) < 10 {
-            guard !retriedPlay else { return }
+        let context = FollowRules.Context(
+            ours: currentURI, staged: stagedURI, previous: previousURI,
+            sincePlayRequest: Date().timeIntervalSince(playRequestedAt), retriedPlay: retriedPlay,
+            pausedByUs: pausedByUs, reportedEnd: reportedEnd, reportedForeign: foreignURI
+        )
+        switch FollowRules.step(observation, context) {
+        case .nothing:
+            break
+        case .retryPlay:
+            // Spotify sometimes ignores a play request (e.g. its app was just waking up), and is
+            // idle or still on our previous song: ask once more. Never over someone else's track.
+            guard let expected = currentURI else { return }
             retriedPlay = true
-            log("Spotify is playing \(uri ?? "nothing") instead of \(expected); retrying")
+            log("Spotify is on \(state?.item?.uri ?? "nothing") instead of \(expected); retrying")
             struct Body: Encodable { var uris: [String] }
             settleUntil = Date().addingTimeInterval(2)
             _ = try? await api.send("PUT", "/me/player/play", query: deviceQuery, body: Body(uris: [expected]))
-            return
-        }
-        if uri != currentURI {
-            let previous = currentURI
-            currentURI = uri
-            if let uri, uri == stagedURI {
-                stagedURI = nil
-                reportedEnd = false
-                onEvent?(.advancedToStaged)
-            } else if previous != nil, !reportedEnd {
-                // Spotify moved on to something Canopy didn't stage (autoplay, a stale queue
-                // item, or another controller). Hand control back to Canopy's queue.
-                reportedEnd = true
-                onEvent?(.reachedEnd)
-            }
-            return
-        }
-
-        // Stopped at the end with nothing queued.
-        if !state.is_playing, !pausedByUs, !reportedEnd, stagedURI == nil, let item = state.item,
-           (state.progress_ms ?? 0) == 0 || Double(state.progress_ms ?? 0) >= Double(item.duration_ms ?? 0) - 1500 {
+        case .advancedToStaged:
+            currentURI = state?.item?.uri
+            stagedURI = nil
+            foreignURI = nil
+            reportedEnd = false
+            onEvent?(.advancedToStaged)
+        case .foreign:
+            // Someone else's choice (another zone or app on the account, autoplay): follow it.
+            guard let item = state?.item else { return }
+            log("following \(item.name ?? item.uri): not ours")
+            foreignURI = item.uri
+            onEvent?(.externalTrack(item.queueTrack))
+        case .backToOurs:
+            foreignURI = nil
+            onEvent?(.externalTrack(nil))
+        case .reachedEnd:
             reportedEnd = true
             onEvent?(.reachedEnd)
         }

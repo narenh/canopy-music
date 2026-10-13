@@ -35,6 +35,10 @@ public enum PlaybackEvent: Sendable, Equatable {
     case reachedEnd
     /// Play/pause state changed.
     case statusChanged
+    /// Follow mode (`FollowingPlaybackEngine`): the player is playing a track this session
+    /// didn't start or stage (another app or zone on the account, autoplay), or nil once it's
+    /// back on the session's own song. The session doesn't advance for it (docs/multi-device.md).
+    case externalTrack(QueueTrack?)
 }
 
 /// An engine call that didn't answer within `PartySession.engineCallTimeout`: the player (Apple's
@@ -68,4 +72,20 @@ public protocol PlaybackEngine: AnyObject {
     func seek(to time: TimeInterval)
     /// `duration` nil means the system's default crossfade length.
     func setCrossfade(enabled: Bool, duration: TimeInterval?)
+}
+
+/// A player that belongs to an account other things also control (Spotify): the session follows
+/// what it plays instead of driving it (`FollowRules`, docs/multi-device.md). It can't replace a
+/// staged track, so the session stages late, confirms the song reached the player's queue, and
+/// shows the player's own queue above its Up next.
+@MainActor
+public protocol FollowingPlaybackEngine: PlaybackEngine {
+    /// The track the player is on, as last seen (its URI), and that track's length. From the
+    /// player itself, so it's right even while the session's current song is a step behind.
+    var playerTrackID: String? { get }
+    var playerDuration: TimeInterval? { get }
+    /// The player's own queue, read now, in the order it will play. Throws when it can't be read.
+    func fetchPlayerQueue() async throws -> [QueueTrack]
+    /// Moves the player on to the next item in its own queue, whoever put it there.
+    func skipInPlayer() async throws
 }

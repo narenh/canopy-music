@@ -70,6 +70,17 @@ public struct PartySnapshot: Codable, Equatable, Sendable {
     /// that sees a new epoch takes that snapshot whatever its version, since the counter started
     /// over. nil from older hubs: versions are compared as before.
     public var epoch: String?
+
+    // Follow mode (Spotify zones, docs/multi-device.md). Optional so older peers ignore them.
+    /// What the player is actually playing when it isn't one of this queue's songs (another app
+    /// or zone on the account, autoplay). Now Playing shows it, with no requester; `current`
+    /// stays underneath until the player reaches the queue's next song. nil otherwise.
+    public var externalCurrent: QueueItem?
+    /// Songs in the player's own queue that Canopy didn't put there and that play before its
+    /// next song: read-only, at the top of Up next. nil when there are none.
+    public var foreignUpcoming: [QueueItem]?
+    /// Something the host should know, e.g. "Couldn't queue the next song on Spotify". nil when fine.
+    public var playerIssue: String?
 }
 
 /// Owns the queue and keeps the player in step with it. Both the iPad UI and the phone server
@@ -156,6 +167,31 @@ public final class PartySession {
     @ObservationIgnored public var onSongStarted: (@MainActor () -> Void)?
     public let catalog: any MusicCatalog
     @ObservationIgnored public let engine: any PlaybackEngine
+
+    // MARK: Follow mode state (docs/multi-device.md)
+
+    /// Follow mode: what the player is playing when it isn't one of this queue's songs. Canopy's
+    /// own `state.current` stays underneath, unchanged, until the player reaches our next song.
+    public private(set) var externalCurrent: QueueItem?
+    /// Follow mode: songs in the player's own queue that will play before Canopy's next song.
+    public private(set) var foreignUpcoming: [QueueItem] = []
+    /// Something the host should see, e.g. "Couldn't queue the next song on Spotify".
+    public private(set) var playerIssue: String?
+    /// What Now Playing shows: what the player is actually playing.
+    public var nowPlaying: QueueItem? { externalCurrent ?? state.current }
+    /// The engine, when it's one this session follows rather than drives (hub only).
+    private var follower: (any FollowingPlaybackEngine)? {
+        remote == nil ? engine as? any FollowingPlaybackEngine : nil
+    }
+    @ObservationIgnored var followTiming = FollowTiming()
+    /// Counts up to call off the staging run in flight (the track changed, the zone ended).
+    @ObservationIgnored private var stagingRun = 0
+    @ObservationIgnored private var stagingTask: Task<Void, Never>?
+    /// The staged item was seen in the player's queue (or the player took it without error and
+    /// its queue couldn't be read).
+    @ObservationIgnored private var stagedConfirmed = false
+    /// Staging gave up for this track: nothing more is tried until our next song plays.
+    @ObservationIgnored private var gaveUpStaging = false
 
     @ObservationIgnored private var stagedItemID: UUID?
     /// Tail of the serial chain of engine operations (see `serially`).
@@ -244,6 +280,9 @@ public final class PartySession {
         screensaverWhilePlaying = snapshot.screensaverWhilePlaying ?? false
         guestAddress = snapshot.address
         lanAddress = snapshot.lanAddress
+        externalCurrent = snapshot.externalCurrent
+        foreignUpcoming = snapshot.foreignUpcoming ?? []
+        playerIssue = snapshot.playerIssue
         // Only displays' snapshots carry it (not `/api/state`, read after a refused edit).
         if let hubWifi = snapshot.wifi { wifi = hubWifi }
     }
@@ -308,6 +347,7 @@ public final class PartySession {
         isPlaying = false
         skippedOnLoad = []
         displays = []
+        resetFollow(keepPlayerQueue: false)
         state.clear()
         broadcast()
         if let storeURL { try? FileManager.default.removeItem(at: storeURL) }
@@ -318,6 +358,8 @@ public final class PartySession {
     /// a chained engine call that finishes later changes nothing, and nothing outlives it.
     public func shutdown() {
         generation += 1
+        stagingRun += 1
+        stagingTask = nil
         if remote == nil {
             engine.pause()
             isPlaying = false
@@ -397,6 +439,8 @@ public final class PartySession {
         loadedItemID = nil
         isPlaying = false
         skippedOnLoad = skipped
+        // The player's own queue is still there and plays first; the rest starts over.
+        resetFollow(keepPlayerQueue: true)
         mutate {
             $0.load(playlist: tracks, name: playlist.name)
             if shuffled { $0.shufflePlaylist() }
@@ -494,6 +538,7 @@ public final class PartySession {
         }
         let wasPlaying = engine.isPlaying
         stagedItemID = nil
+        cancelStaging()
         mutate { $0.goBack() }
         if wasPlaying, let current = state.current {
             try? await play(current)
@@ -527,12 +572,22 @@ public final class PartySession {
 
     private func skipNow() async {
         let wasPlaying = engine.isPlaying
+        // Follow mode: the player's own queue is what Up next shows first, so skip goes there.
+        // With nothing of the player's queued, skip moves Canopy's queue on as usual (which also
+        // takes back a player that's been following someone else).
+        if wasPlaying, follower != nil, !foreignUpcoming.isEmpty {
+            let generation = generation
+            _ = try? await timed("skipInPlayer") { try await self.follower?.skipInPlayer() }
+            guard generation == self.generation else { engine.pause(); return }
+            return
+        }
         if wasPlaying, stagedItemID != nil {
             let generation = generation
             let skipped = (try? await timed("skipToStaged") { try await self.engine.skipToStaged() }) != nil
             guard generation == self.generation else { engine.pause(); return }
             if skipped { return }
         }
+        cancelStaging()
         mutate { $0.advance() }
         if wasPlaying, let current = state.current { try? await play(current) }
     }
@@ -666,7 +721,10 @@ public final class PartySession {
             skippedTitles: skippedOnLoad.isEmpty ? nil : skippedOnLoad.prefix(Self.skippedTitlesInSnapshots).map(\.title),
             screensaverWhilePlaying: hubKind == .tv ? screensaverWhilePlaying : nil,
             wifi: includingWifi ? wifi : nil,
-            epoch: epoch
+            epoch: epoch,
+            externalCurrent: externalCurrent,
+            foreignUpcoming: foreignUpcoming.isEmpty ? nil : foreignUpcoming,
+            playerIssue: playerIssue
         )
     }
 
@@ -700,6 +758,8 @@ public final class PartySession {
     private func play(_ item: QueueItem) async throws {
         stagedItemID = nil
         loadedItemID = item.id
+        // A new song of ours: any staging for the old one is off.
+        cancelStaging()
         let generation = generation
         do {
             try await timed("play") { try await self.engine.play(item.track) }
@@ -719,6 +779,12 @@ public final class PartySession {
         onSongStarted?()
         recordPlayed(item)
         isPlaying = engine.isPlaying
+        if follower != nil {
+            // The player is on our song now.
+            externalCurrent = nil
+            playerIssue = nil
+            readPlayerQueueSoon()
+        }
         broadcast()
         Task { await syncStaging() }
     }
@@ -785,10 +851,23 @@ public final class PartySession {
     private func handle(_ event: PlaybackEvent) {
         switch event {
         case .advancedToStaged:
-            let id = stagedItemID
+            var id = stagedItemID
+            if id == nil, let follower {
+                // Staged but not yet confirmed (or confirmation failed and the song got there
+                // anyway): the item the player is actually on.
+                let playing = follower.playerTrackID
+                id = (state.upNext.first { $0.id == state.lockedNextID && $0.track.id == playing }
+                      ?? state.upNext.first { $0.track.id == playing })?.id
+            }
             stagedItemID = nil
+            if follower != nil {
+                cancelStaging()
+                externalCurrent = nil
+                playerIssue = nil
+            }
             mutate { $0.advance(to: id) }
             loadedItemID = state.current?.id
+            if follower != nil { readPlayerQueueSoon() }
             // Nothing current (the zone ended as the player moved on): nothing started.
             guard state.current != nil else { return }
             onSongStarted?()
@@ -796,6 +875,10 @@ public final class PartySession {
         case .reachedEnd:
             stagedItemID = nil
             loadedItemID = nil
+            if follower != nil {
+                cancelStaging()
+                externalCurrent = nil
+            }
             mutate { $0.advance() }
             if let current = state.current {
                 Task { try? await serially { try? await self.play(current) } }
@@ -803,8 +886,236 @@ public final class PartySession {
         case .statusChanged:
             isPlaying = engine.isPlaying
             broadcast()
+        case .externalTrack(let track):
+            guard follower != nil else { return }
+            followExternal(track)
         }
     }
+
+    // MARK: Follow mode (docs/multi-device.md)
+
+    /// The player moved to a track that isn't ours (or back to ours, `nil`). Canopy's queue stays
+    /// where it is: no advance, no play. A foreign track that plays goes in the party log with
+    /// no requester.
+    private func followExternal(_ track: QueueTrack?) {
+        guard let track else {
+            guard externalCurrent != nil else { return }
+            externalCurrent = nil
+            broadcast()
+            readPlayerQueueSoon()
+            return
+        }
+        guard externalCurrent?.track.id != track.id else { return }
+        // The row it had in the player's queue becomes Now Playing.
+        let item = foreignUpcoming.first { $0.track.id == track.id } ?? QueueItem(track: track, requester: nil)
+        foreignUpcoming.removeAll { $0.id == item.id }
+        externalCurrent = item
+        recordPlayed(item)
+        broadcast()
+        readPlayerQueueSoon()
+    }
+
+    /// Calls off the staging run in flight (our song changed, the zone ended or started over).
+    private func cancelStaging() {
+        stagingRun += 1
+        stagingTask = nil
+        stagedConfirmed = false
+        gaveUpStaging = false
+    }
+
+    private func resetFollow(keepPlayerQueue: Bool) {
+        cancelStaging()
+        externalCurrent = nil
+        playerIssue = nil
+        if !keepPlayerQueue { foreignUpcoming = [] }
+    }
+
+    private func followLog(_ message: @autoclosure () -> String) {
+        #if DEBUG
+        print("[follow] \(message())")
+        #endif
+    }
+
+    /// Reads the player's queue, updates the foreign songs shown above Up next, and says whether
+    /// `confirming` (default: the staged item) is in it; nil when the queue couldn't be read.
+    /// Called when the track changes, right after staging, and for the confirmation before the
+    /// end; never on a timer. A staged song that has gone from the queue (someone cleared it, a
+    /// new context) is staged again, under the same rules.
+    @discardableResult
+    private func refreshPlayerQueue(confirming: QueueItem? = nil) async -> Bool? {
+        guard let follower else { return nil }
+        let generation = generation
+        let queue: [QueueTrack]
+        do {
+            queue = try await follower.fetchPlayerQueue()
+        } catch {
+            followLog("couldn't read the player's queue: \(error)")
+            return nil
+        }
+        guard generation == self.generation else { return nil }
+        let target = confirming ?? state.upNext.first { $0.id == stagedItemID }
+            ?? state.upNext.first { $0.id == state.lockedNextID }
+        let (foreign, queued) = FollowRules.foreignUpcoming(in: queue, staged: target?.track.id)
+        setForeignUpcoming(foreign)
+        if confirming == nil, stagedConfirmed, !queued, let staged = target, stagingTask == nil,
+           follower.playerTrackID != staged.track.id {
+            followLog("\(staged.track.title) has gone from the player's queue; staging it again")
+            stagedItemID = nil
+            stagedConfirmed = false
+            startStaging(staged.id)
+        }
+        return queued
+    }
+
+    private func readPlayerQueueSoon() {
+        Task { await refreshPlayerQueue(confirming: nil) }
+    }
+
+    /// The player's foreign songs, keeping each one's row ID while it stays (so rows don't
+    /// rebuild or jump on every read).
+    private func setForeignUpcoming(_ tracks: [QueueTrack]) {
+        var pool = foreignUpcoming
+        let items = tracks.map { track in
+            if let index = pool.firstIndex(where: { $0.track.id == track.id }) { return pool.remove(at: index) }
+            return QueueItem(track: track, requester: nil)
+        }
+        guard items != foreignUpcoming else { return }
+        foreignUpcoming = items
+        broadcast()
+    }
+
+    /// Seconds left in what the player is playing (ours or not); nil when unknown.
+    private var playerRemaining: TimeInterval? {
+        guard let duration = follower?.playerDuration else { return nil }
+        return duration - engine.currentTime
+    }
+
+    /// Once a second: lock and stage the next song `lead` seconds before our song ends. Only while
+    /// the player is on our current song (its URI, not just the session's idea of it), timed by
+    /// the player's own position and length: right after a song change the position can still
+    /// be the last song's, which locked the next song at the start of a track.
+    private func followTick() {
+        guard let follower, stagingTask == nil, !gaveUpStaging, stagedItemID == nil, externalCurrent == nil,
+              let current = state.current, loadedItemID == current.id,
+              follower.playerTrackID == current.track.id,
+              let duration = follower.playerDuration ?? current.track.duration,
+              duration - engine.currentTime < followTiming.lead,
+              let first = state.upNext.first else { return }
+        startStaging(first.id)
+    }
+
+    private func startStaging(_ id: UUID) {
+        stagingRun += 1
+        let run = stagingRun
+        if state.lockedNextID != id, state.upNext.first?.id == id { mutate { $0.lockNext() } }
+        stagingTask = Task { [weak self] in
+            await self?.runStaging(firstID: id, run: run)
+            if let self, self.stagingRun == run { self.stagingTask = nil }
+        }
+    }
+
+    private func isCurrent(_ run: Int, _ generation: Int) -> Bool {
+        stagingRun == run && self.generation == generation
+    }
+
+    /// The staging state machine: stage the locked song (retrying), confirm it's in the player's
+    /// queue by `confirmBy` seconds before the end; else lock the song below it and do the same
+    /// (by `fallbackConfirmBy`); else give up for this track and say so.
+    private func runStaging(firstID: UUID, run: Int) async {
+        let generation = generation
+        guard let first = state.upNext.first(where: { $0.id == firstID }) else { return }
+        if await attempt(first, confirmBy: followTiming.confirmBy, run: run, generation: generation) { return }
+        guard isCurrent(run, generation) else { return }
+        guard let next = mutate({ $0.lockInstead(of: firstID) }) else {
+            giveUpStaging([first])
+            return
+        }
+        followLog("\(first.track.title) isn't in the player's queue; trying \(next.track.title) instead")
+        if await attempt(next, confirmBy: followTiming.fallbackConfirmBy, run: run, generation: generation) { return }
+        guard isCurrent(run, generation) else { return }
+        giveUpStaging([first, next])
+    }
+
+    /// Stages `item` and confirms it. True once it's confirmed.
+    private func attempt(_ item: QueueItem, confirmBy: TimeInterval, run: Int, generation: Int) async -> Bool {
+        let posted = await stageWithRetries(item, run: run, generation: generation)
+        guard isCurrent(run, generation) else { return false }
+        if posted, await refreshPlayerQueue(confirming: item) ?? true {
+            // Seen in the queue (or the player took it and its queue couldn't be read).
+            return confirmStaged(item, run: run, generation: generation)
+        }
+        guard isCurrent(run, generation) else { return false }
+        // Not seen yet: look again by `confirmBy` seconds before the end.
+        while isCurrent(run, generation), let remaining = playerRemaining, remaining > confirmBy {
+            try? await Task.sleep(for: .seconds(followTiming.tick))
+        }
+        guard isCurrent(run, generation) else { return false }
+        if await refreshPlayerQueue(confirming: item) ?? posted {
+            return confirmStaged(item, run: run, generation: generation)
+        }
+        followLog("\(item.track.title) isn't in the player's queue \(Int(confirmBy)) s before the end")
+        return false
+    }
+
+    private func confirmStaged(_ item: QueueItem, run: Int, generation: Int) -> Bool {
+        guard isCurrent(run, generation) else { return false }
+        stagedItemID = item.id
+        stagedConfirmed = true
+        if playerIssue != nil { playerIssue = nil; broadcast() }
+        followLog("\(item.track.title) is in the player's queue")
+        return true
+    }
+
+    /// Hands `item` to the player, retrying after each of `retryDelays`. True when it took it.
+    private func stageWithRetries(_ item: QueueItem, run: Int, generation: Int) async -> Bool {
+        for (attempt, delay) in ([0] + followTiming.retryDelays).enumerated() {
+            if delay > 0 { try? await Task.sleep(for: .seconds(delay)) }
+            guard isCurrent(run, generation) else { return false }
+            let took = (try? await serially { () -> Bool in
+                guard self.isCurrent(run, generation) else { return false }
+                do {
+                    try await self.timed("stage") { try await self.engine.stage(item.track) }
+                    return true
+                } catch {
+                    self.followLog("stage \(item.track.title) failed (try \(attempt + 1)): \(error)")
+                    return false
+                }
+            }) ?? false
+            if took { return true }
+        }
+        return false
+    }
+
+    /// Neither song could be queued on the player: stop trying for this track, log it, and tell
+    /// the host. The player then does whatever it does next, and is followed.
+    private func giveUpStaging(_ tried: [QueueItem]) {
+        gaveUpStaging = true
+        stagedItemID = nil
+        stagedConfirmed = false
+        mutate { $0.unlockNext() }
+        playerIssue = "Couldn't queue the next song on \(serviceName ?? "the player")"
+        let error = FollowStagingError(titles: tried.map(\.track.title))
+        ErrorReport.log(error, context: "follow: gave up staging; the player picks what plays next")
+        followLog("gave up: \(error.localizedDescription)")
+        broadcast()
+        // The player keeps what it has; we just stop expecting our song there.
+        Task { try? await serially { try? await self.timed("stage") { try await self.engine.stage(nil) } } }
+    }
+
+    #if DEBUG
+    /// `-fakeSpotifyFollow` (debug builds): poses follow mode's state on any engine, so the UI can
+    /// be seen without Spotify: a foreign track playing, the player's own queue, our next song
+    /// locked, and optionally the host's issue line.
+    public func debugPoseFollow(external: QueueTrack?, foreign: [QueueTrack], issue: String? = nil) {
+        guard remote == nil else { return }
+        if externalCurrent?.track.id != external?.id {
+            externalCurrent = external.map { QueueItem(track: $0, requester: nil) }
+        }
+        setForeignUpcoming(foreign)
+        playerIssue = issue
+        if state.lockedNextID == nil, !state.upNext.isEmpty { mutate { $0.lockNext() } } else { broadcast() }
+    }
+    #endif
 
     /// Makes the engine's staged track match the queue. Calls are coalesced so only one runs at a time.
     func syncStaging() async {
@@ -820,8 +1131,9 @@ public final class PartySession {
 
     /// Makes the engine's staged track match `upNext.first` (or the locked item).
     private func stageIfNeeded() async {
-        // Only stage behind a song the engine actually has loaded.
-        guard let current = state.current, loadedItemID == current.id else { return }
+        // Only stage behind a song the engine actually has loaded. A followed player is staged
+        // by its own state machine (`followTick`).
+        guard follower == nil, let current = state.current, loadedItemID == current.id else { return }
         let desired: QueueItem?
         if engine.canReplaceStaged {
             desired = state.upNext.first
@@ -847,8 +1159,12 @@ public final class PartySession {
     private func startLateStagingTicker() {
         tickTask = Task { [weak self] in
             while !Task.isCancelled {
-                try? await Task.sleep(for: .seconds(1))
+                try? await Task.sleep(for: .seconds(self?.followTiming.tick ?? 1))
                 guard let self else { return }
+                if self.follower != nil {
+                    self.followTick()
+                    continue
+                }
                 guard self.stagedItemID == nil, let duration = self.state.current?.track.duration,
                       duration - self.engine.currentTime < Self.lateStageLead,
                       !self.state.upNext.isEmpty else { continue }

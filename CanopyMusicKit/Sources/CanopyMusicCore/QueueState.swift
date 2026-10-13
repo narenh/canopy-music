@@ -250,6 +250,19 @@ public struct QueueState: Codable, Equatable, Sendable {
         version += 1
     }
 
+    /// Follow mode: the locked song `failed` couldn't be handed to the player, so the song right
+    /// below it goes first and is locked instead; `failed` stays just below it, for the next
+    /// transition. Returns the newly locked item, or nil when there's nothing below `failed`.
+    @discardableResult
+    public mutating func lockInstead(of failed: UUID) -> QueueItem? {
+        guard let index = upNext.firstIndex(where: { $0.id == failed }), upNext.indices.contains(index + 1) else { return nil }
+        let next = upNext.remove(at: index + 1)
+        upNext.insert(next, at: 0)
+        lockedNextID = next.id
+        version += 1
+        return next
+    }
+
     public mutating func unlockNext() {
         guard lockedNextID != nil else { return }
         lockedNextID = nil

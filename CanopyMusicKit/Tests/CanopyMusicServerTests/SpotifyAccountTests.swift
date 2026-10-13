@@ -39,6 +39,17 @@ struct SpotifyAccountTests {
         #expect(blank.spotifyAccount == nil)
     }
 
+    /// Apple TV hubs play Spotify too, and announce the account the same way.
+    @Test func aTVZoneOnTheAccountCounts() throws {
+        let mine = SpotifyAccount.fingerprint(userID: "me")
+        let tv = try roundTrip(["name": "Bedroom TV", "kind": "tv", "addr": "10.0.1.7", "hub": "tv-1", ZoneService.spotifyAccountKey: mine])
+        #expect(tv.kind == .tv && tv.spotifyAccount == mine)
+        #expect(ZoneListing.usingSpotifyAccount(mine, in: [tv], ownHubID: "ipad-1") == tv)
+        // …and a TV checks iPad zones (and other TVs) before starting its own.
+        let ipad = try roundTrip(["name": "Den", "kind": "ipad", "addr": "10.0.1.5", "hub": "ipad-1", ZoneService.spotifyAccountKey: mine])
+        #expect(ZoneListing.usingSpotifyAccount(mine, in: [ipad, tv], ownHubID: "tv-1") == ipad)
+    }
+
     @Test func findsAnotherZoneOnTheAccount() {
         let mine = SpotifyAccount.fingerprint(userID: "me")
         let theirs = SpotifyAccount.fingerprint(userID: "them")

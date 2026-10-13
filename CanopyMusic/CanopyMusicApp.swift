@@ -317,17 +317,8 @@ struct RootView: View {
             // Held for as long as this session lasts (the demo player moving on would clear it).
             if args.contains("-fakeSpotifyFollow"), model.isDemo {
                 let session = model.session
-                let colors = { (bg: String, sec: String) in ArtworkColors(background: bg, primary: "#FFFFFF", secondary: sec) }
-                let external = QueueTrack(id: "spotify:track:fake-external", title: "Espresso", artist: "Sabrina Carpenter",
-                                          album: "Short n' Sweet", duration: 175, colors: colors("#5A3A1E", "#E8B07A"))
-                let foreign = [
-                    QueueTrack(id: "spotify:track:fake-q1", title: "Good Luck, Babe!", artist: "Chappell Roan", duration: 218, colors: colors("#7A1F3D", "#F29BB8")),
-                    QueueTrack(id: "spotify:track:fake-q2", title: "Birds of a Feather", artist: "Billie Eilish", duration: 210, colors: colors("#1E3A5A", "#8CB8E8")),
-                ]
-                let issue = args.contains("-fakeSpotifyIssue") ? "Couldn't queue the next song on Spotify" : nil
                 while model.session === session {
-                    session.serviceName = "Spotify"
-                    session.debugPoseFollow(external: external, foreign: foreign, issue: issue)
+                    session.debugPoseSpotifyFollow(issue: args.contains("-fakeSpotifyIssue"))
                     try? await Task.sleep(for: .seconds(1))
                 }
             }

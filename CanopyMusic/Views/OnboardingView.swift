@@ -153,6 +153,9 @@ struct SpotifySetupStep: View {
     @Environment(AppModel.self) private var model
     @State private var clientID = SpotifyConfig.clientID
     @State private var working = false
+    /// Advanced: the user's own sign-in page. Open from the start if one is set.
+    @State private var showsAdvanced = SpotifyConfig.ownSignInPage != nil
+    @State private var signInPageUsable = true
     let back: () -> Void
     let done: () -> Void
 
@@ -173,7 +176,9 @@ struct SpotifySetupStep: View {
 
             VStack(alignment: .leading, spacing: 12) {
                 step(1, "Create an app at developer.spotify.com/dashboard (log in with your Premium account).")
-                step(2, "Set the redirect URI to `canopy-music://spotify-callback` and check the `Web API` box.")
+                step(2, "In the app's settings, add this Redirect URI and check **Web API**:") {
+                    RedirectURIRow(uri: model.spotifyRedirectURI)
+                }
                 step(3, "Copy the app's Client ID and paste it below.")
                 Link("Full instructions on GitHub", destination: Self.readme)
                     .font(.system(size: 15, weight: .semibold))
@@ -181,13 +186,47 @@ struct SpotifySetupStep: View {
             }
             .frame(maxWidth: 560, alignment: .leading)
 
-            TextField("", text: $clientID, prompt: Text("Client ID").foregroundStyle(.white.opacity(0.4)))
-                .font(.system(size: 20).monospaced())
-                .textInputAutocapitalization(.never)
-                .autocorrectionDisabled()
-                .padding(.horizontal, 22)
-                .frame(width: 560, height: 56)
-                .glassEffect(.regular.interactive(), in: Capsule())
+            SpotifyRedirectNotice()
+
+            VStack(spacing: 14) {
+                TextField("", text: $clientID, prompt: Text("Client ID").foregroundStyle(.white.opacity(0.4)))
+                    .font(.system(size: 20).monospaced())
+                    .textInputAutocapitalization(.never)
+                    .autocorrectionDisabled()
+                    .padding(.horizontal, 22)
+                    .frame(width: 560, height: 56)
+                    .glassEffect(.regular.interactive(), in: Capsule())
+
+                // Quiet: only for people who host their own copy of the sign-in page.
+                Button {
+                    withAnimation(.easeInOut(duration: 0.25)) { showsAdvanced.toggle() }
+                } label: {
+                    HStack(spacing: 5) {
+                        Text("Advanced")
+                        Image(systemName: "chevron.right")
+                            .font(.system(size: 12, weight: .semibold))
+                            .rotationEffect(.degrees(showsAdvanced ? 90 : 0))
+                    }
+                    .font(.system(size: 15, weight: .semibold))
+                    .foregroundStyle(.white.opacity(0.6))
+                    .frame(width: 560, alignment: .leading)
+                    .padding(.leading, 44)
+                }
+                .buttonStyle(.plain)
+                .accessibilityValue(showsAdvanced ? "Shown" : "Hidden")
+
+                if showsAdvanced {
+                    VStack(alignment: .leading, spacing: 6) {
+                        Text("Spotify sign-in page")
+                            .font(.system(size: 14, weight: .semibold))
+                            .foregroundStyle(.white.opacity(0.6))
+                            .padding(.leading, 20)
+                        SpotifySignInPageField(isUsable: $signInPageUsable)
+                    }
+                    .frame(width: 560)
+                    .transition(.opacity.combined(with: .move(edge: .top)))
+                }
+            }
 
             HStack(spacing: 16) {
                 Button("Back", action: back)
@@ -207,22 +246,34 @@ struct SpotifySetupStep: View {
                 }
                 .buttonStyle(.glassProminent)
                 .controlSize(.large)
-                .disabled(clientID.trimmingCharacters(in: .whitespaces).isEmpty || working)
+                // Sign-in stays off until the sign-in page is good (or the default).
+                .disabled(clientID.trimmingCharacters(in: .whitespaces).isEmpty || working || (showsAdvanced && !signInPageUsable))
             }
         }
         .padding(40)
+        #if DEBUG
+        // `-spotifyAdvanced`: opens Advanced (the simulator can't be tapped from here).
+        .onAppear { if ProcessInfo.processInfo.arguments.contains("-spotifyAdvanced") { showsAdvanced = true } }
+        #endif
     }
 
-    /// `text` is Markdown, so `code` spans render monospaced.
+    /// `text` is Markdown, so `code` spans render monospaced and `**` bold.
     private func step(_ number: Int, _ text: LocalizedStringKey) -> some View {
+        step(number, text) { EmptyView() }
+    }
+
+    private func step(_ number: Int, _ text: LocalizedStringKey, @ViewBuilder below: () -> some View) -> some View {
         HStack(alignment: .firstTextBaseline, spacing: 14) {
             Text("\(number)")
                 .font(.system(size: 15, weight: .bold))
                 .frame(width: 22, height: 22)
                 .background(.white.opacity(0.15), in: Circle())
-            Text(text)
-                .font(.system(size: 17))
-                .foregroundStyle(.white.opacity(0.8))
+            VStack(alignment: .leading, spacing: 8) {
+                Text(text)
+                    .font(.system(size: 17))
+                    .foregroundStyle(.white.opacity(0.8))
+                below()
+            }
         }
     }
 }

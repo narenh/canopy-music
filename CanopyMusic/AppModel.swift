@@ -51,6 +51,14 @@ final class AppModel {
     let spotifyAuth: SpotifyAuth
     /// Mirrors `SpotifyConfig.clientID` so views update when it's entered.
     private(set) var spotifyClientID = SpotifyConfig.clientID
+    /// Mirrors `SpotifyConfig.ownSignInPage`: the user's own Spotify sign-in page, nil for the default.
+    private(set) var spotifyOwnSignInPage = SpotifyConfig.ownSignInPage
+    /// The redirect URI to register: the sign-in page in use.
+    var spotifyRedirectURI: String { spotifyOwnSignInPage ?? SpotifyRelay.defaultPage }
+    /// The last sign-in's sheet was closed without an answer. Spotify may have shown its own
+    /// error page there (an unregistered redirect URI), which the app can't see, so the sign-in
+    /// step says what to check.
+    private(set) var spotifySignInClosed = false
     let spotifyAPI: SpotifyAPI
     /// The Spotify Connect device to play on, by id (the iPad's Spotify app, an Apple TV…).
     var spotifyDeviceID: String? {
@@ -475,11 +483,22 @@ final class AppModel {
         spotifyDisplayName = nil
     }
 
+    /// The Spotify sign-in page setting (nil: the default). Changing it keeps the current
+    /// sign-in: only new sign-ins use it.
+    func setSpotifySignInPage(_ page: String?) {
+        SpotifyConfig.setOwnSignInPage(page)
+        spotifyOwnSignInPage = SpotifyConfig.ownSignInPage
+    }
+
     func signInToSpotify() async {
+        spotifySignInClosed = false
         do {
             try await spotifyAuth.signIn()
             await refreshSpotifyProfile()
         } catch SpotifyError.signInCancelled {
+            // "Cancel" on Spotify's own page: nothing to say.
+        } catch SpotifyError.signInClosed {
+            spotifySignInClosed = true
         } catch {
             errorMessage = error.localizedDescription
         }

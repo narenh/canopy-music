@@ -27,7 +27,6 @@ struct PartyView: View {
     @State private var toast: Announcement?
     @State private var toastTask: Task<Void, Never>?
     @State private var showUnlock = false
-    @State private var showLeave = false
 
     /// What the search field says it searches: the hub's service on a display.
     private var searchServiceName: String {
@@ -82,11 +81,6 @@ struct PartyView: View {
         }
         .onChange(of: session.state.upNext.map(\.id)) { old, new in flashPhoneRequests(old: old, new: new) }
         .sheet(isPresented: $showUnlock) { UnlockView() }
-        .confirmationDialog(model.displayedZone?.name ?? "Zone", isPresented: $showLeave, titleVisibility: .visible) {
-            Button("Leave \(model.displayedZone?.name ?? "zone")", role: .destructive) { model.leaveZone() }
-        } message: {
-            Text("Showing \(model.displayedZone?.kind == .tv ? "the Apple TV's" : "an iPad's") zone. Music plays there.")
-        }
         .overlay { DisplayConnectionOverlay() }
         #if DEBUG
         .task { await runAutoSearch() }
@@ -102,8 +96,9 @@ struct PartyView: View {
             HStack(spacing: 18) {
                 LogoView(height: 34)
                     .onLongPressGesture(minimumDuration: 1.5) {
-                        // A display has no host mode; it can only leave the zone.
-                        if model.isDisplay { showLeave = true; return }
+                        // A display has no host mode: it leaves the zone (nothing is lost, so no
+                        // confirmation; the zone carries on on its hub).
+                        if model.isDisplay { model.leaveZone(); return }
                         // No PIN set: go straight back to host mode, no keypad.
                         if model.hostPIN.isEmpty { _ = model.unlock(pin: "") } else { showUnlock = true }
                     }

@@ -287,6 +287,50 @@ html.sheet-open, html.sheet-open body { overflow: hidden; }
 /* A problem: the note explains it, so the bar lines up at the top. */
 .music-bar[data-state="problem"] { align-items: flex-start; }
 .music-bar[data-state="problem"] .music-bar-state { margin-top: 8px; }
+/* The Music bar's chevron opens the service menu (Apple Music or Spotify), as on the iPad. */
+.music-bar { position: relative; }
+.music-bar-icon.round { border-radius: 50%; }
+.music-bar-chev { flex: none; width: 34px; height: 34px; margin: -4px -8px -4px -4px; display: grid; place-items: center; color: var(--text-2); }
+.music-bar-chev svg { width: 18px; height: 18px; stroke-width: 2.2; }
+.music-bar-chev[hidden] { display: none; }
+.music-bar[data-state="problem"] .music-bar-chev { margin-top: 4px; }
+.service-menu { position: absolute; top: calc(100% + 6px); right: 0; z-index: 5; width: max-content; min-width: 200px; background: #2a2a2a; border-radius: 12px; padding: 4px; box-shadow: 0 10px 30px rgba(0,0,0,.45); }
+.service-menu[hidden] { display: none; }
+.service-menu button { display: flex; align-items: center; gap: 10px; width: 100%; padding: 10px 12px; border-radius: 9px; font-size: 15px; text-align: left; }
+.service-menu button:active { background: var(--surface-2); }
+.service-menu img { width: 24px; height: 24px; border-radius: 22.5%; }
+.service-menu img.round { border-radius: 50%; }
+.service-menu button[aria-checked="true"]::after { content: "✓"; margin-left: auto; padding-left: 16px; color: var(--text-2); }
+/* Spotify on an Apple TV: the steps, the Client ID, Advanced and Sign in, under the Music bar. */
+.spotify-panel { margin-top: 10px; padding: 14px 12px; border-radius: 12px; background: var(--surface); display: grid; gap: 10px; font-size: 14px; }
+.spotify-panel[hidden], #setup-spotify-device[hidden], #spotify-advanced[hidden] { display: none; }
+.panel-title { font-weight: 600; font-size: 15px; }
+.panel-steps { margin: 0; padding-left: 20px; display: grid; gap: 6px; color: var(--text-2); }
+.panel-steps b { color: var(--text); font-weight: 600; }
+.uri-row { display: flex; align-items: center; justify-content: space-between; gap: 8px; min-width: 0; }
+.uri-row code { font: 11px ui-monospace, Menlo, monospace; color: var(--text); background: var(--surface-2); padding: 6px 7px; border-radius: 7px; overflow-wrap: anywhere; min-width: 0; }
+.copy-btn { flex: none; font-size: 12px; font-weight: 600; padding: 5px 10px; border-radius: 999px; background: var(--surface-2); color: var(--text); }
+.text-input.mono { font: 15px ui-monospace, Menlo, monospace; }
+.disclosure { justify-self: start; display: flex; align-items: center; gap: 4px; font-size: 13px; font-weight: 600; color: var(--text-2); padding: 2px 0; }
+.disclosure svg { width: 14px; height: 14px; stroke-width: 2.4; transition: transform .2s var(--ease); }
+.disclosure[aria-expanded="true"] svg { transform: rotate(90deg); }
+#spotify-advanced .muted-label { margin-top: 2px; }
+.field-note .ok { color: #30d158; }
+.field-note .warn, .field-note.warn { color: #ffb340; }
+.field-note .bad { color: #ff6961; }
+.field-note[hidden] { display: none; }
+.spotify-btn:not(:disabled) { background: #1ed760; color: #000; }
+.small-link { font-size: 13px; font-weight: 500; color: var(--text-2); padding: 8px 2px 0; }
+.device-bar { position: relative; display: flex; align-items: center; gap: 10px; padding: 12px 14px; border-radius: 12px; background: var(--surface-2); font-size: 16px; font-weight: 600; }
+.device-bar-name { flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.device-bar-name.placeholder { color: var(--text-2); font-weight: 400; }
+.device-bar svg { flex: none; width: 18px; height: 18px; stroke-width: 2.2; color: var(--text-2); }
+/* The native picker, invisible over the bar: tapping the bar opens it. */
+.device-bar select { position: absolute; inset: 0; width: 100%; height: 100%; opacity: 0; font-size: 16px; }
+/* A dead end on the hub (the Spotify sign-in link after it finished or expired). */
+.message-page { display: flex; flex-direction: column; align-items: flex-start; gap: 18px; padding-top: calc(env(safe-area-inset-top) + 40px); }
+.message-page p { color: var(--text-2); font-size: 16px; }
+.message-page a { text-decoration: none; }
 .picker-shuffle { display: flex; justify-content: space-between; align-items: center; gap: 12px; padding: 8px 2px 12px; font-size: 15px; }
 .picker-sheet.busy .playlist-row, .picker-sheet.busy .picker-shuffle { pointer-events: none; }
 .picker-sheet.busy .playlist-row:not(.selected), .picker-sheet.busy .picker-shuffle { opacity: .5; }

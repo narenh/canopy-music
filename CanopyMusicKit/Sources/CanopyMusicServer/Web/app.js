@@ -702,7 +702,8 @@
       headers: body ? { "Content-Type": "application/json" } : {},
       body: body ? JSON.stringify(body) : undefined,
     });
-    if (!res.ok) throw new Error(`${res.status}`);
+    // The hub's reason (debug hubs describe the error in full), for the debug log.
+    if (!res.ok) throw new Error(`${path} ${res.status} ${(await res.text().catch(() => "")).slice(0, 600)}`);
     const text = await res.text();
     return text ? JSON.parse(text) : null;
   }
@@ -1325,7 +1326,8 @@
       $("setup").hidden = true;
       if (toastSkipped(reply)) setupToastUntil = Date.now() + 6000;
       if (snap) moveIfSetUp();
-    } catch {
+    } catch (error) {
+      debugLog(`setup start failed: ${error.message}`);
       setupBusy(false);
       toast("Couldn't start. Try again.");
     }
@@ -1600,7 +1602,10 @@
     if (!button || !hosting()) return;
     let action = button.dataset.action;
     if (action === "toggle") action = snap && snap.playback.isPlaying ? "pause" : "play";
-    api("/api/host/playback", { key: hostKey, action }).catch(() => toast(`Couldn't reach ${hubName()}`));
+    api("/api/host/playback", { key: hostKey, action }).catch((error) => {
+      debugLog(`playback ${action} failed: ${error.message}`);
+      toast(`Couldn't reach ${hubName()}`);
+    });
   });
   function askName() {
     $("name-input").value = myName || "";

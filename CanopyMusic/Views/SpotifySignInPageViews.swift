@@ -102,7 +102,7 @@ struct SpotifySignInPageField: View {
     }
 
     @ViewBuilder private var status: some View {
-        let help = Text(showsHelp ? " Only change this if you host your own copy. Leave it empty to use the default." : "")
+        let help = Text(showsHelp ? " Leave it empty to use the default." : "")
             .foregroundStyle(.white.opacity(0.55))
         if checking {
             HStack(spacing: 6) { ProgressView().controlSize(.mini); Text("Checking…").foregroundStyle(.orange) }
@@ -148,6 +148,13 @@ struct SpotifySignInPageSettings: View {
                     SpotifySignInPageField(isUsable: $usable, showsHelp: false)
                         .listRowBackground(Color.clear)
                 }
+            } header: {
+                // As on the Spotify setup page's Advanced: most people never need this.
+                Text("Only for people who host their own copy of the Canopy Music sign-in relay. Most people can ignore this.")
+                    .textCase(nil)
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
+                    .padding(.bottom, 6)
             } footer: {
                 VStack(alignment: .leading, spacing: 8) {
                     Text("Register the address you use as a Redirect URI in your Spotify app. To host your own copy, see the canopy-music-relay repository.")

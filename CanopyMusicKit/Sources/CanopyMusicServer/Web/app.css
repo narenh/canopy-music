@@ -287,34 +287,52 @@ html.sheet-open, html.sheet-open body { overflow: hidden; }
 /* A problem: the note explains it, so the bar lines up at the top. */
 .music-bar[data-state="problem"] { align-items: flex-start; }
 .music-bar[data-state="problem"] .music-bar-state { margin-top: 8px; }
-/* The Music bar's chevron opens the service menu (Apple Music or Spotify), as on the iPad. */
-.music-bar { position: relative; }
+/* The Music bar is a full-width dropdown, as the iPad's Music row: tapping it opens a menu with
+   the other service, its state on a second line. */
+.service-select { position: relative; }
+.music-bar { width: 100%; text-align: left; }
 .music-bar-icon.round { border-radius: 50%; }
-.music-bar-chev { flex: none; width: 34px; height: 34px; margin: -4px -8px -4px -4px; display: grid; place-items: center; color: var(--text-2); }
-.music-bar-chev svg { width: 18px; height: 18px; stroke-width: 2.2; }
-.music-bar-chev[hidden] { display: none; }
-.music-bar[data-state="problem"] .music-bar-chev { margin-top: 4px; }
-.service-menu { position: absolute; top: calc(100% + 6px); right: 0; z-index: 5; width: max-content; min-width: 200px; background: #2a2a2a; border-radius: 12px; padding: 4px; box-shadow: 0 10px 30px rgba(0,0,0,.45); }
+.music-bar-chev { flex: none; width: 22px; margin-right: -4px; display: grid; place-items: center; color: var(--text-2); }
+.music-bar-chev svg { width: 18px; height: 18px; stroke-width: 2.2; transition: transform .2s var(--ease); }
+.music-bar[aria-expanded="true"] .music-bar-chev svg { transform: rotate(180deg); }
+.music-bar[data-state="problem"] .music-bar-chev { margin-top: 8px; }
+.service-menu { position: absolute; top: calc(100% + 6px); left: 0; right: 0; z-index: 5; background: #2c2c2c; border-radius: 14px; padding: 5px; box-shadow: 0 12px 34px rgba(0,0,0,.5); animation: menu-in .18s var(--ease); }
 .service-menu[hidden] { display: none; }
-.service-menu button { display: flex; align-items: center; gap: 10px; width: 100%; padding: 10px 12px; border-radius: 9px; font-size: 15px; text-align: left; }
+@keyframes menu-in { from { opacity: 0; transform: translateY(-4px) scale(.98); } }
+.service-menu button { display: flex; align-items: center; gap: 12px; width: 100%; padding: 10px 11px; border-radius: 10px; text-align: left; }
 .service-menu button:active { background: var(--surface-2); }
-.service-menu img { width: 24px; height: 24px; border-radius: 22.5%; }
+.service-menu img { flex: none; width: 34px; height: 34px; border-radius: 22.5%; }
 .service-menu img.round { border-radius: 50%; }
-.service-menu button[aria-checked="true"]::after { content: "✓"; margin-left: auto; padding-left: 16px; color: var(--text-2); }
-/* Spotify on an Apple TV: the steps, the Client ID, Advanced and Sign in, under the Music bar. */
-.spotify-panel { margin-top: 10px; padding: 14px 12px; border-radius: 12px; background: var(--surface); display: grid; gap: 10px; font-size: 14px; }
-.spotify-panel[hidden], #setup-spotify-device[hidden], #spotify-advanced[hidden] { display: none; }
-.panel-title { font-weight: 600; font-size: 15px; }
-.panel-steps { margin: 0; padding-left: 20px; display: grid; gap: 6px; color: var(--text-2); }
-.panel-steps b { color: var(--text); font-weight: 600; }
+.service-option-text { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+.service-option-title { font-size: 16px; font-weight: 600; }
+.service-option-note { font-size: 13px; color: var(--text-2); }
+.service-option-note:empty { display: none; }
+/* Spotify chosen, not signed in: its setup page, from under the bar. */
+.open-spotify { margin-top: 10px; }
+#setup-spotify-device[hidden], #spotify-advanced[hidden], .open-spotify[hidden] { display: none; }
+/* Spotify's setup page: Back at the top, the steps, the Client ID and Sign in, then Advanced. */
+#setup-spotify-scroll { padding-bottom: calc(env(safe-area-inset-bottom) + 28px); }
+.page-head { display: flex; align-items: center; justify-content: space-between; }
+.page-head-icon { width: 40px; height: 40px; border-radius: 50%; }
+.setup-steps { margin: 0 0 20px; padding-left: 24px; display: grid; gap: 10px; font-size: 15px; color: var(--text-2); }
+.setup-steps li { padding-left: 4px; }
+.setup-steps li::marker { color: var(--text-3); font-weight: 600; }
+.setup-steps b { color: var(--text); font-weight: 600; }
+.setup-steps a { color: inherit; text-decoration: underline; text-decoration-color: var(--text-3); text-underline-offset: 3px; }
+.setup-steps .uri-row { margin: 6px 0; }
 .uri-row { display: flex; align-items: center; justify-content: space-between; gap: 8px; min-width: 0; }
-.uri-row code { font: 11px ui-monospace, Menlo, monospace; color: var(--text); background: var(--surface-2); padding: 6px 7px; border-radius: 7px; overflow-wrap: anywhere; min-width: 0; }
-.copy-btn { flex: none; font-size: 12px; font-weight: 600; padding: 5px 10px; border-radius: 999px; background: var(--surface-2); color: var(--text); }
+.uri-row code { font: 11px ui-monospace, Menlo, monospace; color: var(--text); background: var(--surface-2); padding: 7px 8px; border-radius: 8px; overflow-wrap: anywhere; min-width: 0; }
+.copy-btn { flex: none; font-size: 13px; font-weight: 600; padding: 6px 12px; border-radius: 999px; background: var(--surface-2); color: var(--text); }
 .text-input.mono { font: 15px ui-monospace, Menlo, monospace; }
-.disclosure { justify-self: start; display: flex; align-items: center; gap: 4px; font-size: 13px; font-weight: 600; color: var(--text-2); padding: 2px 0; }
+#setup-spotify-page .spotify-btn { margin-top: 12px; }
+#setup-spotify-page #spotify-hint { margin-top: 10px; }
+.spotify-family { margin-top: 10px; }
+.disclosure { display: flex; flex-direction: column; align-items: flex-start; gap: 3px; width: 100%; margin-top: 26px; padding: 12px 2px 4px; border-top: 1px solid var(--line); text-align: left; }
+.disclosure-head { display: flex; align-items: center; gap: 4px; font-size: 14px; font-weight: 600; color: var(--text-2); }
+.disclosure-sub { font-size: 12px; color: var(--text-3); }
 .disclosure svg { width: 14px; height: 14px; stroke-width: 2.4; transition: transform .2s var(--ease); }
 .disclosure[aria-expanded="true"] svg { transform: rotate(90deg); }
-#spotify-advanced .muted-label { margin-top: 2px; }
+#spotify-advanced { margin-top: 12px; }
 .field-note .ok { color: #30d158; }
 .field-note .warn, .field-note.warn { color: #ffb340; }
 .field-note .bad { color: #ff6961; }

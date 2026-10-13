@@ -257,7 +257,7 @@ final class AppModel {
         let debugFlags = ["-autoParty", "-autoSearch", "-autoLoad", "-autoResume", "-autoPrevious", "-autoStress", "-showSettings",
                           "-showPicker", "-appleMusicState", "-qrGallery", "-backgroundFor", "-screenshotParty",
                           "-easterEggPreview", "-diagnoseMusicKit", "-benchAppleMusic", "-autoLoadPlaylist", "-confirmEnd", "-showSave", "-spotifyState",
-                          "-switchService", "-sonosProbe", "-sonosSelect", "-sonosFake", "-showOutputPicker"]
+                          "-switchService", "-openServiceMenu", "-sonosProbe", "-sonosSelect", "-sonosFake", "-showOutputPicker"]
         if ProcessInfo.processInfo.arguments.contains(where: debugFlags.contains) {
             role = .hub
             locked = false

@@ -87,41 +87,30 @@
       <input class="text-input" id="setup-name" maxlength="40" autocomplete="off" enterkeyhint="done">
       <p class="field-note" id="setup-address" hidden></p>
       <p class="muted-label" style="margin-top:18px">Music</p>
-      <!-- The service (Apple Music or Spotify, from the chevron's menu) and whether it can play. -->
-      <div class="music-bar" id="setup-music" data-state="checking" aria-live="polite">
-        <img class="music-bar-icon" id="setup-music-icon" src="/apple-music.png" alt="">
-        <span class="music-bar-text">
-          <span class="music-bar-title" id="setup-music-title">Apple Music</span>
-          <span class="music-bar-note" id="setup-music-note" hidden></span>
-        </span>
-        <span class="music-bar-state" id="setup-music-state"></span>
-        <button class="music-bar-chev" id="setup-service-btn" type="button" aria-label="Choose the music service" aria-haspopup="menu" aria-expanded="false"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m6 9 6 6 6-6"/></svg></button>
+      <!-- The service and whether it can play: a full-width dropdown, as the iPad's Music row.
+           Its menu offers only the other service, with that one's state on a second line. -->
+      <div class="service-select">
+        <button class="music-bar" id="setup-music" type="button" data-state="checking" aria-live="polite" aria-haspopup="menu" aria-expanded="false">
+          <img class="music-bar-icon" id="setup-music-icon" src="/apple-music.png" alt="">
+          <span class="music-bar-text">
+            <span class="music-bar-title" id="setup-music-title">Apple Music</span>
+            <span class="music-bar-note" id="setup-music-note" hidden></span>
+          </span>
+          <span class="music-bar-state" id="setup-music-state"></span>
+          <span class="music-bar-chev" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="m6 9 6 6 6-6"/></svg></span>
+        </button>
         <div class="service-menu" id="setup-service-menu" role="menu" hidden>
-          <button type="button" role="menuitemradio" data-service="appleMusic"><img src="/apple-music.png" alt=""><span>Apple Music</span></button>
-          <button type="button" role="menuitemradio" data-service="spotify"><img class="round" src="/spotify.png" alt=""><span>Spotify</span></button>
+          <button type="button" role="menuitem" id="setup-service-option">
+            <img id="setup-option-icon" src="/spotify.png" alt="">
+            <span class="service-option-text">
+              <span class="service-option-title" id="setup-option-title"></span>
+              <span class="service-option-note" id="setup-option-note"></span>
+            </span>
+          </button>
         </div>
       </div>
-      <!-- Spotify: the host's own developer app, the address to register, and the sign-in. -->
-      <div class="spotify-panel" id="setup-spotify" hidden>
-        <p class="panel-title">Connect Spotify</p>
-        <ol class="panel-steps">
-          <li>Create an app at developer.spotify.com/dashboard (log in with your Premium account).</li>
-          <li>Add this Redirect URI and check <b>Web API</b>:</li>
-        </ol>
-        <div class="uri-row"><code id="spotify-uri"></code><button class="copy-btn" id="spotify-copy" type="button">Copy</button></div>
-        <ol class="panel-steps" start="3">
-          <li>Paste the app's Client ID:</li>
-        </ol>
-        <input class="text-input mono" id="spotify-client" maxlength="64" placeholder="Client ID" autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck="false" enterkeyhint="done" data-1p-ignore data-lpignore="true">
-        <button class="disclosure" id="spotify-advanced-btn" type="button" aria-expanded="false">Advanced <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m9 6 6 6-6 6"/></svg></button>
-        <div id="spotify-advanced" hidden>
-          <p class="muted-label">Spotify sign-in page</p>
-          <input class="text-input mono" id="spotify-page" maxlength="300" placeholder="music.canopysf.com/spotify" inputmode="url" autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck="false" enterkeyhint="done" data-1p-ignore data-lpignore="true">
-          <p class="field-note" id="spotify-page-note"></p>
-        </div>
-        <p class="field-note warn" id="spotify-hint" hidden></p>
-        <button class="primary-btn wide spotify-btn" id="spotify-signin" type="button"><span class="spinner" hidden></span><span class="label">Sign in to Spotify</span></button>
-      </div>
+      <!-- Spotify chosen but not signed in (a sign-in that lapsed): its setup page. -->
+      <button class="primary-btn wide spotify-btn open-spotify" id="spotify-open" type="button" hidden>Sign in to Spotify</button>
       <button class="text-btn small-link" id="spotify-change" type="button" hidden>Sign in again or change the Client ID</button>
       <!-- Spotify, signed in: where music plays (a Spotify Connect device; not the TV itself). -->
       <div id="setup-spotify-device" hidden>
@@ -136,6 +125,46 @@
     </div>
     <div class="picker-foot">
       <button class="primary-btn wide" id="setup-continue" type="button" disabled><span class="label">Continue</span></button>
+    </div>
+  </div>
+  <!-- Spotify's setup, from the Music bar: the host's own developer app, the address to register,
+       the Client ID and the sign-in. Back keeps the service as it was. -->
+  <div class="setup-page" id="setup-spotify-page" hidden>
+    <div class="picker-scroll" id="setup-spotify-scroll">
+      <div class="page-head">
+        <button class="back-btn" id="spotify-back" type="button" aria-label="Back"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m15 5-7 7 7 7"/></svg></button>
+        <img class="page-head-icon" src="/spotify.png" alt="">
+      </div>
+      <h2 class="sheet-title">Connect Spotify</h2>
+      <p class="sheet-sub">Canopy Music plays Spotify through a developer app you create. It's free, and you only do this once.</p>
+      <ol class="setup-steps">
+        <li>Go to <a href="https://developer.spotify.com/dashboard" target="_blank" rel="noopener"><b>developer.spotify.com/dashboard</b></a> and log in with your Spotify account. Playback needs Spotify Premium.</li>
+        <li>If Spotify asks, accept the Developer Terms.</li>
+        <li>Tap <b>Create app</b>.</li>
+        <li>Give it any name and description, like “Canopy Music”.</li>
+        <li>Under <b>Redirect URIs</b>, paste
+          <span class="uri-row"><code id="spotify-uri"></code><button class="copy-btn" id="spotify-copy" type="button">Copy</button></span>
+          and tap <b>Add</b>.</li>
+        <li>Under <b>Which API/SDKs are you planning to use?</b>, check <b>Web API</b>.</li>
+        <li>Agree to the terms and tap <b>Save</b>.</li>
+        <li>On your new app's page, open <b>Settings</b> and copy the <b>Client ID</b>.</li>
+        <li>Paste it below.</li>
+      </ol>
+      <p class="muted-label">Client ID</p>
+      <input class="text-input mono" id="spotify-client" maxlength="64" placeholder="Client ID" autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck="false" enterkeyhint="done" data-1p-ignore data-lpignore="true">
+      <p class="field-note warn" id="spotify-hint" hidden></p>
+      <button class="primary-btn wide spotify-btn" id="spotify-signin" type="button"><span class="spinner" hidden></span><span class="label">Sign in to Spotify</span></button>
+      <p class="field-note spotify-family">Your family can share one app if each person's email is added under User Management in the app's settings.</p>
+      <!-- Quiet: only for people who host their own copy of the sign-in relay. -->
+      <button class="disclosure" id="spotify-advanced-btn" type="button" aria-expanded="false" aria-controls="spotify-advanced">
+        <span class="disclosure-head">Advanced <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m9 6 6 6-6 6"/></svg></span>
+        <span class="disclosure-sub">Only for people who host their own copy of the Canopy Music sign-in relay. Most people can ignore this.</span>
+      </button>
+      <div id="spotify-advanced" hidden>
+        <p class="muted-label">Spotify sign-in page</p>
+        <input class="text-input mono" id="spotify-page" maxlength="300" placeholder="music.canopysf.com/spotify" inputmode="url" autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck="false" enterkeyhint="done" data-1p-ignore data-lpignore="true">
+        <p class="field-note" id="spotify-page-note"></p>
+      </div>
     </div>
   </div>
   <div class="setup-page" id="setup-music-page" hidden>

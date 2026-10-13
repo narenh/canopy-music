@@ -324,6 +324,9 @@ final class TVModel {
                 await spotify.refresh()
                 pushSpotifySetup()
             }
+            // The page's service menu says what's wrong with Apple Music, if anything. Checked
+            // once (without asking): choosing Apple Music checks it again.
+            if session.musicAccess == nil { checkMusicAccess(asking: false) }
         }
     }
 

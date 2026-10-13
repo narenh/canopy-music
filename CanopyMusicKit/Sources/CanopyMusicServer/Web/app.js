@@ -384,8 +384,15 @@
     debugScreen("splash shown again");
   }
 
+  /** What's actually playing: in a Spotify zone, possibly a track from outside the queue
+   * (another app or zone on the account), which has no requester. */
+  const nowPlaying = (s) => s.externalCurrent || s.current;
+  /** Songs in Spotify's own queue that play before the zone's next song (read-only, first). */
+  const foreignItems = (s) => s.foreignUpcoming || [];
+  const isForeign = (item) => foreignItems(snap).some((f) => f.id === item.id);
+
   function render() {
-    const current = snap.current;
+    const current = nowPlaying(snap);
     applyTheme(current && current.track);
 
     // The host can turn off reordering from phones (host control can always reorder).
@@ -409,6 +416,9 @@
     $("playlist-name").textContent = snap.playlistName || "";
     $("playlist-line").hidden = !snap.playlistName;
     $("now-status").textContent = !current ? "Waiting for music" : snap.playback.isPlaying ? "Now playing" : "Paused";
+    // Understated: chosen on the Spotify account, not from this queue.
+    $("now-from").hidden = !snap.externalCurrent;
+    $("now-from").textContent = snap.externalCurrent ? ` · From ${snap.service || "Spotify"}` : "";
     $("now-title").textContent = current ? current.track.title : "Nothing yet";
     $("now-artist").textContent = current ? current.track.artist : "";
     if (current) setArt($("now-art"), current.track, true);
@@ -469,10 +479,13 @@
   };
 
   function fillRow(li, item) {
-    const locked = snap.lockedNextID === item.id;
-    const label = requesterLabel(item);
+    // Spotify's own queue items are locked too: nothing here can move or remove them.
+    const foreign = isForeign(item);
+    const locked = foreign || snap.lockedNextID === item.id;
+    const label = foreign ? null : requesterLabel(item);
     li.classList.add("row");
     li.classList.toggle("locked", locked);
+    li.classList.toggle("foreign", foreign);
     li.dataset.id = item.id;
     li.innerHTML = "";
 
@@ -508,7 +521,7 @@
     if (locked) {
       const lock = document.createElement("span");
       lock.className = "lock";
-      lock.title = "Up next. Locked in.";
+      lock.title = foreign ? `Queued on ${snap.service || "Spotify"}` : "Up next. Locked in.";
       lock.innerHTML = icons.lock;
       li.append(lock);
     } else if (snap.canReorder !== false || hosting()) {
@@ -532,12 +545,13 @@
   function rowSignature(item) {
     const t = item.track, label = requesterLabel(item);
     return [t.title, t.artist, t.thumbnailURL || t.artworkURL || "", t.colors ? t.colors.background + t.colors.secondary : "",
-      snap.lockedNextID === item.id, label ? `${label.text}${label.mine}` : "", hosting(), snap.canReorder !== false].join("|");
+      snap.lockedNextID === item.id, isForeign(item), label ? `${label.text}${label.mine}` : "", hosting(), snap.canReorder !== false].join("|");
   }
 
   function renderQueue() {
     const list = $("queue");
-    const items = snap.upNext;
+    // Spotify's own queue first (it plays first), then the zone's Up next.
+    const items = [...foreignItems(snap), ...snap.upNext];
     const rows = list.children;
     const sameOrder = items.length === rows.length && items.every((item, i) => rows[i].dataset.id === item.id);
     // FLIP, first: where the rows on screen are, if any row comes, goes or moves.
@@ -589,7 +603,7 @@
     for (const id of flashIds) flash(id);
     flashIds.clear();
 
-    $("queue-empty").hidden = snap.upNext.length > 0;
+    $("queue-empty").hidden = items.length > 0;
     firstRender = false;
     laterQueueChanged();
   }
@@ -711,10 +725,11 @@
 
   function updateProgress() {
     const fill = $("progress");
-    if (!snap || !snap.current || !snap.current.track.duration) { fill.style.width = "0"; return; }
+    const current = snap && nowPlaying(snap);
+    if (!current || !current.track.duration) { fill.style.width = "0"; return; }
     const pb = snap.playback;
     const elapsed = pb.position + (pb.isPlaying ? (Date.now() - pb.capturedAt) / 1000 : 0);
-    fill.style.width = `${Math.min(100, (elapsed / snap.current.track.duration) * 100)}%`;
+    fill.style.width = `${Math.min(100, (elapsed / current.track.duration) * 100)}%`;
   }
   // Every frame while playing so the bar grows smoothly (a seek just jumps); browsers pause
   // frames in background tabs. Twice a second otherwise, which is plenty while paused.
@@ -786,7 +801,9 @@
     const li = handle.closest(".row");
     const rows = [...list.children];
     const from = rows.indexOf(li);
-    const floor = rows[0] && rows[0].classList.contains("locked") ? 1 : 0;
+    // Nothing goes above the locked rows at the top: Spotify's own queue, then the locked next song.
+    let floor = 0;
+    while (rows[floor] && rows[floor].classList.contains("locked")) floor++;
     dragging = {
       li, rows, from, to: from, floor,
       rects: rows.map((r) => r.getBoundingClientRect()),
@@ -858,11 +875,13 @@
 
     const id = d.li.dataset.id;
     if (d.to !== d.from) {
-      const after = d.to === 0 ? null : order[d.to - 1].dataset.id;
+      // Spotify's own queue rows aren't in the zone's Up next: dropped just below them is its top.
+      const above = d.to === 0 ? null : order[d.to - 1];
+      const after = above && !above.classList.contains("foreign") ? above.dataset.id : null;
       // Optimistic local reorder so an incoming snapshot doesn't bounce the row back.
       const items = snap.upNext.slice();
       const [moved] = items.splice(items.findIndex((i) => i.id === id), 1);
-      items.splice(d.to, 0, moved);
+      items.splice(Math.max(0, d.to - foreignItems(snap).length), 0, moved);
       snap = { ...snap, upNext: items };
       api("/api/move", { id, after, key: hosting() ? hostKey : undefined }).catch(() => toast("Couldn't move that one"));
     }
@@ -1390,6 +1409,9 @@
     const skipped = skippedNote(snap);
     $("settings-playlist-skipped").hidden = !skipped;
     $("settings-playlist-skipped").textContent = skipped;
+    // Spotify zones: the next song couldn't be queued on Spotify, which picks what plays next.
+    $("settings-player-issue").hidden = !snap.playerIssue;
+    $("settings-player-issue").textContent = snap.playerIssue || "";
     $("settings-queue").checked = snap.canQueue !== false;
     $("settings-reorder").checked = snap.canReorder !== false;
     $("settings-displays").checked = snap.displaysCanControl !== false;

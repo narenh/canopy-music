@@ -48,7 +48,7 @@
   <section class="now" id="now" aria-live="polite">
     <div class="now-art art" id="now-art"></div>
     <div class="now-meta">
-      <p class="eyebrow" id="now-status">Now playing</p>
+      <p class="eyebrow"><span id="now-status">Now playing</span><span class="now-from" id="now-from" hidden></span></p>
       <p class="now-title" id="now-title">Nothing yet</p>
       <p class="now-artist" id="now-artist"></p>
       <div class="progress"><div class="progress-fill" id="progress"></div></div>
@@ -137,6 +137,7 @@
     <p class="settings-head">Music</p>
     <div class="setting-row"><span class="setting-label">Base playlist</span><span class="setting-value" id="settings-playlist">None yet</span><button type="button" class="pill-btn" id="settings-playlist-change">Change</button></div>
     <p class="small skipped-note" id="settings-playlist-skipped" hidden></p>
+    <p class="small player-issue" id="settings-player-issue" hidden></p>
     <div class="setting-row" id="settings-party-row" hidden><span class="setting-label">Save as playlist</span><span class="setting-value" id="settings-party"></span><button type="button" class="pill-btn" id="settings-party-save">Save</button></div>
     <p class="settings-head">Phones</p>
     <label class="setting-row"><span>Queue from phones</span><input type="checkbox" class="switch" id="settings-queue"></label>

@@ -22,7 +22,7 @@ struct HostView: View {
 
     var body: some View {
         @Bindable var model = model
-        let theme = ArtworkTheme(session.state.current?.track.colors)
+        let theme = ArtworkTheme(session.nowPlaying?.track.colors)
         ContentCap {
             GeometryReader { geo in
                 HStack(spacing: 0) {
@@ -39,7 +39,7 @@ struct HostView: View {
                 .frame(maxWidth: .infinity)
             }
         }
-        .background { ThemedBackground(track: session.state.current?.track, theme: theme) }
+        .background { ThemedBackground(track: session.nowPlaying?.track, theme: theme) }
         .environment(\.artworkTheme, theme)
         .preferredColorScheme(.dark)
         .sheet(isPresented: $showPicker) { PlaylistPickerView() }
@@ -649,11 +649,14 @@ private extension HostView {
             if !session.skippedOnLoad.isEmpty {
                 skippedNote
             }
-            if let current = session.state.current {
-                Text("Playing \(current.track.title) · \(current.track.artist)")
+            if let current = session.nowPlaying {
+                Text("Playing \(current.track.title) · \(current.track.artist)\(current.id == session.externalCurrent?.id ? " · From \(session.serviceName ?? "Spotify")" : "")")
                     .font(.system(size: 13))
                     .foregroundStyle(.white.opacity(0.6))
                     .lineLimit(1)
+            }
+            if let issue = session.playerIssue {
+                PlayerIssueLine(text: issue)
             }
         }
     }

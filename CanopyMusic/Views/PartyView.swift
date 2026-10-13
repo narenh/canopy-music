@@ -37,7 +37,9 @@ struct PartyView: View {
     @State private var autoAddTrackID: String?
 
     private var session: PartySession { model.session }
-    private var current: QueueItem? { session.state.current }
+    /// What's playing: in a Spotify zone it can be a track from outside the queue
+    /// (`PartySession.externalCurrent`).
+    private var current: QueueItem? { session.nowPlaying }
     private var searchActive: Bool { searchFocused || !query.isEmpty }
 
     var body: some View {
@@ -211,6 +213,13 @@ struct PartyView: View {
             .padding(.top, 20)
             .padding(.bottom, 8)
 
+            // Spotify zones: staging the next song failed and Spotify picks what plays next.
+            if let issue = session.playerIssue {
+                PlayerIssueLine(text: issue)
+                    .padding(.horizontal, 20)
+                    .padding(.bottom, 6)
+            }
+
             // Songs added on the iPad can be removed here (e.g. added by mistake). Phone requests
             // can only be removed from the phone that added them.
             UpNextList(
@@ -237,7 +246,7 @@ struct PartyView: View {
     // MARK: Adding
 
     private func status(for track: QueueTrack) -> AddStatus {
-        if current?.track.id == track.id { return .playing }
+        if session.state.current?.track.id == track.id { return .playing }
         if session.state.upNext.contains(where: { $0.isRequest && $0.track.id == track.id }) { return .queued }
         return .add
     }
@@ -437,6 +446,9 @@ struct NowPlayingView: View {
                             .foregroundStyle(.white.opacity(0.65))
                         if let requester = item?.requester {
                             RequesterPill(requester: requester)
+                        } else if let item, item.id == session.externalCurrent?.id {
+                            // Not from this queue: someone else on the Spotify account chose it.
+                            FromServiceLabel(service: session.serviceName)
                         }
                     }
                 }

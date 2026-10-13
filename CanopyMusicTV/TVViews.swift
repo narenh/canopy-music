@@ -29,7 +29,8 @@ struct TVRootView: View {
     }
 
     var body: some View {
-        let current = model.session.state.current
+        // What's actually playing (a Spotify hub's can be a track from outside its queue).
+        let current = model.session.nowPlaying
         // The same takeover as the iPad's, as a hub or a display (a display's time comes from
         // its hub's snapshots).
         let takeover = model.role == .choosing || Self.capturing ? nil : easterEgg.takeover(for: current)
@@ -524,7 +525,8 @@ struct TVPartyView: View {
 
     var body: some View {
         let session = model.session
-        let live = session.state.current
+        // What's actually playing: a Spotify hub's can be a track from outside its queue.
+        let live = session.nowPlaying
         // The live item while it's the one shown, so its changes (a requester's name) show.
         let current = !started || shown?.id == live?.id ? live : shown
         // The song shown leaves the way the change to the live one goes, so that's set while it's
@@ -568,15 +570,25 @@ struct TVPartyView: View {
                     Text("Up next")
                         .font(.system(size: 44, weight: .bold))
                         .holdsRemoteFocus()
+                    // A Spotify hub's next song couldn't be queued on Spotify (quiet, for the host).
+                    if let issue = session.playerIssue {
+                        Label(issue, systemImage: "exclamationmark.circle")
+                            .font(.system(size: 22, weight: .medium))
+                            .foregroundStyle(.white.opacity(0.5))
+                            .lineLimit(1)
+                    }
                     // Takes whatever height is left above the join card and fades out at the bottom.
                     GeometryReader { geo in
+                        // Songs in Spotify's own queue (a Spotify hub's) play first, so they're
+                        // listed first; they have no requester.
+                        let items = session.foreignUpcoming + session.state.upNext
                         VStack(spacing: 0) {
                             // Rows are a fixed height, so show as many as fit (plus one to fade out).
-                            ForEach(Array(session.state.upNext.prefix(Int(geo.size.height / TVQueueRow.height) + 1))) { item in
+                            ForEach(Array(items.prefix(Int(geo.size.height / TVQueueRow.height) + 1))) { item in
                                 TVQueueRow(item: item)
                             }
                         }
-                        .animation(.easeInOut(duration: 0.4), value: session.state.upNext.map(\.id))
+                        .animation(.easeInOut(duration: 0.4), value: items.map(\.id))
                         .frame(width: geo.size.width, height: geo.size.height, alignment: .top)
                         .clipped()
                     }
@@ -615,7 +627,7 @@ struct TVPartyView: View {
         // which holds focus (it's the only focusable view, so they can't move focus instead).
         .onMoveCommand(perform: move)
         // A newer change cancels this one part way, and `showCurrent` goes on to the newest song.
-        .task(id: model.session.state.current?.id) { await showCurrent() }
+        .task(id: model.session.nowPlaying?.id) { await showCurrent() }
         // The next song or two's art at Now Playing size, loaded ahead so the slide to it has it
         // (`showCurrent` waits only a moment). Just those: every row's would cost as much again
         // as the whole list of rows many times over, and most of them get skipped or reordered.
@@ -681,6 +693,13 @@ struct TVPartyView: View {
                         .lineLimit(1)
                     if let requester = item?.requester {
                         TVRequesterPill(requester: requester).fixedSize()
+                    } else if let item, item.id == model.session.externalCurrent?.id {
+                        // Not from the queue: someone else on the hub's Spotify account chose it.
+                        Text("From \(model.session.serviceName ?? "Spotify")")
+                            .font(.system(size: 24, weight: .medium))
+                            .foregroundStyle(.white.opacity(0.45))
+                            .lineLimit(1)
+                            .fixedSize()
                     }
                 }
                 .padding(.bottom, 26)
@@ -706,18 +725,18 @@ struct TVPartyView: View {
     private func showCurrent() async {
         let session = model.session
         guard started else {
-            shown = session.state.current
+            shown = session.nowPlaying
             started = true
             return
         }
         if let slideEnds {
             do { try await Task.sleep(until: slideEnds, clock: .continuous) } catch { return }
         }
-        guard shown?.id != session.state.current?.id else { return }
+        guard shown?.id != session.nowPlaying?.id else { return }
         // The new song's art is loaded before it slides in (the pre-warm of the next songs' has
         // usually loaded it already); after a moment it slides anyway, and the art shows when
         // it's loaded.
-        if let url = ArtworkURL.url(for: session.state.current?.track, large: true) {
+        if let url = ArtworkURL.url(for: session.nowPlaying?.track, large: true) {
             let start = ContinuousClock.now
             let ready = await ArtworkCache.shared.ready(url, bucket: artBucket, within: .milliseconds(300))
             model.debugLog("artwork \(ready ? "ready" : "not ready") after \(ContinuousClock.now - start) (\(artBucket) px)")
@@ -728,7 +747,7 @@ struct TVPartyView: View {
         // Both pages move in this one animation, so they stay together.
         withAnimation(Self.slideAnimation) {
             forward = goingForward
-            shown = session.state.current
+            shown = session.nowPlaying
         }
     }
 
@@ -891,7 +910,7 @@ struct TVProgress: View {
         // Every frame while playing so the bar grows smoothly (a seek just jumps); twice a second
         // while paused, to catch seeks.
         TimelineView(.animation(minimumInterval: session.isPlaying ? nil : 0.5)) { _ in
-            let live = itemID == session.state.current?.id
+            let live = itemID == session.nowPlaying?.id
             let time = held.show(live ? min(session.engine.currentTime, duration) : nil)
             VStack(spacing: 10) {
                 GeometryReader { geo in

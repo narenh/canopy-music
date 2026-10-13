@@ -123,6 +123,33 @@ struct RequesterPill: View {
     }
 }
 
+/// In place of a requester, for a track that isn't from the queue (Spotify zones: another app or
+/// zone on the account chose it). Plain, quieter than a pill.
+struct FromServiceLabel: View {
+    let service: String?
+    var size: CGFloat = 13
+
+    var body: some View {
+        Text("From \(service ?? "Spotify")")
+            .font(.system(size: size, weight: .medium))
+            .foregroundStyle(.white.opacity(0.45))
+            .lineLimit(1)
+    }
+}
+
+/// The host's quiet status line for a problem with the player (`PartySession.playerIssue`),
+/// e.g. "Couldn't queue the next song on Spotify".
+struct PlayerIssueLine: View {
+    let text: String
+
+    var body: some View {
+        Label(text, systemImage: "exclamationmark.circle")
+            .font(.system(size: 13, weight: .medium))
+            .foregroundStyle(.white.opacity(0.55))
+            .lineLimit(2)
+    }
+}
+
 struct LogoView: View {
     var height: CGFloat = 28
 

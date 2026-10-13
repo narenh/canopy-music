@@ -85,6 +85,9 @@ svg { width: 18px; height: 18px; fill: none; stroke: currentColor; stroke-width:
 .now-art { width: 76px; height: 76px; border-radius: 10px; box-shadow: 0 8px 24px rgba(0,0,0,.35); }
 .now-meta { min-width: 0; flex: 1; }
 .eyebrow { font-size: 12px; color: var(--accent); font-weight: 600; margin-bottom: 2px; }
+/* A track chosen on the Spotify account, not from this queue: said quietly. */
+.now-from { color: var(--text-3); font-weight: 500; }
+.now-from[hidden] { display: none; }
 .now-title { font-size: 18px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .now-artist { font-size: 14px; color: var(--text-2); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .now { flex-wrap: wrap; }
@@ -292,4 +295,7 @@ html.sheet-open, html.sheet-open body { overflow: hidden; }
 .primary-btn.danger { background: #ff453a; color: #fff; }
 .modal-card .skipped-note { color: #ffb340; margin: 8px 2px 4px; }
 .skipped-note[hidden] { display: none; }
+/* Spotify zones: the next song couldn't be queued on Spotify. Quiet, for the host. */
+.modal-card .player-issue { color: var(--text-2); margin: 8px 2px 4px; }
+.player-issue[hidden] { display: none; }
 .invite-qr { width: 220px; height: 220px; image-rendering: pixelated; background: #fff; border-radius: 14px; padding: 10px; }

@@ -33,7 +33,10 @@ struct UpNextList: View {
     /// One row per song. Songs keep the same row as they go from upcoming to now playing to
     /// played, so the list restyles rows instead of moving them between separate sections
     /// (which left stale, still-draggable rows behind).
-    private enum Kind { case played, nowPlaying, upcoming }
+    /// `foreign`: Spotify zones, a song in Spotify's own queue that Canopy didn't put there
+    /// (`PartySession.foreignUpcoming`). It plays before Canopy's next song, so it sits first,
+    /// read-only and locked, with no requester.
+    private enum Kind { case played, nowPlaying, foreign, upcoming }
     private struct Row: Identifiable {
         let item: QueueItem
         let kind: Kind
@@ -44,15 +47,21 @@ struct UpNextList: View {
         var rows: [Row] = []
         if showsHistory {
             rows += session.state.history.prefix(Self.historyLimit).reversed().map { Row(item: $0, kind: .played) }
-            if let current = session.state.current { rows.append(Row(item: current, kind: .nowPlaying)) }
+            // While Spotify plays a track from outside the queue, that's Now Playing; the queue's
+            // own current song (finished or interrupted) shows as played above it.
+            if let current = session.state.current {
+                rows.append(Row(item: current, kind: session.externalCurrent == nil ? .nowPlaying : .played))
+            }
+            if let external = session.externalCurrent { rows.append(Row(item: external, kind: .nowPlaying)) }
         }
+        rows += session.foreignUpcoming.map { Row(item: $0, kind: .foreign) }
         rows += session.state.upNext.map { Row(item: $0, kind: .upcoming) }
         return rows
     }
 
-    /// Where the list rests: the first upcoming song. Played and now-playing rows sit above it,
-    /// for context when someone scrolls up.
-    private var homeID: UUID? { session.state.upNext.first?.id }
+    /// Where the list rests: the first song still to play. Played and now-playing rows sit above
+    /// it, for context when someone scrolls up.
+    private var homeID: UUID? { session.foreignUpcoming.first?.id ?? session.state.upNext.first?.id }
 
     var body: some View {
         let rows = rows
@@ -61,13 +70,14 @@ struct UpNextList: View {
             List {
                 ForEach(rows) { row in
                     let item = row.item
-                    let locked = item.id == session.state.lockedNextID
+                    let foreign = row.kind == .foreign
+                    let locked = foreign || item.id == session.state.lockedNextID
                     let upcoming = row.kind == .upcoming
                     UpNextRow(
-                        item: item, locked: locked, nowPlaying: row.kind == .nowPlaying,
+                        item: item, locked: locked, foreign: foreign, nowPlaying: row.kind == .nowPlaying,
                         hidden: arriving.contains(item.id), onArtworkFrame: onArtworkFrame
                     )
-                    .opacity(row.kind == .upcoming ? 1 : 0.4)
+                    .opacity(upcoming || foreign ? 1 : 0.4)
                     .allowsHitTesting(upcoming)
                     .modifier(RemoveMenu(enabled: upcoming && (canRemoveByMenu(item) || session.isOwnRequest(item)) && !locked) {
                         withAnimation(.spring(duration: 0.4, bounce: 0.1)) { _ = session.remove(item.id) }
@@ -204,6 +214,8 @@ struct UpNextList: View {
 private struct UpNextRow: View {
     let item: QueueItem
     let locked: Bool
+    /// In Spotify's own queue, not Canopy's.
+    var foreign = false
     var nowPlaying = false
     let hidden: Bool
     let onArtworkFrame: (UUID, CGRect) -> Void
@@ -238,7 +250,7 @@ private struct UpNextRow: View {
                 Image(systemName: "lock.fill")
                     .font(.system(size: 13))
                     .foregroundStyle(.white.opacity(0.4))
-                    .accessibilityLabel("Locked in as next")
+                    .accessibilityLabel(foreign ? "Queued on Spotify" : "Locked in as next")
             }
         }
         .opacity(hidden ? 0 : 1)

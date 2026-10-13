@@ -851,7 +851,7 @@ final class AppModel {
     /// Announces this zone (or refreshes what's playing in the announcement).
     func advertiseZone() {
         guard zoneRole == .hub, let server, let address = session.lanAddress else { return }
-        let playing = session.state.current.map { "\($0.track.title) – \($0.track.artist)" } ?? ""
+        let playing = session.nowPlaying.map { "\($0.track.title) – \($0.track.artist)" } ?? ""
         advertisedPlaying = playing
         var txt = [
             "name": zoneName, "kind": HubKind.ipad.rawValue, "addr": address, "hub": deviceID, "playing": String(playing.prefix(120)),
@@ -868,7 +868,7 @@ final class AppModel {
 
     /// Called when the current song changes.
     func zoneSongChanged() {
-        let playing = session.state.current.map { "\($0.track.title) – \($0.track.artist)" } ?? ""
+        let playing = session.nowPlaying.map { "\($0.track.title) – \($0.track.artist)" } ?? ""
         if playing != advertisedPlaying { advertiseZone() }
     }
 

@@ -165,7 +165,8 @@ struct RootView: View {
     }
 
     var body: some View {
-        let current = model.session.state.current
+        // What's actually playing (in a Spotify zone, possibly a track from outside the queue).
+        let current = model.session.nowPlaying
         let takeover = Capture.isOn ? nil : easterEgg.takeover(for: current)
         Group {
             switch model.zoneRole {
@@ -273,6 +274,27 @@ struct RootView: View {
                 }
                 await model.play()
                 model.lock()
+            }
+            // `-fakeSpotifyFollow` poses follow mode (Spotify zones) on the demo party, since
+            // Spotify can't be reached from the simulator: a track from outside the queue playing
+            // ("From Spotify"), two songs in Spotify's own queue above Up next, and the next song
+            // locked. `-fakeSpotifyIssue` shows the host's "Couldn't queue" line instead of the lock.
+            // Held for as long as this session lasts (the demo player moving on would clear it).
+            if args.contains("-fakeSpotifyFollow"), model.isDemo {
+                let session = model.session
+                let colors = { (bg: String, sec: String) in ArtworkColors(background: bg, primary: "#FFFFFF", secondary: sec) }
+                let external = QueueTrack(id: "spotify:track:fake-external", title: "Espresso", artist: "Sabrina Carpenter",
+                                          album: "Short n' Sweet", duration: 175, colors: colors("#5A3A1E", "#E8B07A"))
+                let foreign = [
+                    QueueTrack(id: "spotify:track:fake-q1", title: "Good Luck, Babe!", artist: "Chappell Roan", duration: 218, colors: colors("#7A1F3D", "#F29BB8")),
+                    QueueTrack(id: "spotify:track:fake-q2", title: "Birds of a Feather", artist: "Billie Eilish", duration: 210, colors: colors("#1E3A5A", "#8CB8E8")),
+                ]
+                let issue = args.contains("-fakeSpotifyIssue") ? "Couldn't queue the next song on Spotify" : nil
+                while model.session === session {
+                    session.serviceName = "Spotify"
+                    session.debugPoseFollow(external: external, foreign: foreign, issue: issue)
+                    try? await Task.sleep(for: .seconds(1))
+                }
             }
             #endif
         }

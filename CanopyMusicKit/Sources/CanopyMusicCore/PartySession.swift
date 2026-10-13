@@ -1104,8 +1104,8 @@ public final class PartySession {
 
     #if DEBUG
     /// `-fakeSpotifyFollow` (debug builds): poses follow mode's state on any engine, so the UI can
-    /// be seen without Spotify: a foreign track playing, the player's own queue, our next song
-    /// locked, and optionally the host's issue line.
+    /// be seen without Spotify: a foreign track playing, the player's own queue, and our next song
+    /// locked; or, with `issue`, the host's issue line (and nothing locked, as after giving up).
     public func debugPoseFollow(external: QueueTrack?, foreign: [QueueTrack], issue: String? = nil) {
         guard remote == nil else { return }
         if externalCurrent?.track.id != external?.id {
@@ -1113,7 +1113,7 @@ public final class PartySession {
         }
         setForeignUpcoming(foreign)
         playerIssue = issue
-        if state.lockedNextID == nil, !state.upNext.isEmpty { mutate { $0.lockNext() } } else { broadcast() }
+        if issue == nil, state.lockedNextID == nil, !state.upNext.isEmpty { mutate { $0.lockNext() } } else { broadcast() }
     }
     #endif
 

@@ -627,6 +627,8 @@ struct TVPartyView: View {
     private func nowPlaying(_ item: QueueItem?, art: CGFloat) -> some View {
         VStack(alignment: .leading, spacing: 0) {
             TVArtwork(track: item?.track, cornerRadius: 22)
+                // Its video, if it has one, goes with this page (`TVMotionArtworkView`).
+                .overlay { TVMotionArtworkView(track: item?.track, catalog: model.session.catalog, cornerRadius: 22) }
                 .frame(width: art, height: art)
                 .shadow(color: .black.opacity(0.4), radius: 30, y: 16)
             VStack(alignment: .leading, spacing: 0) {

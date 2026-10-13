@@ -1,8 +1,9 @@
 import SwiftUI
 
 /// Setup's first step, the first time "Create a new zone" is pressed: pick Apple Music or Spotify
-/// (or the demo). Spotify gets a second step for the host's own Client ID and sign-in, then asks
-/// where music plays. Then the phone-queueing step, and setup's second step, the zone's name and
+/// (or the demo); each card says where its service stands. Spotify, if it isn't signed in, pushes
+/// its setup page (the host's own developer app, Client ID and sign-in), then asks where music
+/// plays. Then the phone-queueing step, and setup's second step, the zone's name and
 /// PIN (`CreateZoneView`). It never comes back once a service is chosen.
 struct OnboardingView: View {
     @Environment(AppModel.self) private var model
@@ -71,7 +72,8 @@ struct OnboardingView: View {
                     ServiceCard(
                         icon: Image("AppleMusicIcon"), iconCornerRadius: 0.225,
                         name: "Apple Music",
-                        detail: "Plays right on this \(DeviceKind.noun), to any AirPlay speakers."
+                        detail: "Plays right on this \(DeviceKind.noun), to any AirPlay speakers.",
+                        status: model.serviceDetail(.appleMusic)
                     ) {
                         model.chooseProvider(.appleMusic)
                         Task {
@@ -83,7 +85,8 @@ struct OnboardingView: View {
                     ServiceCard(
                         icon: Image("SpotifyIcon"), iconCornerRadius: 0.5,
                         name: "Spotify",
-                        detail: "Controls Spotify on this \(DeviceKind.noun) or an Apple TV. Needs Premium and a free developer app."
+                        detail: "Controls Spotify on this \(DeviceKind.noun) or an Apple TV. Needs Premium and a free developer app.",
+                        status: model.serviceDetail(.spotify)
                     ) {
                         // Already signed in (e.g. a reinstall kept the sign-in): no need to sign in again.
                         if model.spotifyAuth.isSignedIn, !model.spotifyClientID.isEmpty {
@@ -120,6 +123,9 @@ private struct ServiceCard: View {
     let iconCornerRadius: CGFloat
     let name: String
     let detail: String
+    /// The service's state (`AppModel.serviceDetail`), under the name, as the start screen's
+    /// service menu says it.
+    let status: String?
     let action: () -> Void
 
     var body: some View {
@@ -130,8 +136,15 @@ private struct ServiceCard: View {
                     .scaledToFill()
                     .frame(width: 88, height: 88)
                     .clipShape(RoundedRectangle(cornerRadius: 88 * iconCornerRadius, style: .continuous))
-                Text(name)
-                    .font(.system(size: 26, weight: .bold))
+                VStack(spacing: 4) {
+                    Text(name)
+                        .font(.system(size: 26, weight: .bold))
+                    if let status {
+                        Text(status)
+                            .font(.system(size: 15, weight: .semibold))
+                            .foregroundStyle(.white.opacity(0.85))
+                    }
+                }
                 Text(detail)
                     .font(.system(size: 15))
                     .foregroundStyle(.white.opacity(0.6))
@@ -139,7 +152,7 @@ private struct ServiceCard: View {
                     .fixedSize(horizontal: false, vertical: true)
             }
             .padding(28)
-            .frame(width: 320, height: 300)
+            .frame(width: 320, height: 320)
             .contentShape(RoundedRectangle(cornerRadius: 32, style: .continuous))
         }
         .buttonStyle(.plain)
@@ -147,8 +160,11 @@ private struct ServiceCard: View {
     }
 }
 
-/// Client ID + sign-in. There's no skip: Spotify isn't selectable until this succeeds.
-/// Used by onboarding and when switching to Spotify on the start screen.
+/// Spotify's setup page: how to create the Spotify developer app, its Client ID, and the
+/// sign-in, with Advanced (the sign-in page) for people hosting their own relay. A page of its
+/// own, scrolling, so nothing is cramped. There's no skip: Spotify isn't chosen until the sign-in
+/// succeeds (`done`); Back (`back`) leaves the service as it was. Pushed by setup's service step,
+/// and shown full screen from the start screen's Music row.
 struct SpotifySetupStep: View {
     @Environment(AppModel.self) private var model
     @State private var clientID = SpotifyConfig.clientID
@@ -164,75 +180,55 @@ struct SpotifySetupStep: View {
         self.done = done
     }
 
-    private static let readme = URL(string: "https://github.com/narenh/canopy-music#spotify")!
-
     var body: some View {
-        VStack(spacing: 28) {
-            Image("SpotifyIcon")
-                .resizable()
-                .frame(width: 72, height: 72)
-            Text("Connect Spotify")
-                .font(.system(size: 36, weight: .bold))
-
-            VStack(alignment: .leading, spacing: 12) {
-                step(1, "Create an app at developer.spotify.com/dashboard (log in with your Premium account).")
-                step(2, "In the app's settings, add this Redirect URI and check **Web API**:") {
-                    RedirectURIRow(uri: model.spotifyRedirectURI)
+        ScrollView {
+            VStack(alignment: .leading, spacing: 0) {
+                HStack {
+                    Button(action: back) {
+                        Image(systemName: "chevron.left")
+                            .font(.system(size: 18, weight: .semibold))
+                            .frame(width: 32, height: 32)
+                    }
+                    .buttonStyle(.glass)
+                    .tint(.primary)
+                    .buttonBorderShape(.circle)
+                    .accessibilityLabel("Back")
+                    Spacer()
+                    Image("SpotifyIcon")
+                        .resizable()
+                        .frame(width: 44, height: 44)
                 }
-                step(3, "Copy the app's Client ID and paste it below.")
-                Link("Full instructions on GitHub", destination: Self.readme)
-                    .font(.system(size: 15, weight: .semibold))
-                    .padding(.leading, 36)
-            }
-            .frame(maxWidth: 560, alignment: .leading)
+                .padding(.bottom, 22)
 
-            SpotifyRedirectNotice()
+                Text("Connect Spotify")
+                    .font(.system(size: 36, weight: .bold))
+                Text("Canopy Music plays Spotify through a developer app you create. It's free, and you only do this once.")
+                    .font(.system(size: 18))
+                    .foregroundStyle(.white.opacity(0.6))
+                    .fixedSize(horizontal: false, vertical: true)
+                    .padding(.top, 6)
+                    .padding(.bottom, 28)
 
-            VStack(spacing: 14) {
+                steps
+                    .padding(.bottom, 30)
+
+                Text("Client ID")
+                    .font(.system(size: 14, weight: .semibold))
+                    .foregroundStyle(.white.opacity(0.6))
+                    .padding(.leading, 20)
+                    .padding(.bottom, 8)
                 TextField("", text: $clientID, prompt: Text("Client ID").foregroundStyle(.white.opacity(0.4)))
                     .font(.system(size: 20).monospaced())
                     .textInputAutocapitalization(.never)
                     .autocorrectionDisabled()
                     .padding(.horizontal, 22)
-                    .frame(width: 560, height: 56)
+                    .frame(height: 56)
                     .glassEffect(.regular.interactive(), in: Capsule())
+                    .accessibilityLabel("Client ID")
 
-                // Quiet: only for people who host their own copy of the sign-in page.
-                Button {
-                    withAnimation(.easeInOut(duration: 0.25)) { showsAdvanced.toggle() }
-                } label: {
-                    HStack(spacing: 5) {
-                        Text("Advanced")
-                        Image(systemName: "chevron.right")
-                            .font(.system(size: 12, weight: .semibold))
-                            .rotationEffect(.degrees(showsAdvanced ? 90 : 0))
-                    }
-                    .font(.system(size: 15, weight: .semibold))
-                    .foregroundStyle(.white.opacity(0.6))
-                    .frame(width: 560, alignment: .leading)
-                    .padding(.leading, 44)
-                }
-                .buttonStyle(.plain)
-                .accessibilityValue(showsAdvanced ? "Shown" : "Hidden")
+                SpotifyRedirectNotice()
+                    .padding(.top, 16)
 
-                if showsAdvanced {
-                    VStack(alignment: .leading, spacing: 6) {
-                        Text("Spotify sign-in page")
-                            .font(.system(size: 14, weight: .semibold))
-                            .foregroundStyle(.white.opacity(0.6))
-                            .padding(.leading, 20)
-                        SpotifySignInPageField(isUsable: $signInPageUsable)
-                    }
-                    .frame(width: 560)
-                    .transition(.opacity.combined(with: .move(edge: .top)))
-                }
-            }
-
-            HStack(spacing: 16) {
-                Button("Back", action: back)
-                    .buttonStyle(.glass)
-                    .tint(.primary)
-                    .controlSize(.large)
                 Button {
                     working = true
                     model.setSpotifyClientID(clientID)
@@ -242,22 +238,104 @@ struct SpotifySetupStep: View {
                         if model.spotifyAuth.isSignedIn { done() }
                     }
                 } label: {
-                    if working { ProgressView() } else { Text("Sign in to Spotify").bold() }
+                    ZStack {
+                        Text("Sign in to Spotify").bold().opacity(working ? 0 : 1)
+                        if working { ProgressView() }
+                    }
+                    .frame(maxWidth: .infinity)
                 }
                 .buttonStyle(.glassProminent)
                 .controlSize(.large)
                 // Sign-in stays off until the sign-in page is good (or the default).
                 .disabled(clientID.trimmingCharacters(in: .whitespaces).isEmpty || working || (showsAdvanced && !signInPageUsable))
+                .padding(.top, 16)
+
+                Text("Your family can share one app if each person's email is added under User Management in the app's settings.")
+                    .font(.system(size: 15))
+                    .foregroundStyle(.white.opacity(0.55))
+                    .fixedSize(horizontal: false, vertical: true)
+                    .padding(.horizontal, 8)
+                    .padding(.top, 14)
+
+                Divider()
+                    .overlay(.white.opacity(0.15))
+                    .padding(.top, 34)
+                advanced
             }
+            .frame(maxWidth: 600, alignment: .leading)
+            .padding(.horizontal, 40)
+            .padding(.vertical, 32)
+            .frame(maxWidth: .infinity)
         }
-        .padding(40)
+        .scrollBounceBehavior(.basedOnSize)
         #if DEBUG
         // `-spotifyAdvanced`: opens Advanced (the simulator can't be tapped from here).
         .onAppear { if ProcessInfo.processInfo.arguments.contains("-spotifyAdvanced") { showsAdvanced = true } }
         #endif
     }
 
-    /// `text` is Markdown, so `code` spans render monospaced and `**` bold.
+    /// Creating the Spotify app, step by step. Markdown: `**` bold, `[…](…)` links.
+    private var steps: some View {
+        VStack(alignment: .leading, spacing: 16) {
+            step(1, "Go to [**developer.spotify.com/dashboard**](https://developer.spotify.com/dashboard) and log in with your Spotify account. Playback needs Spotify Premium.")
+            step(2, "If Spotify asks, accept the Developer Terms.")
+            step(3, "Tap **Create app**.")
+            step(4, "Give it any name and description, like “Canopy Music”.")
+            step(5, "Under **Redirect URIs**, paste") {
+                RedirectURIRow(uri: model.spotifyRedirectURI)
+                Text("and tap **Add**.")
+                    .font(.system(size: 17))
+                    .foregroundStyle(.white.opacity(0.8))
+            }
+            step(6, "Under **Which API/SDKs are you planning to use?**, check **Web API**.")
+            step(7, "Agree to the terms and tap **Save**.")
+            step(8, "On your new app's page, open **Settings** and copy the **Client ID**.")
+            step(9, "Paste it below.")
+        }
+    }
+
+    /// Quiet, and collapsed: only for people who host their own copy of the sign-in relay.
+    private var advanced: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            Button {
+                withAnimation(.easeInOut(duration: 0.25)) { showsAdvanced.toggle() }
+            } label: {
+                VStack(alignment: .leading, spacing: 4) {
+                    HStack(spacing: 5) {
+                        Text("Advanced")
+                        Image(systemName: "chevron.right")
+                            .font(.system(size: 12, weight: .semibold))
+                            .rotationEffect(.degrees(showsAdvanced ? 90 : 0))
+                    }
+                    .font(.system(size: 15, weight: .semibold))
+                    .foregroundStyle(.white.opacity(0.6))
+                    Text("Only for people who host their own copy of the Canopy Music sign-in relay. Most people can ignore this.")
+                        .font(.system(size: 14))
+                        .foregroundStyle(.white.opacity(0.4))
+                        .multilineTextAlignment(.leading)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(.horizontal, 8)
+                .padding(.vertical, 14)
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .accessibilityValue(showsAdvanced ? "Shown" : "Hidden")
+
+            if showsAdvanced {
+                VStack(alignment: .leading, spacing: 6) {
+                    Text("Spotify sign-in page")
+                        .font(.system(size: 14, weight: .semibold))
+                        .foregroundStyle(.white.opacity(0.6))
+                        .padding(.leading, 20)
+                    SpotifySignInPageField(isUsable: $signInPageUsable)
+                }
+                .transition(.opacity.combined(with: .move(edge: .top)))
+            }
+        }
+    }
+
     private func step(_ number: Int, _ text: LocalizedStringKey) -> some View {
         step(number, text) { EmptyView() }
     }
@@ -266,12 +344,13 @@ struct SpotifySetupStep: View {
         HStack(alignment: .firstTextBaseline, spacing: 14) {
             Text("\(number)")
                 .font(.system(size: 15, weight: .bold))
-                .frame(width: 22, height: 22)
+                .frame(width: 24, height: 24)
                 .background(.white.opacity(0.15), in: Circle())
             VStack(alignment: .leading, spacing: 8) {
                 Text(text)
                     .font(.system(size: 17))
                     .foregroundStyle(.white.opacity(0.8))
+                    .fixedSize(horizontal: false, vertical: true)
                 below()
             }
         }

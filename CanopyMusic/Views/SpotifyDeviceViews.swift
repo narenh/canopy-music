@@ -3,21 +3,32 @@ import UIKit
 
 /// Host Music section rows for Spotify: who's signed in, and where music plays with a live status.
 /// On the start screen (`switchService` set) the first row, and its chevron, open the service menu.
+/// Signed out, its Sign in opens Spotify's setup page (`openSetup`).
 struct SpotifyStatusRows: View {
     @Environment(AppModel.self) private var model
     let switchService: ((AppModel.Provider) -> Void)?
+    let openSetup: () -> Void
 
     var body: some View {
         @Bindable var model = model
         if model.spotifyClientID.isEmpty || !model.spotifyAuth.isSignedIn {
             HStack(spacing: 12) {
-                Button {
-                    Task { await model.signInToSpotify() }
-                } label: {
-                    Label("Sign in to Spotify", systemImage: "person.crop.circle.badge.plus")
+                ServiceMenu(choose: switchService) {
+                    HStack(spacing: 12) {
+                        Image("SpotifyIcon")
+                            .resizable()
+                            .frame(width: 28, height: 28)
+                            .saturation(0)
+                            .opacity(0.5)
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text("Spotify")
+                            Text("Not connected").font(.footnote).foregroundStyle(.secondary)
+                        }
+                        Spacer(minLength: 8)
+                    }
                 }
-                .disabled(model.spotifyClientID.isEmpty)
-                Spacer(minLength: 8)
+                Button("Sign in", action: openSetup)
+                    .buttonStyle(.glassProminent)
                 if let switchService {
                     ServiceMenu(choose: switchService) { ServiceChevron() }
                 }

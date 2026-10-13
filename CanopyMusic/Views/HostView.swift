@@ -24,16 +24,22 @@ struct HostView: View {
         model.isLive ? nil : { next in chooseService(next) }
     }
 
-    /// Spotify signs in first if it isn't yet (backing out keeps the current service), then
-    /// asks where music plays (`AppModel.switchService`).
+    /// Spotify signs in first if it isn't yet, on its setup page (backing out keeps the current
+    /// service), then asks where music plays (`AppModel.switchService`).
     private func chooseService(_ next: AppModel.Provider) {
         guard next != model.provider else { return }
         if next == .spotify, !model.spotifyAuth.isSignedIn || model.spotifyClientID.isEmpty {
-            signedInToSpotify = false
-            signingInToSpotify = true
+            openSpotifySetup()
         } else {
             model.switchService(to: next)
         }
+    }
+
+    /// Spotify's setup page, full screen: from the menu, or the Music row's Sign in when Spotify
+    /// is chosen but signed out.
+    private func openSpotifySetup() {
+        signedInToSpotify = false
+        signingInToSpotify = true
     }
 
     /// Start on the start screen; Back to party (just locking) in a live zone.
@@ -76,7 +82,14 @@ struct HostView: View {
         // "Where should music play?": the Spotify rows, Start finding no device, or switching.
         .spotifyDevicePicker()
         .fullScreenCover(isPresented: $signingInToSpotify, onDismiss: {
-            if signedInToSpotify { model.switchService(to: .spotify) }
+            guard signedInToSpotify else { return }
+            // Signed in: Spotify is chosen now, then "Where should music play?" (already
+            // chosen: signed in again, the device is asked for if there isn't one).
+            if model.provider != .spotify {
+                model.switchService(to: .spotify)
+            } else if model.spotifyDeviceID == nil {
+                model.isPickingSpotifyDevice = true
+            }
         }) {
             ZStack {
                 LinearGradient(colors: [Color(white: 0.11), Color(white: 0.04)], startPoint: .top, endPoint: .bottom)
@@ -105,6 +118,9 @@ struct HostView: View {
             if let i = args.firstIndex(of: "-switchService"), i + 1 < args.count,
                let next = AppModel.Provider(rawValue: args[i + 1]), let switchService {
                 Task { try? await Task.sleep(for: .seconds(2)); switchService(next) }
+            }
+            if args.contains("-openServiceMenu") {
+                Task { try? await Task.sleep(for: .seconds(2)); DebugMenuOpener.openWidestMenu() }
             }
         }
         #endif
@@ -159,7 +175,7 @@ struct HostView: View {
                 // in a live zone it just shows the service.
                 Section("Music") {
                     if model.provider == .spotify {
-                        SpotifyStatusRows(switchService: switchService)
+                        SpotifyStatusRows(switchService: switchService, openSetup: openSpotifySetup)
                     } else if model.isDemo {
                         HStack(spacing: 12) {
                             ServiceMenu(choose: switchService) {
@@ -430,8 +446,9 @@ private struct AppleMusicStatusRow: View {
 
 // MARK: - Switching services
 
-/// The start screen's service switcher: the Music row, and its down chevron, open a menu of the
-/// services. In a live zone (`choose` is nil) it's just the row: the service changes only by
+/// The start screen's service switcher: the Music row is a full-width dropdown. The row, and its
+/// down chevron, open a menu offering only the other service, with that service's state on a
+/// second line. In a live zone (`choose` is nil) it's just the row: the service changes only by
 /// ending the zone.
 struct ServiceMenu<Content: View>: View {
     @Environment(AppModel.self) private var model
@@ -441,15 +458,13 @@ struct ServiceMenu<Content: View>: View {
     var body: some View {
         if let choose {
             Menu {
-                ForEach([AppModel.Provider.appleMusic, .spotify], id: \.self) { provider in
+                ForEach([AppModel.Provider.appleMusic, .spotify].filter { $0 != model.provider }, id: \.self) { provider in
                     Button {
                         choose(provider)
                     } label: {
-                        if provider == model.provider {
-                            Label(provider.title, systemImage: "checkmark")
-                        } else {
-                            Text(provider.title)
-                        }
+                        Text(provider.title)
+                        if let detail = model.serviceDetail(provider) { Text(detail) }
+                        Image(provider == .spotify ? "SpotifyIcon" : "AppleMusicIcon")
                     }
                 }
             } label: {
@@ -463,6 +478,53 @@ struct ServiceMenu<Content: View>: View {
         }
     }
 }
+
+extension AppModel {
+    /// A service's state in a line, as the service menu and setup's service step say it:
+    /// Spotify's sign-in (choosing it when it isn't connected opens its setup page), and Apple
+    /// Music's access when something's in the way.
+    func serviceDetail(_ provider: Provider) -> String? {
+        switch provider {
+        case .spotify:
+            guard spotifyAuth.isSignedIn, !spotifyClientID.isEmpty else { return "Not connected. Tap to sign in." }
+            return spotifyDisplayName.map { "Signed in as \($0)" } ?? "Signed in"
+        case .appleMusic:
+            switch authorization {
+            case .authorized: return canPlayAppleMusic ? nil : "No subscription"
+            case .denied, .restricted: return "Access is off"
+            default: return "Not connected"
+            }
+        default:
+            return nil
+        }
+    }
+}
+
+#if DEBUG
+/// `-openServiceMenu`: opens the start screen's Music menu, for screenshots (the simulator can't
+/// be tapped from here). Finds the widest menu button on screen (the Music row's) and presents its
+/// menu through UIKit's private `_presentMenuAtLocation:`. Debug builds only.
+@MainActor
+enum DebugMenuOpener {
+    static func openWidestMenu() {
+        guard let window = UIApplication.shared.connectedScenes.compactMap({ ($0 as? UIWindowScene)?.keyWindow }).first else { return }
+        var found: [(view: UIView, interaction: UIContextMenuInteraction)] = []
+        func walk(_ view: UIView) {
+            if view is UIButton {
+                for case let interaction as UIContextMenuInteraction in view.interactions { found.append((view, interaction)) }
+            }
+            view.subviews.forEach(walk)
+        }
+        walk(window)
+        guard let target = found.max(by: { $0.view.bounds.width < $1.view.bounds.width }) else { return }
+        let selector = NSSelectorFromString("_presentMenuAtLocation:")
+        guard let method = class_getInstanceMethod(type(of: target.interaction), selector) else { return }
+        typealias Present = @convention(c) (AnyObject, Selector, CGPoint) -> Void
+        let present = unsafeBitCast(method_getImplementation(method), to: Present.self)
+        present(target.interaction, selector, CGPoint(x: target.view.bounds.midX, y: target.view.bounds.maxY))
+    }
+}
+#endif
 
 /// The down chevron at the end of the Music row.
 struct ServiceChevron: View {

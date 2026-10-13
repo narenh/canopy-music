@@ -86,7 +86,11 @@ private final class TVLoopingVideoView: UIView {
     private var player: AVQueuePlayer?
     private var looper: AVPlayerLooper?
     private var readyObservation: NSKeyValueObservation?
+    private var statusObservation: NSKeyValueObservation?
+    private var interruptionObserver: NSObjectProtocol?
     private var onReady: (@MainActor () -> Void)?
+    /// Whether we want it playing (`setActive`), for the debug log.
+    private var wantsToPlay = false
 
     func start(url: URL, onReady: @escaping @MainActor () -> Void) {
         self.onReady = onReady
@@ -108,14 +112,41 @@ private final class TVLoopingVideoView: UIView {
             guard layer.isReadyForDisplay else { return }
             Task { @MainActor [weak self] in self?.revealOnce() }
         }
+        // Debug log of what the player does, to check the music never pauses it (the app's audio
+        // session is `.ambient` for that; see `TVModel.init`).
+        statusObservation = player.observe(\.timeControlStatus, options: [.new]) { [weak self] player, _ in
+            Task { @MainActor [weak self] in self?.statusChanged(player) }
+        }
+        interruptionObserver = NotificationCenter.default.addObserver(
+            forName: AVAudioSession.interruptionNotification, object: nil, queue: .main
+        ) { note in
+            let type = (note.userInfo?[AVAudioSessionInterruptionTypeKey] as? UInt).flatMap(AVAudioSession.InterruptionType.init)
+            motionLog("audio session interruption \(type == .began ? "began" : type == .ended ? "ended" : "?")")
+        }
     }
 
     func setActive(_ active: Bool) {
         guard let player else { return }
+        wantsToPlay = active
         if active { player.play() } else { player.pause() }
     }
 
+    private func statusChanged(_ player: AVPlayer) {
+        let status = switch player.timeControlStatus {
+        case .paused: "paused"
+        case .playing: "playing"
+        case .waitingToPlayAtSpecifiedRate: "waiting (\(player.reasonForWaitingToPlay?.rawValue ?? "?"))"
+        @unknown default: "unknown"
+        }
+        motionLog("video \(status), wants to play: \(wantsToPlay)")
+    }
+
     func stop() {
+        wantsToPlay = false
+        statusObservation?.invalidate()
+        statusObservation = nil
+        if let interruptionObserver { NotificationCenter.default.removeObserver(interruptionObserver) }
+        interruptionObserver = nil
         readyObservation?.invalidate()
         readyObservation = nil
         onReady = nil
@@ -132,4 +163,19 @@ private final class TVLoopingVideoView: UIView {
         self.onReady = nil
         onReady()
     }
+}
+
+/// Debug builds: a line in Library/Caches/tv.log (as `TVModel.debugLog`).
+private func motionLog(_ line: String) {
+    #if DEBUG
+    let url = URL.cachesDirectory.appending(path: "tv.log")
+    let text = "\(Date()) [motion] \(line)\n"
+    if let handle = try? FileHandle(forWritingTo: url) {
+        handle.seekToEndOfFile()
+        handle.write(Data(text.utf8))
+        try? handle.close()
+    } else {
+        try? Data(text.utf8).write(to: url)
+    }
+    #endif
 }

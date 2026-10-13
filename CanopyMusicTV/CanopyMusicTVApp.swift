@@ -1,3 +1,4 @@
+import AVFoundation
 import CanopyMusicCore
 import CanopyMusicServer
 @preconcurrency import MusicKit
@@ -102,6 +103,10 @@ final class TVModel {
             UserDefaults.standard.set(deviceID, forKey: "deviceID")
         }
         session = PartySession(catalog: DemoOrEmptyCatalog(), engine: SilentEngine())
+        // The app's own audio is only the motion artwork's silent video; the music plays in the
+        // Apple Music player's own session. Left at the default (not mixable), the music starting
+        // interrupted this session and paused the video. Ambient mixes, so it never is.
+        try? AVAudioSession.sharedInstance().setCategory(.ambient)
         restoreZoneIfNeeded()
     }
 

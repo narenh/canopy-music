@@ -248,6 +248,8 @@ html.sheet-open, html.sheet-open body { overflow: hidden; }
   flex: none; padding: 4px 16px calc(env(safe-area-inset-bottom) + 12px);
   background: var(--base); border-top: 1px solid var(--line);
 }
+/* While typing in setup, the keyboard has the room: Shuffle and Start come back when it closes. */
+#setup:has(input.text-input:focus, input[type="search"]:focus) .picker-foot { display: none; }
 .picker-shuffle { display: flex; justify-content: space-between; align-items: center; gap: 12px; padding: 8px 2px 12px; font-size: 15px; }
 .picker-sheet.busy .playlist-row, .picker-sheet.busy .picker-shuffle { pointer-events: none; }
 .picker-sheet.busy .playlist-row:not(.selected), .picker-sheet.busy .picker-shuffle { opacity: .5; }

@@ -39,7 +39,10 @@ struct AppleMusicCatalog: MusicCatalog {
     /// How the most recent library playlist loads went, including which tracks were left out.
     var reports = PlaylistLoadReports()
     /// Animated album artwork for Now Playing (see `MotionArtwork`).
-    let motionArtwork: MotionArtworkLookup? = MotionArtworkLookup(fetchReportingURL: AppleMusicCatalog.catalogData)
+    let motionArtwork: MotionArtworkLookup? = MotionArtworkLookup(
+        fetchReportingURL: AppleMusicCatalog.catalogData,
+        storefront: { try? await MusicDataRequest.currentCountryCode }
+    )
 
     /// Tracks left out of the last library playlist loaded through this catalog (not on Apple Music,
     /// or no confident match). 0 before any library playlist has loaded.
@@ -598,6 +601,11 @@ private extension MusicKit.Track {
 }
 
 extension QueueTrack {
+    /// Every catalog song becomes a `QueueTrack` here (playlists, search, library tracks matched
+    /// to the catalog, the tvOS refetch). `albumID` comes from data the song already has: its
+    /// `albums` relationship if a request loaded it (none of ours ask for it), else its `url`
+    /// attribute, which Apple Music fills for catalog songs with the album's link
+    /// (".../album/<slug>/<albumId>?i=<songId>"). No extra request.
     init(_ song: Song) {
         self.init(
             id: song.id.rawValue,
@@ -608,7 +616,9 @@ extension QueueTrack {
             artworkURL: song.artwork?.url(width: 1200, height: 1200),
             thumbnailURL: song.artwork?.url(width: 160, height: 160),
             colors: song.artwork.flatMap(ArtworkColors.init),
-            isExplicit: song.contentRating == .explicit
+            isExplicit: song.contentRating == .explicit,
+            albumID: song.albums?.first.map(\.id.rawValue).flatMap { MotionArtwork.isCatalogID($0) ? $0 : nil }
+                ?? MotionArtwork.albumID(inSongURL: song.url)
         )
     }
 }

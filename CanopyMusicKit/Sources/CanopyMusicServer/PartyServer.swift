@@ -306,15 +306,21 @@ public final class PartyServer: Sendable {
                 return text(.notImplemented, "This zone's music service has no motion artwork lookup (Apple Music only).")
             }
             // `&source=service`: what the third-party service (the one motion artwork uses) answers
-            // for the current song, or `&artist=<name>&albumName=<name>`.
+            // for the current song, or `&artist=<name>&albumName=<name>`, as the lookup would ask
+            // it: by album link when the song has a catalog album id, else by name. `&albumID=<id>`
+            // asks by that album's link; `&albumID=` (empty) forces the name search. The response
+            // shows the path taken, each URL requested, the service's response and the verdict.
             if request.query["source"] == "service" {
-                guard let artist = request.query["artist"] ?? current?.artist,
-                      let albumName = request.query["albumName"] ?? current?.album else {
-                    return text(.badRequest, "Add ?current (nothing is playing) or ?artist=<name>&albumName=<name>.")
+                var track = current ?? QueueTrack(id: "", title: "", artist: "", album: "")
+                if let artist = request.query["artist"] { track.artist = artist }
+                if let albumName = request.query["albumName"] { track.album = albumName }
+                if let albumID = request.query["albumID"] { track.albumID = albumID.isEmpty ? nil : albumID }
+                guard track.albumID != nil || (!track.artist.isEmpty && !track.album.isEmpty) else {
+                    return text(.badRequest, "Add ?current (nothing is playing), ?artist=<name>&albumName=<name> or ?albumID=<catalog album id>.")
                 }
                 do {
                     return HTTPResponse(statusCode: .ok, headers: [.contentType: "application/json", .cacheControl: "no-store"],
-                                        body: try await lookup.probeService(artist: artist, album: albumName))
+                                        body: try await lookup.probeService(track: track))
                 } catch {
                     return .serviceFailed(error)
                 }

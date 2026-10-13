@@ -257,5 +257,177 @@ import Testing
         #expect(await requests.urls.count == 2)
         #expect(await apple.urls.isEmpty)
     }
+
+    // MARK: Album link
+
+    static func answer(artist: String, album: String) -> Data {
+        Data(#"{"url": "\#(square)", "url_tall": null, "artist": "\#(artist)", "album": "\#(album)", "isCached": true}"#.utf8)
+    }
+
+    @Test func albumLinks() throws {
+        #expect(MotionArtworkService.albumLink(albumID: "1440833098", storefront: "gb") == "https://music.apple.com/gb/album/1440833098")
+        #expect(MotionArtworkService.albumLink(albumID: "1440833098", storefront: "GB") == "https://music.apple.com/gb/album/1440833098")
+        #expect(MotionArtworkService.albumLink(albumID: "1440833098", storefront: nil) == "https://music.apple.com/us/album/1440833098")
+        #expect(MotionArtworkService.albumLink(albumID: "1440833098", storefront: "") == "https://music.apple.com/us/album/1440833098")
+        #expect(MotionArtworkService.albumLink(albumID: "1440833098", storefront: "usa") == "https://music.apple.com/us/album/1440833098")
+        let url = try #require(MotionArtworkService.albumLinkURL("https://music.apple.com/gb/album/1440833098"))
+        #expect(url.absoluteString == "https://artwork.m8tec.top/api/v1/artwork/url?url=https://music.apple.com/gb/album/1440833098")
+        #expect(Self.query(url) == ["url": "https://music.apple.com/gb/album/1440833098"])
+    }
+
+    @Test func onlyCatalogAlbumIDsAreUsed() {
+        #expect(MotionArtworkService.usableAlbumID("1440833098") == "1440833098")
+        #expect(MotionArtworkService.usableAlbumID(nil) == nil)
+        #expect(MotionArtworkService.usableAlbumID("") == nil)
+        #expect(MotionArtworkService.usableAlbumID("l.abc123") == nil)
+    }
+
+    // MARK: Name guard
+
+    static func matches(_ theirs: (String, String), _ ours: (String, String)) -> Bool {
+        MotionArtworkService.namesMatch(.init(artist: theirs.0, album: theirs.1), artist: ours.0, album: ours.1)
+    }
+
+    @Test func guardAcceptsTheSameAlbum() {
+        #expect(Self.matches(("ILLENIUM", "ODYSSEY"), ("ILLENIUM", "ODYSSEY")))
+        #expect(Self.matches(("illenium", "Odyssey"), ("ILLENIUM", "ODYSSEY")))
+        #expect(Self.matches(("Simon & Garfunkel", "Bookends"), ("Simon  &  Garfunkel", "Bookends")))
+        #expect(Self.matches(("Taylor Swift", "Fearless (Taylor’s Version)"), ("Taylor Swift", "Fearless (Taylor's Version)")))
+        #expect(Self.matches(("Ed Sheeran", "÷"), ("Ed Sheeran", "÷")))
+    }
+
+    @Test func guardRejectsOtherAlbumsAndArtists() {
+        #expect(!Self.matches(("ILLENIUM", "ODYSSEY (Deluxe)"), ("ILLENIUM", "ODYSSEY")))
+        #expect(!Self.matches(("ILLENIUM", "ODYSSEY"), ("ILLENIUM", "ODYSSEY (Deluxe)")))
+        #expect(!Self.matches(("Someone Else", "ODYSSEY"), ("ILLENIUM", "ODYSSEY")))
+        #expect(!Self.matches(("Ed Sheeran", "×"), ("Ed Sheeran", "÷")))
+        #expect(!MotionArtworkService.namesMatch(.init(artist: nil, album: "ODYSSEY"), artist: "ILLENIUM", album: "ODYSSEY"))
+        #expect(!MotionArtworkService.namesMatch(.init(artist: "ILLENIUM", album: nil), artist: "ILLENIUM", album: "ODYSSEY"))
+    }
+
+    @Test func guardIgnoresSingleAndEPSuffixes() {
+        #expect(Self.matches(("Gryffin", "Forever"), ("Gryffin", "Forever - Single")))
+        #expect(Self.matches(("Gryffin", "Forever - Single"), ("Gryffin", "Forever")))
+        #expect(Self.matches(("Gryffin", "Forever - EP"), ("Gryffin", "Forever - Single")))
+        #expect(MotionArtworkService.albumTitle("Forever - single") == "Forever")
+    }
+
+    @Test func guardTakesTheWholeArtistOrTheFirst() {
+        let ours = ("ILLENIUM, Tom Grennan & Alna", "ODYSSEY")
+        #expect(Self.matches(("ILLENIUM", "ODYSSEY"), ours))
+        #expect(Self.matches(("ILLENIUM, Tom Grennan & Alna", "ODYSSEY"), ours))
+        #expect(!Self.matches(("Tom Grennan", "ODYSSEY"), ours))
+        #expect(Self.matches(("Calvin Harris", "Funk Wav Bounces, Vol. 1"), ("Calvin Harris feat. Frank Ocean", "Funk Wav Bounces Vol.1")))
+        #expect(!Self.matches(("Frank Ocean", "Funk Wav Bounces Vol. 1"), ("Calvin Harris feat. Frank Ocean", "Funk Wav Bounces Vol. 1")))
+    }
+
+    @Test func guardFoldsDiacriticsAndPunctuation() {
+        #expect(Self.matches(("Sigur Ros", "Takk…"), ("Sigur Rós", "Takk...")))
+        #expect(Self.matches(("BEYONCÉ", "I AM...SASHA FIERCE"), ("Beyoncé", "I Am... Sasha Fierce")))
+        #expect(Self.matches(("Röyksopp", "Melody A.M."), ("Royksopp", "Melody A. M.")))
+        #expect(MotionArtworkService.normalized("  Hoppípolla — (Live!)  ") == "hoppipolla live")
+    }
+
+    // MARK: Which way the lookup asks
+
+    @Test func asksByAlbumLinkWhenTheTrackHasAnAlbumID() async {
+        let requests = Requests()
+        let lookup = MotionArtworkLookup(fetch: { _ in Data() }, storefront: { "gb" }, serviceLoad: { url in
+            await requests.note(url)
+            // The exact album's answer is taken whatever its names.
+            return (Self.answer(artist: "ILLENIUM", album: "ODYSSEY (Deluxe)"), 200)
+        })
+        var track = Self.track(artist: "ILLENIUM", album: "ODYSSEY")
+        track.albumID = "1440833098"
+        #expect(await lookup.videoURL(for: track) == URL(string: Self.square))
+        #expect(await lookup.videoURL(for: track) == URL(string: Self.square))
+        let urls = await requests.urls
+        #expect(urls.count == 1)
+        #expect(urls.first?.path == "/api/v1/artwork/url")
+        #expect(urls.first.map(Self.query) == ["url": "https://music.apple.com/gb/album/1440833098"])
+    }
+
+    @Test func albumLinkWithoutArtworkIsRememberedAndDoesNotSearch() async {
+        let requests = Requests()
+        let lookup = MotionArtworkLookup(fetch: { _ in Data() }, serviceLoad: { url in
+            await requests.note(url)
+            return (Self.missing, 404)
+        })
+        var track = Self.track(artist: "ILLENIUM", album: "ODYSSEY")
+        track.albumID = "1440833098"
+        #expect(await lookup.videoURL(for: track) == nil)
+        #expect(await lookup.videoURL(for: track) == nil)
+        let urls = await requests.urls
+        #expect(urls.count == 1)
+        #expect(urls.first.map(Self.query) == ["url": "https://music.apple.com/us/album/1440833098"])
+    }
+
+    @Test func searchesByNameWithoutACatalogAlbumID() async {
+        let requests = Requests()
+        let lookup = MotionArtworkLookup(fetch: { _ in Data() }, serviceLoad: { url in
+            await requests.note(url)
+            return (Self.answer(artist: "ILLENIUM", album: "ODYSSEY"), 200)
+        })
+        var track = Self.track(artist: "ILLENIUM", album: "ODYSSEY")
+        track.albumID = "l.libraryAlbum"
+        #expect(await lookup.videoURL(for: track) == URL(string: Self.square))
+        let urls = await requests.urls
+        #expect(urls.map(\.path) == ["/api/v1/artwork/search"])
+        #expect(urls.first.map(Self.query) == ["artist": "ILLENIUM", "album": "ODYSSEY"])
+    }
+
+    @Test func searchAnswerForAnotherAlbumCountsAsNoneAndIsRemembered() async {
+        let requests = Requests()
+        let lookup = MotionArtworkLookup(fetch: { _ in Data() }, serviceLoad: { url in
+            await requests.note(url)
+            return (Self.answer(artist: "ILLENIUM", album: "ODYSSEY (Deluxe)"), 200)
+        })
+        let track = Self.track(artist: "ILLENIUM, Tom Grennan & Alna", album: "ODYSSEY")
+        #expect(await lookup.videoURL(for: track) == nil)
+        #expect(await lookup.videoURL(for: track) == nil)
+        // Both artist candidates were tried once, then the "none" was remembered.
+        #expect(await requests.urls.count == 2)
+    }
+
+    @Test func probeShowsThePathURLResponseAndVerdict() async throws {
+        let lookup = MotionArtworkLookup(fetch: { _ in Data() }, storefront: { "us" }, serviceLoad: { url in
+            url.path.hasSuffix("/url") ? (Self.answer(artist: "ILLENIUM", album: "ODYSSEY"), 200)
+                : (Self.answer(artist: "Someone Else", album: "ODYSSEY"), 200)
+        })
+        var track = Self.track(artist: "ILLENIUM", album: "ODYSSEY")
+        track.albumID = "1440833098"
+        let linkedData = try await lookup.probeService(track: track)
+        let linked = try #require(try JSONSerialization.jsonObject(with: linkedData) as? [String: Any])
+        #expect(linked["path"] as? String == "albumLink")
+        #expect(linked["albumLink"] as? String == "https://music.apple.com/us/album/1440833098")
+        #expect(linked["pickedSquareURL"] as? String == Self.square)
+        let linkRequest = try #require((linked["requests"] as? [[String: Any]])?.first)
+        #expect(linkRequest["url"] as? String == "https://artwork.m8tec.top/api/v1/artwork/url?url=https://music.apple.com/us/album/1440833098")
+        #expect(linkRequest["status"] as? Int == 200)
+        #expect((linkRequest["response"] as? [String: Any])?["album"] as? String == "ODYSSEY")
+        #expect((linkRequest["verdict"] as? String)?.hasPrefix("accepted") == true)
+
+        track.albumID = nil
+        let searchedData = try await lookup.probeService(track: track)
+        let searched = try #require(try JSONSerialization.jsonObject(with: searchedData) as? [String: Any])
+        #expect(searched["path"] as? String == "search")
+        #expect(searched["albumLink"] == nil)
+        #expect(searched["pickedSquareURL"] is NSNull)
+        let searchRequest = try #require((searched["requests"] as? [[String: Any]])?.first)
+        #expect((searchRequest["url"] as? String)?.hasPrefix("https://artwork.m8tec.top/api/v1/artwork/search?") == true)
+        #expect((searchRequest["verdict"] as? String)?.hasPrefix("rejected") == true)
+    }
 }
 #endif
+
+@Suite struct SongLinkAlbumTests {
+    @Test func readsTheAlbumIDFromASongLink() {
+        #expect(MotionArtwork.albumID(inSongURL: URL(string: "https://music.apple.com/us/album/forever/1440833098?i=1440833101")) == "1440833098")
+        #expect(MotionArtwork.albumID(inSongURL: URL(string: "https://music.apple.com/gb/album/1440833098")) == "1440833098")
+        #expect(MotionArtwork.albumID(inSongURL: URL(string: "https://music.apple.com/album/1989-taylors-version/1708308989?i=1")) == "1708308989")
+        #expect(MotionArtwork.albumID(inSongURL: URL(string: "https://music.apple.com/us/song/forever/1440833101")) == nil)
+        #expect(MotionArtwork.albumID(inSongURL: URL(string: "https://example.com/us/album/forever/1440833098")) == nil)
+        #expect(MotionArtwork.albumID(inSongURL: URL(string: "https://music.apple.com/us/album/forever")) == nil)
+        #expect(MotionArtwork.albumID(inSongURL: nil) == nil)
+    }
+}

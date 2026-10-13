@@ -24,11 +24,15 @@ public struct QueueTrack: Codable, Hashable, Sendable, Identifiable {
     public var thumbnailURL: URL?
     public var colors: ArtworkColors?
     public var isExplicit: Bool
+    /// The Apple Music catalog album the song is on, when known (catalog songs). Lets motion
+    /// artwork ask for that exact album rather than searching by name. Optional in JSON: saved
+    /// queues and snapshots from before it decode without it, and older peers ignore it.
+    public var albumID: String?
 
     public init(
         id: String, title: String, artist: String, album: String = "",
         duration: TimeInterval? = nil, artworkURL: URL? = nil, thumbnailURL: URL? = nil,
-        colors: ArtworkColors? = nil, isExplicit: Bool = false
+        colors: ArtworkColors? = nil, isExplicit: Bool = false, albumID: String? = nil
     ) {
         self.id = id
         self.title = title
@@ -39,6 +43,25 @@ public struct QueueTrack: Codable, Hashable, Sendable, Identifiable {
         self.thumbnailURL = thumbnailURL
         self.colors = colors
         self.isExplicit = isExplicit
+        self.albumID = albumID
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case id, title, artist, album, duration, artworkURL, thumbnailURL, colors, isExplicit, albumID
+    }
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        id = try container.decode(String.self, forKey: .id)
+        title = try container.decode(String.self, forKey: .title)
+        artist = try container.decode(String.self, forKey: .artist)
+        album = try container.decode(String.self, forKey: .album)
+        duration = try container.decodeIfPresent(TimeInterval.self, forKey: .duration)
+        artworkURL = try container.decodeIfPresent(URL.self, forKey: .artworkURL)
+        thumbnailURL = try container.decodeIfPresent(URL.self, forKey: .thumbnailURL)
+        colors = try container.decodeIfPresent(ArtworkColors.self, forKey: .colors)
+        isExplicit = try container.decode(Bool.self, forKey: .isExplicit)
+        albumID = try container.decodeIfPresent(String.self, forKey: .albumID)
     }
 }
 

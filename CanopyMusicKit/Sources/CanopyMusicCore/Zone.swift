@@ -1,21 +1,97 @@
 import Foundation
 
-/// What a hub is: an iPad running the party, or an Apple TV.
+/// What a hub is: an iPad running the party, or an Apple TV. A Mac (the iPad app, "Designed for
+/// iPad") is `ipad` here, since older peers can't decode a new case; it says which Mac it is in
+/// the separate, optional `device` field beside it (`MacKind`).
 public enum HubKind: String, Codable, Sendable {
     case ipad, tv
 }
+
+/// The kind of Mac a hub or display runs on. On the wire (the Bonjour TXT record's `device`,
+/// snapshots' `hubDevice`, the display hello's `device`) as the raw value; absent for iPads and
+/// Apple TVs, and ignored by peers from before it.
+public enum MacKind: String, CaseIterable, Sendable {
+    case macBookAir = "MacBookAir", macBookPro = "MacBookPro", iMac = "iMac", macMini = "Macmini",
+         macStudio = "MacStudio", macPro = "MacPro", mac = "Mac"
+
+    /// What it's called in copy: "MacBook Air", "iMac", "Mac mini", …, or "Mac".
+    public var noun: String {
+        switch self {
+        case .macBookAir: "MacBook Air"
+        case .macBookPro: "MacBook Pro"
+        case .iMac: "iMac"
+        case .macMini: "Mac mini"
+        case .macStudio: "Mac Studio"
+        case .macPro: "Mac Pro"
+        case .mac: "Mac"
+        }
+    }
+
+    /// From the wire: nil when the field is absent or empty (an iPad or TV); a kind this build
+    /// doesn't know (a newer peer's) counts as some Mac.
+    public init?(wire value: String?) {
+        guard let value, !value.isEmpty else { return nil }
+        self = MacKind(rawValue: value) ?? .mac
+    }
+}
+
+/// The SF Symbol for a hub or display, one rule for every zone row, badge and connected list:
+/// prefer the symbol without a generation suffix; failing that, the latest generation; failing
+/// that, a generic computer. Symbol names differ by OS version, so `isAvailable` says whether a
+/// name exists on this one (the apps pass `UIImage(systemName:)`).
+public enum DeviceSymbol {
+    /// The names to try, best first. The last always exists.
+    public static func candidates(kind: HubKind, device: String?) -> [String] {
+        guard kind == .ipad, let mac = MacKind(wire: device) else {
+            return [kind == .tv ? "tv" : "ipad.landscape"]
+        }
+        return switch mac {
+        case .macBookAir, .macBookPro: ["macbook", "macbook.gen2", "macbook.gen1", "laptopcomputer"]
+        case .iMac: ["desktopcomputer"]
+        case .macMini: ["macmini", "desktopcomputer"]
+        case .macStudio: ["macstudio", "desktopcomputer"]
+        case .macPro: ["macpro", "macpro.gen3", "macpro.gen2", "macpro.gen1", "desktopcomputer"]
+        case .mac: ["desktopcomputer"]
+        }
+    }
+
+    public static func name(kind: HubKind, device: String?, isAvailable: (String) -> Bool) -> String {
+        let names = candidates(kind: kind, device: device)
+        return names.first(where: isAvailable) ?? names[names.count - 1]
+    }
+}
+
+#if canImport(UIKit)
+import UIKit
+
+extension DeviceSymbol {
+    @MainActor private static var cache: [String: String] = [:]
+
+    /// The symbol that exists on this OS, looked up once per kind of device.
+    @MainActor public static func name(kind: HubKind, device: String?) -> String {
+        let key = "\(kind.rawValue)/\(device ?? "")"
+        if let found = cache[key] { return found }
+        let found = name(kind: kind, device: device) { UIImage(systemName: $0) != nil }
+        cache[key] = found
+        return found
+    }
+}
+#endif
 
 /// A Canopy device showing another device's zone (see docs/multi-device.md).
 public struct ZoneDisplay: Codable, Hashable, Sendable, Identifiable {
     public var id: String
     public var name: String
     public var kind: HubKind
+    /// Which Mac, for an `ipad`-kind display running on one (`MacKind`); nil otherwise.
+    public var device: String?
     public var lastSeen: Date
 
-    public init(id: String, name: String, kind: HubKind, lastSeen: Date = Date()) {
+    public init(id: String, name: String, kind: HubKind, device: String? = nil, lastSeen: Date = Date()) {
         self.id = id
         self.name = name
         self.kind = kind
+        self.device = device
         self.lastSeen = lastSeen
     }
 }

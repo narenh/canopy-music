@@ -96,16 +96,23 @@ struct ExplicitBadge: View {
     }
 }
 
+extension EnvironmentValues {
+    /// What an unnamed request from the hub itself is labelled: "iPad", or the kind of Mac the
+    /// hub is when its snapshots say (`PartySession.hubDevice`). Set at the root.
+    @Entry var hubDeviceNoun: String = "iPad"
+}
+
 struct RequesterPill: View {
     let requester: Requester
     @Environment(\.artworkTheme) private var theme
+    @Environment(\.hubDeviceNoun) private var hubDeviceNoun
 
     var body: some View {
         HStack(spacing: 4) {
             if requester.origin == .phone {
                 Image(systemName: "iphone").font(.system(size: 10, weight: .semibold))
             }
-            Text(requester.name ?? (requester.origin == .phone ? "Guest" : "iPad"))
+            Text(requester.name ?? (requester.origin == .phone ? "Guest" : hubDeviceNoun))
                 .lineLimit(1)
         }
         .font(.system(size: 12, weight: .semibold))

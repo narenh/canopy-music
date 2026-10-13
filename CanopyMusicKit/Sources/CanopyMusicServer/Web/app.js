@@ -402,7 +402,7 @@
     const playing = !!(current && snap.playback.isPlaying);
     $("t-play").innerHTML = playing ? icons.pause : icons.play;
     $("t-play").setAttribute("aria-label", playing ? "Pause" : "Play");
-    $("zone-device").innerHTML = snap.hubKind === "tv" ? icons.tv : icons.ipad;
+    $("zone-device").innerHTML = deviceIcon(snap.hubKind, snap.hubDevice);
     $("zone-name").textContent = snap.zoneName || "";
     document.title = snap.zoneName ? `${snap.zoneName} - Canopy Music` : "Canopy Music";
     $("zone-line").hidden = !snap.zoneName;
@@ -424,15 +424,41 @@
     if (!r) return null;
     if (myIds.has(r.clientID)) return { text: "You", mine: true };
     if (r.name) return { text: r.name, mine: false };
-    return { text: r.origin === "ipad" ? "iPad" : "Guest", mine: false };
+    return { text: r.origin === "ipad" ? hubNoun() : "Guest", mine: false };
   }
 
-  /// "the Apple TV" or "the iPad": whichever this zone plays from.
-  function hubName() { return snap && snap.hubKind === "tv" ? "the Apple TV" : "the iPad"; }
+  // Which Mac a hub or display is (`hubDevice` in snapshots, `device` in the displays list):
+  // what it's called, and its icon. Absent for iPads and Apple TVs, and from older hubs.
+  const macNouns = { MacBookAir: "MacBook Air", MacBookPro: "MacBook Pro", iMac: "iMac", Macmini: "Mac mini",
+                     MacStudio: "Mac Studio", MacPro: "Mac Pro", Mac: "Mac" };
+  function macNoun(device) { return device ? (macNouns[device] || "Mac") : null; }
+  /// "Apple TV", "iPad" or the kind of Mac this zone plays from.
+  function hubNoun() {
+    if (!snap) return "iPad";
+    return snap.hubKind === "tv" ? "Apple TV" : macNoun(snap.hubDevice) || "iPad";
+  }
+  /// "the Apple TV", "the iPad" or "the MacBook Air": whichever this zone plays from.
+  function hubName() { return `the ${hubNoun()}`; }
+  function deviceIcon(kind, device) {
+    if (kind === "tv") return icons.tv;
+    switch (device ? (macNouns[device] ? device : "Mac") : null) {
+      case "MacBookAir": case "MacBookPro": return icons.laptop;
+      case "Macmini": return icons.macmini;
+      case "MacStudio": return icons.macstudio;
+      case "MacPro": return icons.macpro;
+      case "iMac": case "Mac": return icons.desktop;
+      default: return icons.ipad;
+    }
+  }
 
   const icons = {
     ipad: '<svg viewBox="0 0 24 24" aria-hidden="true"><rect x="2.5" y="5" width="19" height="14" rx="2.5"/></svg>',
     tv: '<svg viewBox="0 0 24 24" aria-hidden="true"><rect x="2.5" y="4" width="19" height="13" rx="2"/><path d="M8 20.5h8"/></svg>',
+    laptop: '<svg viewBox="0 0 24 24" aria-hidden="true"><rect x="4" y="5" width="16" height="11" rx="1.5"/><path d="M1.5 19h21"/></svg>',
+    desktop: '<svg viewBox="0 0 24 24" aria-hidden="true"><rect x="2.5" y="3.5" width="19" height="13" rx="2"/><path d="M2.5 13h19M9.5 20.5h5M12 16.5v4"/></svg>',
+    macmini: '<svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="8" width="18" height="8" rx="1.5"/><path d="M6 12h.01"/></svg>',
+    macstudio: '<svg viewBox="0 0 24 24" aria-hidden="true"><rect x="4" y="5" width="16" height="14" rx="2"/><path d="M8 15h.01M11 15h.01"/></svg>',
+    macpro: '<svg viewBox="0 0 24 24" aria-hidden="true"><rect x="6" y="3" width="12" height="18" rx="2"/><path d="M9.5 7.5h5M9.5 11h5M9.5 14.5h5"/></svg>',
     grip: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9 6h.01M15 6h.01M9 12h.01M15 12h.01M9 18h.01M15 18h.01" stroke-width="3"/></svg>',
     x: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6l12 12M18 6 6 18"/></svg>',
     lock: '<svg viewBox="0 0 24 24" aria-hidden="true"><rect x="5" y="11" width="14" height="10" rx="2"/><path d="M8 11V7a4 4 0 0 1 8 0v4"/></svg>',
@@ -1418,7 +1444,7 @@
       if (wifiLinkPending) { wifiLinkPending = false; $("settings-wifi-btn").click(); }
       for (const d of details.displays) {
         const li = document.createElement("li");
-        li.innerHTML = d.kind === "tv" ? icons.tv : icons.ipad;
+        li.innerHTML = deviceIcon(d.kind, d.device);
         li.append(d.name);
         list.append(li);
       }
@@ -1540,7 +1566,7 @@
   function openParty(mode) {
     partyMode = mode;
     partyBusy = false;
-    const device = snap.hubKind === "tv" ? "Apple TV" : "iPad";
+    const device = hubNoun();
     $("party-title").textContent = mode === "end" ? `End ${snap.zoneName || "this zone"}?` : "Save as playlist";
     $("party-sub").textContent = mode === "end"
       ? `The music stops for everyone and the queue is cleared. The ${device} goes back to its zone list.`

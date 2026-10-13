@@ -155,7 +155,7 @@ public final class PartyServer: Sendable {
         // Displays: other Canopy devices showing this zone.
         await server.appendRoute("POST /api/display/hello") { request in
             let body = try JSONDecoder.api.decode(DisplayHello.self, from: await request.bodyData)
-            await session.noteDisplay(ZoneDisplay(id: body.clientId, name: body.name, kind: body.kind))
+            await session.noteDisplay(ZoneDisplay(id: body.clientId, name: body.name, kind: body.kind, device: body.device))
             return HTTPResponse(statusCode: .ok)
         }
 
@@ -217,7 +217,7 @@ public final class PartyServer: Sendable {
         await server.appendRoute("GET /api/host/details") { request in
             guard await session.isHost(key: request.query["key"]) else { return HTTPResponse(statusCode: .forbidden) }
             let displays = await session.displays.filter { Date().timeIntervalSince($0.lastSeen) < 30 }
-            return try .json(HostDetails(wifi: await session.wifi, displays: displays.map { .init(name: $0.name, kind: $0.kind) },
+            return try .json(HostDetails(wifi: await session.wifi, displays: displays.map { .init(name: $0.name, kind: $0.kind, device: $0.device) },
                                          party: await session.partySaveInfo))
         }
 
@@ -383,6 +383,8 @@ struct DisplayHello: Decodable {
     var clientId: String
     var name: String
     var kind: HubKind
+    /// Which Mac an `ipad`-kind display is (`MacKind`); absent from iPads, TVs and older displays.
+    var device: String?
 }
 
 struct PlaybackBody: Decodable {
@@ -408,7 +410,7 @@ struct PlaylistLoaded: Codable {
 }
 
 struct HostDetails: Encodable {
-    struct Display: Encodable { var name: String; var kind: HubKind }
+    struct Display: Encodable { var name: String; var kind: HubKind; var device: String? }
     var wifi: WifiDetails
     var displays: [Display]
     /// For "Save as playlist": the suggested name, how many songs, and where it saves.

@@ -97,7 +97,7 @@ struct ZoneListView: View {
     private func zoneRows(_ zones: [ZoneListing]) -> some View {
         ForEach(zones) { zone in
             ZoneRow(
-                icon: zone.kind == .tv ? "tv" : "ipad.landscape",
+                icon: DeviceSymbol.name(kind: zone.kind, device: zone.device),
                 // The icon says what kind of device it is.
                 title: zone.name,
                 subtitle: zone.nowPlaying.map { "Playing \($0)" }

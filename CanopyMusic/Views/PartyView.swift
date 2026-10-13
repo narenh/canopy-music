@@ -752,7 +752,8 @@ private struct DisplayConnectionOverlay: View {
                     Text(connection.hasSnapshot ? "Lost connection to \(name)" : "Connecting to \(name)…")
                         .font(.system(size: 22, weight: .bold))
                     if connection.hasSnapshot {
-                        Text("Reconnecting. Make sure \(model.displayedZone?.kind == .tv ? "the Apple TV is on" : "the iPad is awake") and Canopy Music is open.")
+                        let hub = model.displayedZone.map { $0.kind == .tv ? "the Apple TV is on" : "the \(MacKind(wire: $0.device)?.noun ?? "iPad") is awake" } ?? "the hub is awake"
+                        Text("Reconnecting. Make sure \(hub) and Canopy Music is open.")
                             .foregroundStyle(.white.opacity(0.7))
                             .multilineTextAlignment(.center)
                             .frame(maxWidth: 380)

@@ -200,6 +200,8 @@ struct RootView: View {
             if let current, easterEgg.matches(current.track) { await easterEgg.loadIfNeeded() }
         }
         .environment(model)
+        // Unnamed requests from a Mac hub are labelled with the kind of Mac, not "iPad".
+        .environment(\.hubDeviceNoun, MacKind(wire: model.session.hubDevice)?.noun ?? "iPad")
         .task {
             await model.startOnLaunch()
             #if DEBUG

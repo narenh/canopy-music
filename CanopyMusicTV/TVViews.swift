@@ -64,6 +64,8 @@ struct TVRootView: View {
             }
         }
         .animation(.easeInOut(duration: 0.5), value: model.role)
+        // Unnamed requests from a Mac hub are labelled with the kind of Mac, not "iPad".
+        .environment(\.hubDeviceNoun, MacKind(wire: model.session.hubDevice)?.noun ?? "iPad")
         .onPreferenceChange(TVShownSongKey.self) { partySong = $0 }
         // A zone (hub or display) keeps the screen awake while music plays, unless its hub allows
         // the screensaver then too; paused, and at the zone list, tvOS's screensaver takes over.
@@ -305,7 +307,7 @@ struct TVZoneListView: View {
                         model.show(zone)
                     } label: {
                         TVZoneRow(
-                            icon: zone.kind == .tv ? "tv" : "ipad.landscape",
+                            icon: DeviceSymbol.name(kind: zone.kind, device: zone.device),
                             // The icon says what kind of device it is.
                             title: zone.name,
                             subtitle: zone.nowPlaying.map { "Playing \($0)" }
@@ -407,7 +409,7 @@ struct TVZoneBadge: View {
         if let zone = model.shownZone {
             // Plain text, not a capsule, so it can't be mistaken for a requester pill.
             HStack(spacing: 12) {
-                Image(systemName: zone.kind == .tv ? "tv.fill" : "ipad.landscape")
+                Image(systemName: zone.kind == .tv ? "tv.fill" : DeviceSymbol.name(kind: zone.kind, device: zone.device))
                     .font(.system(size: 22, weight: .medium))
                 Text("Playing from \(zone.name)")
                     .font(.system(size: 24, weight: .medium))
@@ -432,7 +434,8 @@ struct TVConnectionOverlay: View {
                     Text(connection.hasSnapshot ? "Lost connection to \(name)" : "Connecting to \(name)…")
                         .font(.system(size: 40, weight: .bold))
                     if connection.hasSnapshot {
-                        Text("Reconnecting. Make sure \(model.shownZone?.kind == .tv ? "the Apple TV is on" : "the iPad is awake") and Canopy Music is open.\nPress Menu to leave.")
+                        let hub = model.shownZone.map { $0.kind == .tv ? "the Apple TV is on" : "the \(MacKind(wire: $0.device)?.noun ?? "iPad") is awake" } ?? "the hub is awake"
+                        Text("Reconnecting. Make sure \(hub) and Canopy Music is open.\nPress Menu to leave.")
                             .font(.system(size: 26))
                             .foregroundStyle(.white.opacity(0.7))
                             .multilineTextAlignment(.center)
@@ -791,16 +794,23 @@ struct TVQueueRow: View {
     }
 }
 
+extension EnvironmentValues {
+    /// What an unnamed request from the hub itself is labelled: "iPad", or the kind of Mac the
+    /// hub is when its snapshots say (`PartySession.hubDevice`). Set at the root.
+    @Entry var hubDeviceNoun: String = "iPad"
+}
+
 /// Who requested a song (the iPad's RequesterPill at TV size).
 struct TVRequesterPill: View {
     let requester: Requester
+    @Environment(\.hubDeviceNoun) private var hubDeviceNoun
 
     var body: some View {
         HStack(spacing: 7) {
             if requester.origin == .phone {
                 Image(systemName: "iphone").font(.system(size: 16, weight: .semibold))
             }
-            Text(requester.name ?? (requester.origin == .phone ? "Guest" : "iPad"))
+            Text(requester.name ?? (requester.origin == .phone ? "Guest" : hubDeviceNoun))
                 .lineLimit(1)
         }
         .font(.system(size: 19, weight: .semibold))

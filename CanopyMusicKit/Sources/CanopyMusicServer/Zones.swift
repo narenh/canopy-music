@@ -17,6 +17,8 @@ public struct ZoneListing: Identifiable, Hashable, Sendable {
     public var id: String
     public var name: String
     public var kind: HubKind
+    /// Which Mac an `ipad`-kind hub is (`MacKind`); nil from iPads, TVs and older hubs.
+    public var device: String?
     /// The hub's guest address by IP (`10.0.1.5` or `10.0.1.5:8080`).
     public var address: String
     /// Identifies the hub device, so a device can tell its own zone apart.
@@ -123,12 +125,17 @@ public final class ZoneBrowser {
     nonisolated static func listing(from result: NWBrowser.Result) -> ZoneListing? {
         guard case .service(let instance, _, _, _) = result.endpoint,
               case .bonjour(let record) = result.metadata else { return nil }
-        let txt = record.dictionary
+        return listing(instance: instance, txt: record.dictionary)
+    }
+
+    /// A zone from its advertised TXT record (the keys `ZoneAdvertiser` is given).
+    nonisolated static func listing(instance: String, txt: [String: String]) -> ZoneListing? {
         guard let address = txt["addr"], !address.isEmpty else { return nil }
         return ZoneListing(
             id: instance,
             name: txt["name"] ?? instance,
             kind: HubKind(rawValue: txt["kind"] ?? "") ?? .ipad,
+            device: txt["device"].flatMap { $0.isEmpty ? nil : $0 },
             address: address,
             hubID: txt["hub"],
             nowPlaying: txt["playing"].flatMap { $0.isEmpty ? nil : $0 }
@@ -151,6 +158,7 @@ public final class ZoneConnection: ZoneRemote {
     @ObservationIgnored public let clientID: String
     @ObservationIgnored private let name: String
     @ObservationIgnored private let kind: HubKind
+    @ObservationIgnored private let device: String?
     @ObservationIgnored private weak var session: PartySession?
     @ObservationIgnored private var loop: Task<Void, Never>?
     @ObservationIgnored private var heartbeat: Task<Void, Never>?
@@ -161,11 +169,14 @@ public final class ZoneConnection: ZoneRemote {
         return URLSession(configuration: config)
     }()
 
-    public init(baseURL: URL, clientID: String, name: String, kind: HubKind) {
+    /// `device` is which Mac this display is (`MacKind`), for its icon in the hub's lists; nil
+    /// on an iPad or TV.
+    public init(baseURL: URL, clientID: String, name: String, kind: HubKind, device: String? = nil) {
         self.baseURL = baseURL
         self.clientID = clientID
         self.name = name
         self.kind = kind
+        self.device = device
     }
 
     public func start(session: PartySession) {
@@ -215,8 +226,8 @@ public final class ZoneConnection: ZoneRemote {
     }
 
     private func sayHello() async {
-        struct Hello: Encodable { var clientId: String; var name: String; var kind: HubKind }
-        _ = try? await post("/api/display/hello", Hello(clientId: clientID, name: name, kind: kind))
+        struct Hello: Encodable { var clientId: String; var name: String; var kind: HubKind; var device: String? }
+        _ = try? await post("/api/display/hello", Hello(clientId: clientID, name: name, kind: kind, device: device))
     }
 
     // MARK: ZoneRemote

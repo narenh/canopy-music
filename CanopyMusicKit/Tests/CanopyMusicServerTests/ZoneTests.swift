@@ -1,6 +1,7 @@
 @testable import CanopyMusicCore
 @testable import CanopyMusicServer
 import Foundation
+import Network
 import Testing
 
 /// A real hub server and a display mirroring it over HTTP + WebSocket on localhost.
@@ -150,6 +151,45 @@ struct ZoneTests {
         let data = ZoneAdvertiser.txtRecord(["name": "Up", "kind": "tv"])
         // Sorted: kind=tv, name=Up — each prefixed by its length.
         #expect(Array(data) == [7] + Array("kind=tv".utf8) + [7] + Array("name=Up".utf8))
+    }
+
+    /// A Mac hub advertises which Mac it is beside `kind=ipad`; iPads and TVs (and older hubs)
+    /// leave the field out, and parse without it.
+    @Test func txtRecordCarriesTheMacKind() throws {
+        func roundTrip(_ txt: [String: String]) throws -> ZoneListing {
+            let record = try #require(NWTXTRecord(ZoneAdvertiser.txtRecord(txt)))
+            return try #require(ZoneBrowser.listing(instance: "Study", txt: record.dictionary))
+        }
+        let mac = try roundTrip(["name": "Study", "kind": "ipad", "device": "MacBookAir", "addr": "10.0.1.5:8080", "hub": "mac-1"])
+        #expect(mac.kind == .ipad)
+        #expect(mac.device == "MacBookAir")
+        #expect(mac.hubID == "mac-1")
+        let ipad = try roundTrip(["name": "Study", "kind": "ipad", "addr": "10.0.1.5:8080"])
+        #expect(ipad.device == nil)
+        let blank = try roundTrip(["name": "Study", "kind": "tv", "device": "", "addr": "10.0.1.5"])
+        #expect(blank.device == nil)
+    }
+
+    /// A Mac acting as a display says which Mac it is when it checks in; an iPad doesn't.
+    @Test func displaysSayWhichMacTheyAre() async throws {
+        let (hub, server, task) = try await makeHub(port: 18775)
+        defer { task.cancel(); Task { await server.stop() } }
+        let mac = ZoneConnection(baseURL: URL(string: "http://127.0.0.1:18775")!, clientID: "mac", name: "MacBook Air", kind: .ipad, device: "MacBookAir")
+        let macDisplay = PartySession(remote: mac)
+        mac.start(session: macDisplay)
+        defer { mac.stop() }
+        let ipad = ZoneConnection(baseURL: URL(string: "http://127.0.0.1:18775")!, clientID: "kitchen", name: "Kitchen iPad", kind: .ipad)
+        let ipadDisplay = PartySession(remote: ipad)
+        ipad.start(session: ipadDisplay)
+        defer { ipad.stop() }
+
+        #expect(await waitFor { hub.displays.contains { $0.id == "mac" } && hub.displays.contains { $0.id == "kitchen" } })
+        #expect(hub.displays.first { $0.id == "mac" }?.device == "MacBookAir")
+        #expect(hub.displays.first { $0.id == "kitchen" }?.device == nil)
+        // Hosts' settings list gets it too.
+        hub.hostKey = "secret"
+        let (details, _) = try await URLSession.shared.data(from: URL(string: "http://127.0.0.1:18775/api/host/details?key=secret")!)
+        #expect(String(decoding: details, as: UTF8.self).contains("\"device\":\"MacBookAir\""))
     }
 }
 

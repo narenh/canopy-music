@@ -611,9 +611,9 @@ final class AppModel {
         guard let url = zone.baseURL else { return }
         session.shutdown()
         Task { await stopServer() }
-        // A Mac shows up as an iPad-kind display (the kind only picks the hub's icon for it; older
-        // hubs and displays couldn't decode a new one) with its own name, e.g. "MacBook Air".
-        let connection = ZoneConnection(baseURL: url, clientID: deviceID, name: DeviceKind.name, kind: .ipad)
+        // A Mac shows up as an iPad-kind display (older hubs couldn't decode a new kind) that says
+        // which Mac it is beside that, for its icon, with its own name, e.g. "MacBook Air".
+        let connection = ZoneConnection(baseURL: url, clientID: deviceID, name: DeviceKind.name, kind: .ipad, device: DeviceKind.device)
         let mirror = PartySession(remote: connection)
         session = mirror
         connection.start(session: mirror)
@@ -641,7 +641,7 @@ final class AppModel {
     }
 
     private func configureHubSession() {
-        session.configureHub(kind: .ipad, id: deviceID, zoneName: zoneName, serviceName: provider == .none ? nil : provider.title)
+        session.configureHub(kind: .ipad, device: DeviceKind.device, id: deviceID, zoneName: zoneName, serviceName: provider == .none ? nil : provider.title)
         session.displaysCanControl = displaysCanControl
         session.phonesCanQueue = phoneQueueEnabled
         session.wifi = WifiDetails(ssid: wifiSSID, password: wifiPassword, simpleQR: wifiSimpleQR)
@@ -652,9 +652,12 @@ final class AppModel {
         guard zoneRole == .hub, let server, let address = session.lanAddress else { return }
         let playing = session.state.current.map { "\($0.track.title) – \($0.track.artist)" } ?? ""
         advertisedPlaying = playing
-        zoneAdvertiser.advertise(name: zoneName, port: server.port, txt: [
+        var txt = [
             "name": zoneName, "kind": HubKind.ipad.rawValue, "addr": address, "hub": deviceID, "playing": String(playing.prefix(120)),
-        ])
+        ]
+        // Which Mac this is, beside `kind=ipad` (older peers ignore it); nothing on an iPad.
+        if let device = DeviceKind.device { txt["device"] = device }
+        zoneAdvertiser.advertise(name: zoneName, port: server.port, txt: txt)
     }
 
     /// Called when the current song changes.

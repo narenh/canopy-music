@@ -136,7 +136,7 @@ struct HostView: View {
                                     Text("Display").font(.footnote).foregroundStyle(.secondary)
                                 }
                             } icon: {
-                                Image(systemName: display.kind == .tv ? "tv" : "ipad.landscape")
+                                Image(systemName: DeviceSymbol.name(kind: display.kind, device: display.device))
                             }
                         }
                     }

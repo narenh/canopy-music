@@ -40,6 +40,9 @@ public struct PartySnapshot: Codable, Equatable, Sendable {
     public var lanAddress: String?
     public var zoneName: String?
     public var hubKind: HubKind?
+    /// Which Mac an `ipad`-kind hub runs on (`MacKind`), for its icon and name on displays and the
+    /// web page; nil from iPads, TVs and older hubs.
+    public var hubDevice: String?
     /// The hub's music service, e.g. "Apple Music", for search placeholders on displays.
     public var service: String?
     /// Whether displays get play/pause, skip and scrubbing.
@@ -91,6 +94,8 @@ public final class PartySession {
     @ObservationIgnored private var hubEpoch: String?
     /// Zone details from the hub, for a display; this device's own, for a hub.
     public private(set) var hubKind: HubKind?
+    /// Which Mac an `ipad`-kind hub runs on (`MacKind`); nil for iPads, TVs and older hubs.
+    public private(set) var hubDevice: String?
     /// The hub device's ID (stable across launches and renames).
     public private(set) var hubID: String?
     public var zoneName: String? {
@@ -229,6 +234,7 @@ public final class PartySession {
         (engine as? MirrorEngine)?.playback = playback
         isPlaying = playback.isPlaying
         hubKind = snapshot.hubKind
+        hubDevice = snapshot.hubDevice
         hubID = snapshot.hubID
         zoneName = snapshot.zoneName
         serviceName = snapshot.service
@@ -242,9 +248,10 @@ public final class PartySession {
         if let hubWifi = snapshot.wifi { wifi = hubWifi }
     }
 
-    /// This device's own zone (hub).
-    public func configureHub(kind: HubKind, id: String? = nil, zoneName: String, serviceName: String?) {
+    /// This device's own zone (hub). `device` is which Mac this is (`MacKind`), if any.
+    public func configureHub(kind: HubKind, device: String? = nil, id: String? = nil, zoneName: String, serviceName: String?) {
         hubKind = kind
+        hubDevice = device
         hubID = id
         self.zoneName = zoneName
         self.serviceName = serviceName
@@ -648,6 +655,7 @@ public final class PartySession {
             lanAddress: lanAddress,
             zoneName: zoneName,
             hubKind: hubKind,
+            hubDevice: hubDevice,
             service: serviceName,
             displaysCanControl: displaysCanControl,
             history: Array(state.history.prefix(20)),

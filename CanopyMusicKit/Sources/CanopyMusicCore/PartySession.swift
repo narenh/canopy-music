@@ -246,6 +246,9 @@ public final class PartySession {
     @ObservationIgnored private var generation = 0
     /// The queue item the engine currently has loaded as its current track.
     @ObservationIgnored private var loadedItemID: UUID?
+    /// A restored session whose engine (not a followed one) was asked to `attach`, and hasn't
+    /// yet reported the player on the restored song, nor been given a song since.
+    @ObservationIgnored private var awaitingAttach = false
     /// `syncStaging` is running (one at a time; later calls fold into it).
     @ObservationIgnored private(set) var isSyncing = false
     @ObservationIgnored private var needsSync = false
@@ -283,9 +286,13 @@ public final class PartySession {
         }
         engine.onEvent = { [weak self] event in self?.handle(event) }
         if !engine.canReplaceStaged { startLateStagingTicker() }
-        // A followed player (Spotify) keeps playing while the app is gone: after a relaunch,
-        // watch it so the restored song shows as it really is (playing, and where).
-        if let current = state.current { follower?.attach(expecting: current.track.id) }
+        // A followed player (Spotify) or a Sonos group keeps playing while the app is gone: after
+        // a relaunch, the engine looks so the restored song shows as it really is (playing, and
+        // where). Engines whose player stopped with the app ignore it.
+        if let current = state.current {
+            awaitingAttach = follower == nil
+            engine.attach(expecting: current.track, next: state.upNext.first?.track)
+        }
     }
 
     /// A display's session: mirrors the hub's queue from snapshots and sends edits to the hub.
@@ -421,6 +428,7 @@ public final class PartySession {
         saveTask = nil
         stagedItemID = nil
         loadedItemID = nil
+        awaitingAttach = false
         isPlaying = false
         isUnderWay = false
         skippedOnLoad = []
@@ -868,6 +876,7 @@ public final class PartySession {
     private func play(_ item: QueueItem) async throws {
         stagedItemID = nil
         loadedItemID = item.id
+        awaitingAttach = false
         // A new song of ours: any staging for the old one is off.
         cancelStaging()
         let generation = generation
@@ -1015,6 +1024,14 @@ public final class PartySession {
             if let follower, loadedItemID == nil, let current = state.current,
                follower.playerTrackID == current.track.id {
                 loadedItemID = current.id
+            }
+            // Likewise an engine that attached to the restored song (a Sonos group still on it).
+            // Its next song is then staged as usual (or found already there).
+            if follower == nil, awaitingAttach, loadedItemID == nil, let current = state.current,
+               engine.attachedTrackID == current.track.id {
+                awaitingAttach = false
+                loadedItemID = current.id
+                Task { await syncStaging() }
             }
             isPlaying = engine.isPlaying
             broadcast()

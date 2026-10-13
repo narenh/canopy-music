@@ -207,9 +207,14 @@ public final class SonosEngine: PlaybackEngine {
     /// After each change of `target`, so the app can remember the rooms for the next launch.
     public var onTargetChanged: (@MainActor (SonosTarget) -> Void)?
     /// The session's current song as restored at launch: the group may still be playing it from
-    /// before (Sonos plays on while the app is gone), and then it's ours to pause on `shutDown`.
+    /// before (Sonos plays on while the app is gone), and then it's ours to pause on `shutDown`
+    /// (if `attach` hasn't taken it over by then).
     public var restoredTrackID: String?
     private var isShutDown = false
+    /// `attach` reading the speakers (tests wait on it).
+    private(set) var attachTask: Task<Void, Never>?
+    /// `attach` took the group's song over, and nothing has been played since.
+    private var attached = false
 
     private var currentTrack: QueueTrack?
     private var currentNumber: Int?
@@ -284,6 +289,7 @@ public final class SonosEngine: PlaybackEngine {
         stagedTrack = nil
         stagedNumber = nil
         hasStarted = true
+        attached = false
         do {
             try await groupRoomsIfNeeded(retaking: retaking)
             try await reporting("RemoveAllTracksFromQueue") { try await client.clearQueue() }
@@ -353,6 +359,8 @@ public final class SonosEngine: PlaybackEngine {
             stagedNumber = nil
             return
         }
+        // Already right after the current song (found there by `attach`, say): nothing to send.
+        if let track, track.id == stagedTrack?.id, stagedNumber != nil { return }
         let uri = try track.map { try reference.uri(for: $0.id) }
         let metadata = try track.map { try reference.metadata(for: $0) }
         busy += 1
@@ -648,6 +656,110 @@ public final class SonosEngine: PlaybackEngine {
         }
     }
 
+    // MARK: Reattaching after a relaunch
+
+    public var attachedTrackID: String? { attached ? currentTrack?.id : nil }
+
+    /// After a relaunch: Sonos plays on while the app is gone, so the group may still be on the
+    /// restored session's song. Reads the live group layout, then from each group one of our
+    /// rooms leads (the one leading the most of them first, as `SonosGroupingPlan` picks) its
+    /// position, transport state and queue, sending nothing. A group on `current`, from its
+    /// queue, is taken over as it is (`adopt`). Anything else (another source, nothing of ours,
+    /// no answer) is left alone: the session stays paused, and Play takes the rooms back as usual.
+    public func attach(expecting current: QueueTrack, next: QueueTrack?) {
+        guard !hasStarted, currentTrack == nil, attachTask == nil, !isShutDown else { return }
+        restoredTrackID = current.id
+        attachTask = Task { [weak self] in await self?.reattach(current, next: next) }
+    }
+
+    private func reattach(_ current: QueueTrack, next: QueueTrack?) async {
+        let chosen = target
+        guard let groups = await liveGroups() else {
+            log?("attach: couldn't read the group layout: leaving the speakers alone")
+            return
+        }
+        let led = Self.groups(ledBy: chosen, in: groups)
+        if led.isEmpty { log?("attach: none of \(chosen.name) leads a group: leaving the speakers alone") }
+        for group in led {
+            guard let member = group.coordinator,
+                  let host = member.host ?? chosen.rooms.first(where: { $0.id == member.id })?.host else { continue }
+            let leader = SonosTarget.Room(id: member.id, name: chosen.rooms.first { $0.id == member.id }?.name ?? member.roomName, host: host)
+            let client = SonosClient(transport: transport, host: host)
+            guard let info = try? await client.positionInfo() else {
+                log?("attach: \(group.name) didn't answer")
+                continue
+            }
+            guard info.trackURI.flatMap(SonosURI.canopyTrackID(of:)) == current.id else {
+                log?("attach: \(group.name) is on something else (\(info.trackURI.map { $0.isEmpty ? "nothing" : $0 } ?? "nothing")): leaving it alone")
+                continue
+            }
+            guard let media = try? await client.mediaInfo(), media["CurrentURI"] == SonosURI.queue(of: leader.id),
+                  let state = try? await client.transportState() else {
+                log?("attach: \(group.name) has \(current.title), but not from its queue: leaving it alone")
+                continue
+            }
+            let queue = try? await client.browse("Q:0")
+            // Played, dropped or given other rooms while the speakers were read: that decides.
+            guard !isShutDown, !hasStarted, target == chosen else {
+                log?("attach: the session moved on while reading \(group.name): leaving it")
+                return
+            }
+            adopt(group, leader: leader, info: info, state: state, queue: queue, current: current, next: next)
+            return
+        }
+    }
+
+    /// The group is on the restored song: it's this engine's, as it is. The rooms become the
+    /// group's own (`onTargetChanged`); the song is current at its queue position, playing or
+    /// paused where it is; and the queue's next entry is the staged song if it's the session's
+    /// next one (otherwise the session stages its own after it). Nothing is sent.
+    private func adopt(_ group: SonosGroup, leader: SonosTarget.Room, info: SonosPositionInfo, state: SonosTransportState?,
+                       queue: [SonosItem]?, current: QueueTrack, next: QueueTrack?) {
+        let known = target.rooms
+        let members = group.rooms.filter { $0.id != leader.id }.compactMap { member -> SonosTarget.Room? in
+            let chosen = known.first { $0.id == member.id }
+            guard let host = member.host ?? chosen?.host else { return nil }
+            return SonosTarget.Room(id: member.id, name: chosen?.name ?? member.roomName, host: host)
+        }
+        target = SonosTarget(coordinator: leader, joining: members)
+        client = SonosClient(transport: transport, host: leader.host)
+        hasStarted = true
+        hasGrouped = true
+        attached = true
+        currentTrack = current
+        currentNumber = info.track
+        let following = queue?.first { $0.id == "Q:0/\(info.track + 1)" }?.uri.flatMap(SonosURI.canopyTrackID(of:))
+        if let next, following == next.id {
+            stagedTrack = next
+            stagedNumber = info.track + 1
+        }
+        pausedByUs = false
+        reportedEnd = false
+        lostControl = false
+        sawPlaying = state == .playing
+        let playing = SonosPlaybackRules.isPlaying(state)
+        let position = info.position ?? 0
+        cache(playing: playing, time: position)
+        lastPlaying = playing
+        let staged = stagedTrack.map { "\($0.title) staged at #\(info.track + 1)" }
+            ?? (queue == nil ? "the queue unread: the next song is staged afresh" : "the next entry isn't the next song: it's staged afresh")
+        log?("attach: \(target.name) is \(playing ? "playing" : "paused on") \(current.title) at #\(info.track), \(SonosTime.string(position)) in; \(staged)")
+        startPolling()
+        onEvent?(.statusChanged)
+    }
+
+    /// The groups one of `target`'s rooms leads, the one leading the most of its rooms first,
+    /// then in the order the rooms were chosen.
+    static func groups(ledBy target: SonosTarget, in groups: [SonosGroup]) -> [SonosGroup] {
+        let ids = Set(target.rooms.map(\.id))
+        return target.rooms.enumerated().compactMap { index, room -> (group: SonosGroup, count: Int, index: Int)? in
+            guard let led = groups.first(where: { $0.coordinatorID == room.id }) else { return nil }
+            return (led, led.rooms.filter { ids.contains($0.id) }.count, index)
+        }
+        .sorted { $0.count != $1.count ? $0.count > $1.count : $0.index < $1.index }
+        .map(\.group)
+    }
+
     // MARK: Polling
 
     private func startPolling() {
@@ -671,7 +783,8 @@ public final class SonosEngine: PlaybackEngine {
     /// The session dropped this engine (after pausing it, which reaches the speakers only if this
     /// engine played there). One that never played, restored after a relaunch, may find the group
     /// still playing the session's song from before: that's ours, so it's paused. Anything else
-    /// in the room is left alone.
+    /// in the room is left alone. One that took the song over at `attach` has started, so the
+    /// session's pause has already reached it; an `attach` still reading stops at `isShutDown`.
     public func shutDown() {
         guard !isShutDown else { return }
         isShutDown = true

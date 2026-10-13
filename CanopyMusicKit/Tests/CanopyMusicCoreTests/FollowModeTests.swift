@@ -67,9 +67,9 @@ final class FakeSpotifyEngine: FollowingPlaybackEngine {
 
     /// What a restored session said it expects the player to be on (`attach`).
     private(set) var attachedTo: String?
-    func attach(expecting trackID: String?) {
-        attachedTo = trackID
-        if ours == nil { ours = trackID }
+    func attach(expecting current: QueueTrack, next: QueueTrack?) {
+        attachedTo = current.id
+        if ours == nil { ours = current.id }
     }
 
     func resume() async throws { isPlaying = true }

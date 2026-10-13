@@ -77,10 +77,24 @@ public protocol PlaybackEngine: AnyObject {
     /// player alone, unless it's still on this session's song from before a relaunch: that's
     /// ours, and it's paused.
     func shutDown()
+    /// After a relaunch: the player may still be on the restored session's `current` song (a
+    /// followed Spotify player, a Sonos group: both play on while the app is gone). Starts
+    /// watching it without sending anything; `next` is the session's song after it. An engine
+    /// that finds the player on `current` takes it over as it is (playing or paused, and where)
+    /// and reports `.statusChanged` (a followed one `.externalTrack` if it's on something else).
+    /// Engines whose player stops with the app (Apple Music) ignore it.
+    func attach(expecting current: QueueTrack, next: QueueTrack?)
+    /// Once `attach` has found the player on the restored song and taken it over, that song's
+    /// id, while the engine is still on it: the session then counts it as loaded, so Play
+    /// resumes it rather than starting it over. nil otherwise. A followed engine reports this
+    /// through `playerTrackID` instead.
+    var attachedTrackID: String? { get }
 }
 
 public extension PlaybackEngine {
     func shutDown() {}
+    func attach(expecting current: QueueTrack, next: QueueTrack?) {}
+    var attachedTrackID: String? { nil }
 }
 
 /// A player that belongs to an account other things also control (Spotify): the session follows
@@ -97,13 +111,4 @@ public protocol FollowingPlaybackEngine: PlaybackEngine {
     func fetchPlayerQueue() async throws -> [QueueTrack]
     /// Moves the player on to the next item in its own queue, whoever put it there.
     func skipInPlayer() async throws
-    /// Starts watching the player without playing anything, expecting `trackID` (a restored
-    /// session's current song): after a relaunch the music may still be playing on the player.
-    /// The next reading reports its state (`.statusChanged`, or `.externalTrack` if it's on
-    /// something else).
-    func attach(expecting trackID: String?)
-}
-
-public extension FollowingPlaybackEngine {
-    func attach(expecting trackID: String?) {}
 }

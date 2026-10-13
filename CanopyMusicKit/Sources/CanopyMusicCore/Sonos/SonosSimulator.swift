@@ -98,6 +98,25 @@ public final class SonosSimulator: SonosTransport {
         groups[g].positionAt = Date()
     }
 
+    /// The group led by `coordinatorID` reaches the end of its song: it goes on to the next
+    /// entry in its queue, or after the last back to the first, stopped (as Sonos does).
+    public func finishTrack(in coordinatorID: String) {
+        guard let g = groupIndex(coordinator: coordinatorID), groups[g].elsewhere == nil else { return }
+        if groups[g].track < groups[g].queue.count {
+            groups[g].track += 1
+        } else {
+            groups[g].track = 1
+            groups[g].state = .stopped
+        }
+        setPosition(g, 0)
+    }
+
+    /// A room is switched off (every request to it fails), or back on.
+    public func setReachable(_ roomID: String, _ reachable: Bool) {
+        guard let r = rooms.firstIndex(where: { $0.id == roomID }) else { return }
+        rooms[r].reachable = reachable
+    }
+
     public func room(_ id: String) -> Room? { rooms.first { $0.id == id } }
 
     /// The ids in each group, coordinator first.

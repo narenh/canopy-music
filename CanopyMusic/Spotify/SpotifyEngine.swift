@@ -71,9 +71,10 @@ final class SpotifyEngine: FollowingPlaybackEngine {
     private var deviceQuery: [String: String] { deviceID.map { ["device_id": $0] } ?? [:] }
 
     /// After a relaunch the music may still be playing on Spotify: watch it, expecting the
-    /// restored current song, without sending anything.
-    func attach(expecting trackID: String?) {
-        guard currentURI == nil, !hasStartedPlayback, let trackID else { return }
+    /// restored current song, without sending anything. (Its staging is its own: `next` isn't used.)
+    func attach(expecting current: QueueTrack, next: QueueTrack?) {
+        let trackID = current.id
+        guard currentURI == nil, !hasStartedPlayback else { return }
         currentURI = trackID
         previousURI = nil
         lastPlaying = nil

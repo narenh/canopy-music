@@ -13,6 +13,8 @@ import SwiftUI
 struct TVMotionArtworkView: View {
     let track: QueueTrack?
     let catalog: any MusicCatalog
+    /// The music's play/pause: the video eases to a stop with it, and back up (as Apple Music's).
+    var isPlaying: Bool
     var cornerRadius: CGFloat
 
     @State private var url: URL?
@@ -22,7 +24,7 @@ struct TVMotionArtworkView: View {
     var body: some View {
         ZStack {
             if let url {
-                TVLoopingVideo(url: url, isActive: scenePhase != .background) {
+                TVLoopingVideo(url: url, isActive: scenePhase != .background, isPlaying: isPlaying) {
                     withAnimation(.easeIn(duration: 0.8)) { isShowing = true }
                 }
                 .id(url)
@@ -60,18 +62,19 @@ struct TVMotionArtworkView: View {
 private struct TVLoopingVideo: UIViewRepresentable {
     let url: URL
     let isActive: Bool
+    let isPlaying: Bool
     /// Called once, when the first frame is ready to show.
     let onReady: @MainActor () -> Void
 
     func makeUIView(context: Context) -> TVLoopingVideoView {
         let view = TVLoopingVideoView()
         view.start(url: url, onReady: onReady)
-        view.setActive(isActive)
+        view.setActive(isActive, playing: isPlaying, animated: false)
         return view
     }
 
     func updateUIView(_ view: TVLoopingVideoView, context: Context) {
-        view.setActive(isActive)
+        view.setActive(isActive, playing: isPlaying, animated: true)
     }
 
     static func dismantleUIView(_ view: TVLoopingVideoView, coordinator: ()) {
@@ -125,10 +128,50 @@ private final class TVLoopingVideoView: UIView {
         }
     }
 
-    func setActive(_ active: Bool) {
+    /// `active` false (the app's in the background) stops it at once. Otherwise it follows the
+    /// music: `animated`, the rate eases down to a stop or back up to normal speed over
+    /// `rampDuration`, as Apple Music's motion artwork does; a stream that can't play slower than
+    /// normal just pauses and plays.
+    func setActive(_ active: Bool, playing: Bool, animated: Bool) {
         guard let player else { return }
-        wantsToPlay = active
-        if active { player.play() } else { player.pause() }
+        let wanted = active && playing
+        guard wanted != wantsToPlay || !animated else { return }
+        wantsToPlay = wanted
+        rampTimer?.invalidate()
+        rampTimer = nil
+        let canRamp = animated && active && (player.currentItem?.canPlaySlowForward ?? false)
+        guard canRamp else {
+            if wanted { player.play() } else { player.pause() }
+            return
+        }
+        ramp = (from: Double(player.rate), to: wanted ? 1 : 0, start: Date())
+        if wanted, player.rate == 0 { player.rate = 0.05 }
+        rampTimer = Timer.scheduledTimer(withTimeInterval: 1.0 / 60, repeats: true) { [weak self] _ in
+            MainActor.assumeIsolated { self?.rampStep() }
+        }
+    }
+
+    static let rampDuration: TimeInterval = 0.25
+    private var rampTimer: Timer?
+    private var ramp: (from: Double, to: Double, start: Date)?
+
+    private func rampStep() {
+        guard let player, let ramp else {
+            rampTimer?.invalidate()
+            rampTimer = nil
+            return
+        }
+        let progress = min(1, Date().timeIntervalSince(ramp.start) / Self.rampDuration)
+        // Ease out: quick at first, settling into the new speed.
+        let eased = 1 - pow(1 - progress, 2)
+        if progress >= 1 {
+            rampTimer?.invalidate()
+            rampTimer = nil
+            self.ramp = nil
+            if ramp.to == 0 { player.pause() } else { player.rate = 1 }
+        } else {
+            player.rate = Float(max(ramp.from + (ramp.to - ramp.from) * eased, 0.05))
+        }
     }
 
     private func statusChanged(_ player: AVPlayer) {
@@ -143,6 +186,8 @@ private final class TVLoopingVideoView: UIView {
 
     func stop() {
         wantsToPlay = false
+        rampTimer?.invalidate()
+        rampTimer = nil
         statusObservation?.invalidate()
         statusObservation = nil
         if let interruptionObserver { NotificationCenter.default.removeObserver(interruptionObserver) }

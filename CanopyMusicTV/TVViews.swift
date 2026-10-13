@@ -39,7 +39,7 @@ struct TVRootView: View {
             TVBackground(track: backgroundItem?.track, theme: ArtworkTheme(backgroundItem?.track.colors))
                 // Changes evenly to the new song's, starting with the party screen's slide and
                 // settling after it (`TVPartyView.showCurrent`).
-                .animation(.linear(duration: 1.5), value: backgroundItem?.id)
+                .animation(.linear(duration: 3), value: backgroundItem?.id)
             switch model.role {
             case .choosing:
                 TVZoneListView()
@@ -628,7 +628,7 @@ struct TVPartyView: View {
         VStack(alignment: .leading, spacing: 0) {
             TVArtwork(track: item?.track, cornerRadius: 22)
                 // Its video, if it has one, goes with this page (`TVMotionArtworkView`).
-                .overlay { TVMotionArtworkView(track: item?.track, catalog: model.session.catalog, cornerRadius: 22) }
+                .overlay { TVMotionArtworkView(track: item?.track, catalog: model.session.catalog, isPlaying: model.session.isPlaying, cornerRadius: 22) }
                 .frame(width: art, height: art)
                 .shadow(color: .black.opacity(0.4), radius: 30, y: 16)
             VStack(alignment: .leading, spacing: 0) {
@@ -1138,13 +1138,14 @@ private struct TVDrift<Content: View>: View {
         terms.reduce(0) { $0 + $1.amplitude * sin(2 * .pi * t / $1.period + $1.phase) }
     }
 
-    /// At strength 1: scale 1.23–1.38 around the 1.3 it sits at without drift, up to about 3% of
-    /// the screen off centre, and up to 2° turned.
+    /// At strength 1 (8× the first, too-subtle tuning, chosen on a real TV): scale about 1.3 ± 0.6
+    /// (never small enough to show an edge), up to about 29% of the screen off centre, and up to
+    /// 16° turned. The blur hides small moves, so it takes this much to read as drifting.
     private static func pose(at t: Double, strength s: Double, size: CGSize) -> Pose {
-        let dx = s * size.width * wave(t, [(0.018, 47, 0.3), (0.012, 79, 2.1), (0.006, 61, 4.0)])
-        let dy = s * size.height * wave(t, [(0.018, 59, 1.2), (0.012, 89, 3.4), (0.006, 43, 5.1)])
-        let degrees = s * wave(t, [(1.2, 67, 0.7), (0.8, 41, 2.9)])
-        var scale = 1.3 + s * wave(t, [(0.045, 53, 1.9), (0.03, 83, 0.4)])
+        let dx = s * size.width * wave(t, [(0.144, 47, 0.3), (0.096, 79, 2.1), (0.048, 61, 4.0)])
+        let dy = s * size.height * wave(t, [(0.144, 59, 1.2), (0.096, 89, 3.4), (0.048, 43, 5.1)])
+        let degrees = s * wave(t, [(9.6, 67, 0.7), (6.4, 41, 2.9)])
+        var scale = 1.3 + s * wave(t, [(0.36, 53, 1.9), (0.24, 83, 0.4)])
         // Never so small that the art's left or right edge shows (it's square, as wide as the
         // screen, so top and bottom have room to spare).
         let turn = abs(sin(degrees * .pi / 180))

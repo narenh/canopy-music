@@ -861,6 +861,20 @@
     visualViewport.addEventListener("scroll", fitViewport);
     fitViewport();
   }
+  // Setup: the field being typed in (with its label) moves to the top of the sheet, once iOS has
+  // opened the keyboard and done its own scrolling; the playlist search then has its results below.
+  $("setup-scroll").addEventListener("focusin", (event) => {
+    const search = event.target.closest(".picker-search");
+    const field = search || (event.target.matches("input.text-input") ? event.target : null);
+    if (!field) return;
+    const target = search || field.previousElementSibling || field;
+    setTimeout(() => {
+      if (document.activeElement !== event.target) return;
+      const scroller = $("setup-scroll");
+      const top = target.getBoundingClientRect().top - scroller.getBoundingClientRect().top + scroller.scrollTop;
+      scroller.scrollTo({ top: Math.max(0, top - 8), behavior: "smooth" });
+    }, 350);
+  });
 
   // MARK: Search
 

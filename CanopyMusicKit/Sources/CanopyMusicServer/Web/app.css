@@ -228,6 +228,8 @@ html.sheet-open, html.sheet-open body { overflow: hidden; }
 .sheet.picker-sheet {
   overflow: hidden; display: flex; flex-direction: column; padding: env(safe-area-inset-top) 0 0;
   top: var(--vvt, 0px); bottom: auto; height: 100vh; height: 100dvh; height: var(--vvh, 100dvh);
+  /* While Safari pans for the keyboard the sheet's top can trail the screen's: no page behind it. */
+  box-shadow: 0 -100vh 0 var(--base);
 }
 .sheet.picker-sheet[hidden] { display: none; }
 .picker-scroll {
@@ -248,8 +250,12 @@ html.sheet-open, html.sheet-open body { overflow: hidden; }
   flex: none; padding: 4px 16px calc(env(safe-area-inset-bottom) + 12px);
   background: var(--base); border-top: 1px solid var(--line);
 }
-/* While typing in setup, the keyboard has the room: Shuffle and Start come back when it closes. */
+/* While typing in setup, the keyboard has the room: Shuffle and Start come back when it closes.
+   Room below the content too, so the field being typed in can scroll to the top (app.js). */
 #setup:has(input.text-input:focus, input[type="search"]:focus) .picker-foot { display: none; }
+#setup:has(input.text-input:focus, input[type="search"]:focus) .picker-scroll::after {
+  content: ""; display: block; height: var(--vvh, 100dvh);
+}
 .picker-shuffle { display: flex; justify-content: space-between; align-items: center; gap: 12px; padding: 8px 2px 12px; font-size: 15px; }
 .picker-sheet.busy .playlist-row, .picker-sheet.busy .picker-shuffle { pointer-events: none; }
 .picker-sheet.busy .playlist-row:not(.selected), .picker-sheet.busy .picker-shuffle { opacity: .5; }

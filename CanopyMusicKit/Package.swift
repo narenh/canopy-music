@@ -19,7 +19,7 @@ let package = Package(
             resources: [.copy("Web")]
         ),
         .executableTarget(name: "CanopyMusicDevServer", dependencies: ["CanopyMusicCore", "CanopyMusicServer"]),
-        .testTarget(name: "CanopyMusicCoreTests", dependencies: ["CanopyMusicCore"]),
+        .testTarget(name: "CanopyMusicCoreTests", dependencies: ["CanopyMusicCore"], resources: [.copy("Fixtures")]),
         .testTarget(name: "CanopyMusicServerTests", dependencies: ["CanopyMusicCore", "CanopyMusicServer"]),
     ]
 )

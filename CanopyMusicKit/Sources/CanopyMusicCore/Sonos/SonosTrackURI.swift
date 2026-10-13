@@ -1,0 +1,179 @@
+import Foundation
+
+/// How Sonos names a service's track: the URI a queue entry plays and the DIDL-Lite metadata
+/// sent with it (`AddURIToQueue`).
+///
+/// Spotify's shape is the one a real S2 household's queue holds
+/// (`x-sonos-spotify:spotify%3atrack%3a{id}?sid=12&flags=8232&sn=4`). Apple Music's is the
+/// community-documented one and hasn't been seen on a real household yet:
+/// `x-sonos-http:song%3a{id}.mp4?sid=204&flags=8224&sn={sn}`. The item-id prefixes and the `desc`
+/// token form (`SA_RINCON{type}_X_#Svc{type}-0-Token`) are community-documented too; the token's
+/// form matches what this household's Sonos Radio favourites carry.
+public struct SonosTrackReference: Hashable, Sendable {
+    public var service: SonosMusicService
+    /// The account's serial number in the household (`sn`).
+    public var accountSerial: Int
+    /// The `desc` to send; nil uses the generic `-0-` token for the service.
+    public var token: String?
+
+    public init(service: SonosMusicService, accountSerial: Int, token: String? = nil) {
+        self.service = service
+        self.accountSerial = accountSerial
+        self.token = token
+    }
+
+    public enum Failure: Error, Equatable, LocalizedError {
+        /// Not a track id this service's Sonos URIs can carry (an Apple Music library-only song,
+        /// a Spotify episode or local file).
+        case unsupportedTrack(String)
+
+        public var errorDescription: String? {
+            switch self {
+            case .unsupportedTrack: "This song can't be played on Sonos."
+            }
+        }
+    }
+
+    /// The bare service track id: Apple Music's catalog id ("1440857781"), or Spotify's base-62 id
+    /// from a `spotify:track:…` URI.
+    public func serviceTrackID(for trackID: String) throws -> String {
+        switch service {
+        case .appleMusic:
+            // Library-only songs (`i.…`) have no catalog id Sonos can stream.
+            guard !trackID.isEmpty, trackID.allSatisfy(\.isNumber) else { throw Failure.unsupportedTrack(trackID) }
+            return trackID
+        case .spotify:
+            let parts = trackID.split(separator: ":")
+            if parts.count == 3, parts[0] == "spotify", parts[1] == "track" { return String(parts[2]) }
+            if parts.count == 1, !trackID.isEmpty, trackID.allSatisfy({ $0.isLetter || $0.isNumber }) { return trackID }
+            throw Failure.unsupportedTrack(trackID)
+        }
+    }
+
+    /// The service's own name for the track, percent-encoded as Sonos writes it (lower-case hex).
+    func encodedObject(_ id: String) -> String {
+        switch service {
+        case .appleMusic: "song%3a\(id)"
+        case .spotify: "spotify%3atrack%3a\(id)"
+        }
+    }
+
+    /// The `flags` value. Spotify's is what the Sonos app wrote into a real queue; Apple Music's
+    /// is the community-documented value.
+    public var flags: Int {
+        switch service {
+        case .appleMusic: 8224
+        case .spotify: 8232
+        }
+    }
+
+    public func uri(for trackID: String) throws -> String {
+        let id = try serviceTrackID(for: trackID)
+        let object = encodedObject(id)
+        let query = "sid=\(service.serviceID)&flags=\(flags)&sn=\(accountSerial)"
+        switch service {
+        case .appleMusic: return "x-sonos-http:\(object).mp4?\(query)"
+        case .spotify: return "x-sonos-spotify:\(object)?\(query)"
+        }
+    }
+
+    /// The DIDL-Lite item id: a prefix Sonos uses for "a track from a music service", then the
+    /// encoded object.
+    public func itemID(for trackID: String) throws -> String {
+        let object = encodedObject(try serviceTrackID(for: trackID))
+        switch service {
+        case .appleMusic: return "10032020\(object)"
+        case .spotify: return "00032020\(object)"
+        }
+    }
+
+    public var resolvedToken: String {
+        token ?? Self.genericToken(serviceType: service.serviceType)
+    }
+
+    public static func genericToken(serviceType: Int) -> String {
+        "SA_RINCON\(serviceType)_X_#Svc\(serviceType)-0-Token"
+    }
+
+    /// The `EnqueuedURIMetaData` for a track: DIDL-Lite with its title and the service token.
+    public func metadata(for track: QueueTrack) throws -> String {
+        let itemID = try itemID(for: track.id)
+        let e = SonosXMLEscape.escape
+        var item = "<item id=\"\(e(itemID))\" parentID=\"-1\" restricted=\"true\">"
+        item += "<dc:title>\(e(track.title))</dc:title>"
+        if !track.artist.isEmpty { item += "<dc:creator>\(e(track.artist))</dc:creator>" }
+        if !track.album.isEmpty { item += "<upnp:album>\(e(track.album))</upnp:album>" }
+        item += "<upnp:class>object.item.audioItem.musicTrack</upnp:class>"
+        item += "<desc id=\"cdudn\" nameSpace=\"urn:schemas-rinconnetworks-com:metadata-1-0/\">\(e(resolvedToken))</desc>"
+        item += "</item>"
+        return Self.didlOpen + item + "</DIDL-Lite>"
+    }
+
+    static let didlOpen = "<DIDL-Lite xmlns:dc=\"http://purl.org/dc/elements/1.1/\" xmlns:upnp=\"urn:schemas-upnp-org:metadata-1-0/upnp/\" xmlns:r=\"urn:schemas-rinconnetworks-com:metadata-1-0/\" xmlns=\"urn:schemas-upnp-org:metadata-1-0/DIDL-Lite/\">"
+}
+
+/// Reading Sonos URIs back.
+public enum SonosURI {
+    /// The `sid` and `sn` query values of a service item URI, if it has them.
+    public static func serviceAndAccount(of uri: String) -> (serviceID: Int, serial: Int?)? {
+        guard let query = uri.split(separator: "?", maxSplits: 1).dropFirst().first else { return nil }
+        var sid: Int?
+        var sn: Int?
+        // `&` may still be escaped as `&amp;` when read out of raw XML.
+        for pair in query.replacingOccurrences(of: "&amp;", with: "&").split(separator: "&") {
+            let kv = pair.split(separator: "=", maxSplits: 1)
+            guard kv.count == 2 else { continue }
+            switch kv[0] {
+            case "sid": sid = Int(kv[1])
+            case "sn": sn = Int(kv[1])
+            default: break
+            }
+        }
+        guard let sid else { return nil }
+        return (sid, sn)
+    }
+
+    /// The track id Canopy Music uses for a service track URI: Spotify's `spotify:track:…` URI,
+    /// or Apple Music's catalog id. nil for anything else (line-in, radio, TV, Spotify Connect).
+    public static func canopyTrackID(of uri: String) -> String? {
+        let base = uri.split(separator: "?", maxSplits: 1).first.map(String.init) ?? uri
+        let decoded = base.removingPercentEncoding ?? base
+        if decoded.hasPrefix("x-sonos-spotify:") {
+            let rest = decoded.dropFirst("x-sonos-spotify:".count)
+            return rest.hasPrefix("spotify:track:") ? String(rest) : nil
+        }
+        if decoded.hasPrefix("x-sonos-http:song:") {
+            var id = decoded.dropFirst("x-sonos-http:song:".count)
+            if let dot = id.firstIndex(of: ".") { id = id[..<dot] }
+            return id.isEmpty ? nil : String(id)
+        }
+        return nil
+    }
+
+    /// The URI that plays a group's queue.
+    public static func queue(of coordinatorID: String) -> String { "x-rincon-queue:\(coordinatorID)#0" }
+
+    /// The URI that makes a player join a group.
+    public static func joinGroup(of coordinatorID: String) -> String { "x-rincon:\(coordinatorID)" }
+}
+
+/// Sonos's "H:MM:SS" times.
+public enum SonosTime {
+    /// nil for "NOT_IMPLEMENTED" and other non-times.
+    public static func seconds(_ string: String?) -> TimeInterval? {
+        guard let string, !string.isEmpty else { return nil }
+        let parts = string.split(separator: ":")
+        guard parts.count == 3 || parts.count == 2 else { return nil }
+        var total: Double = 0
+        for part in parts {
+            guard let value = Double(part) else { return nil }
+            total = total * 60 + value
+        }
+        return total
+    }
+
+    public static func string(_ seconds: TimeInterval) -> String {
+        let whole = max(0, Int(seconds.rounded(.down)))
+        return String(format: "%d:%02d:%02d", whole / 3600, (whole / 60) % 60, whole % 60)
+    }
+}

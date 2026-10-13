@@ -199,13 +199,22 @@ struct ArtworkDrift<Content: View>: View {
     }
     #endif
 
+    private static var frameInterval: TimeInterval {
+        #if os(tvOS)
+        1.0 / 30
+        #else
+        1.0 / 12
+        #endif
+    }
+
     var body: some View {
         let strength = reduceMotion ? 0 : Self.strength
         GeometryReader { geo in
             let (width, height) = (Double(geo.size.width), Double(geo.size.height))
             let side = BackgroundDrift.artSide(width: width, height: height)
-            // 30 frames a second is smooth at these speeds (a few points a second).
-            TimelineView(.animation(minimumInterval: 1.0 / 30, paused: strength == 0)) { timeline in
+            // 30 frames a second on the TV (mains powered); 12 on the iPad, where redrawing the
+            // full-screen art every frame costs battery and the motion is slow enough not to show it.
+            TimelineView(.animation(minimumInterval: Self.frameInterval, paused: strength == 0)) { timeline in
                 let pose = BackgroundDrift.pose(
                     at: timeline.date.timeIntervalSinceReferenceDate * Self.speed,
                     strength: strength, width: width, height: height

@@ -170,9 +170,11 @@ html.sheet-open, html.sheet-open body { overflow: hidden; }
 .offline[hidden] { display: none; }
 .offline .spinner { width: 12px; height: 12px; border-width: 1.5px; }
 
-/* Safari 26 tints its status bar and toolbar with this purple while the splash shows (and keeps
-   it after the splash has gone, until a .bar-tint pulse sets the page's colour). */
-.splash { position: fixed; inset: 0; z-index: 100; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 30px; padding: 24px; background: #3a1236 url(/splash.jpg) center / cover no-repeat; color: #fff; transition: opacity .35s ease; }
+/* The "Dusk" backdrop from music.canopysf.com, drawn rather than an image: soft violet fields
+   over a dark violet. Safari 26 tints its status bar and toolbar with the base colour while the
+   splash shows (and keeps it after the splash has gone, until a .bar-tint pulse sets the page's
+   colour). */
+.splash { position: fixed; inset: 0; z-index: 100; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 30px; padding: 24px; background-color: #2a1748; background-image: radial-gradient(45% 55% at 0% 30%, rgba(120, 70, 180, .7), rgba(120, 70, 180, 0)), radial-gradient(35% 40% at 100% 0%, rgba(150, 90, 170, .55), rgba(150, 90, 170, 0)), radial-gradient(60% 50% at 60% 110%, rgba(30, 14, 60, 1), rgba(30, 14, 60, 0)), linear-gradient(170deg, #3d2266, #2a1748 60%, #1b0f33); color: #fff; transition: opacity .35s ease; }
 /* Safari 26 takes its bars' colour from a fixed element appearing at the screen's edges (at
    least ~6px tall, not transparent) and keeps it after the element has gone, while any other
    fixed element (a sheet, a dialog) still covers the edges. Recolouring the element, theme-color

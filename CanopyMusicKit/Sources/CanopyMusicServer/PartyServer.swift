@@ -71,9 +71,8 @@ public final class PartyServer: Sendable {
         await server.appendRoute("GET /app.js", to: StaticFile("app.js", type: "text/javascript; charset=utf-8"))
         await server.appendRoute("GET /app.css", to: StaticFile("app.css", type: "text/css; charset=utf-8"))
         await server.appendRoute("GET /logo.png", to: StaticFile("logo.png", type: "image/png"))
-        // The loading splash: the "canopy music" lockup on the Venus background.
+        // The loading splash's "canopy music" lockup (its background is drawn in CSS).
         await server.appendRoute("GET /logo-music.png", to: StaticFile("logo-music.png", type: "image/png"))
-        await server.appendRoute("GET /splash.jpg", to: StaticFile("splash.jpg", type: "image/jpeg"))
         // A TV zone's setup: the Music bar (the iPad's own Apple Music icon).
         await server.appendRoute("GET /apple-music.png", to: StaticFile("apple-music.png", type: "image/png"))
         await server.appendRoute("GET /spotify.png", to: StaticFile("spotify.png", type: "image/png"))

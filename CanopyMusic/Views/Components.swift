@@ -9,7 +9,8 @@ struct ArtworkView: View {
     var cornerRadius: CGFloat = 8
 
     var body: some View {
-        let url = large ? (track?.artworkURL ?? track?.thumbnailURL) : (track?.thumbnailURL ?? track?.artworkURL)
+        // `-demoArtworkURLs` (debug builds): demo tracks get a remote image each.
+        let url = (large ? (track?.artworkURL ?? track?.thumbnailURL) : (track?.thumbnailURL ?? track?.artworkURL)) ?? DemoArtwork.url(for: track)
         ZStack {
             placeholder
             if let url {
@@ -35,31 +36,18 @@ struct ArtworkView: View {
     }
 }
 
-/// Full-bleed blurred artwork over the theme's base color.
+/// Full-bleed blurred artwork over the theme's base color, drifting slowly as on the Apple TV
+/// (`ArtworkBackground`, shared with it). Song changes cross-fade over 1.2 s.
 struct ThemedBackground: View {
     let track: QueueTrack?
     let theme: ArtworkTheme
 
     var body: some View {
-        ZStack {
-            theme.base
-            if let url = track?.artworkURL {
-                AsyncImage(url: url, transaction: Transaction(animation: .easeInOut(duration: 1.2))) { phase in
-                    if let image = phase.image {
-                        image.resizable().scaledToFill()
-                            .blur(radius: 90)
-                            .saturation(1.4)
-                            .opacity(0.5)
-                            .scaleEffect(1.3)
-                    }
-                }
-                .id(url)
-                .transition(.opacity)
-            }
-            LinearGradient(colors: [theme.base.opacity(0.1), theme.base.opacity(0.85)], startPoint: .top, endPoint: .bottom)
-        }
+        ArtworkBackground(
+            track: track, artworkURL: track?.artworkURL ?? DemoArtwork.url(for: track),
+            theme: theme, source: BlurredArtworkCache.shared
+        )
         .animation(.easeInOut(duration: 1.2), value: track?.id)
-        .ignoresSafeArea()
     }
 }
 

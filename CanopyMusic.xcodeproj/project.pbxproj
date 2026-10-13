@@ -37,6 +37,12 @@
 			path = CanopyMusic/EasterEgg;
 			sourceTree = "<group>";
 		};
+		CB000000000000000000000B /* Background (iPad and TV) */ = {
+			isa = PBXFileSystemSynchronizedRootGroup;
+			name = "Background (iPad and TV)";
+			path = CanopyMusic/Background;
+			sourceTree = "<group>";
+		};
 /* End PBXFileSystemSynchronizedRootGroup section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -68,6 +74,7 @@
 				CA0000000000000000000002 /* CanopyMusic */,
 				CB0000000000000000000002 /* CanopyMusicTV */,
 				CB000000000000000000000A /* EasterEgg (iPad and TV) */,
+				CB000000000000000000000B /* Background (iPad and TV) */,
 				CA0000000000000000000012 /* CanopyMusic-Info.plist */,
 				CA0000000000000000000005 /* Products */,
 			);
@@ -124,6 +131,7 @@
 			fileSystemSynchronizedGroups = (
 				CB0000000000000000000002 /* CanopyMusicTV */,
 				CB000000000000000000000A /* EasterEgg (iPad and TV) */,
+				CB000000000000000000000B /* Background (iPad and TV) */,
 			);
 			name = CanopyMusicTV;
 			packageProductDependencies = (

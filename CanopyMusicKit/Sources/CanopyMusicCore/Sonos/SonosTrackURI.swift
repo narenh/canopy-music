@@ -155,6 +155,15 @@ public enum SonosURI {
 
     /// The URI that makes a player join a group.
     public static func joinGroup(of coordinatorID: String) -> String { "x-rincon:\(coordinatorID)" }
+
+    /// The coordinator named by a group member's `x-rincon:{coordinator}` URI (what a member
+    /// answers to `GetPositionInfo` and `GetMediaInfo`, checked on a real Move in a Beam's group).
+    /// nil for anything else, `x-rincon-queue:` and `x-rincon-stream:` included.
+    public static func coordinator(ofMemberURI uri: String) -> String? {
+        guard uri.hasPrefix("x-rincon:") else { return nil }
+        let id = uri.dropFirst("x-rincon:".count)
+        return id.isEmpty ? nil : String(id)
+    }
 }
 
 /// Sonos's "H:MM:SS" times.

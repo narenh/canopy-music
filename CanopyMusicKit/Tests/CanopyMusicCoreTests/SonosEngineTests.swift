@@ -92,14 +92,16 @@ func sonosURI(_ id: String) -> String { "x-sonos-spotify:spotify%3atrack%3a\(id)
     @Test func playReplacesTheQueueAndPlaysIt() async throws {
         fake.queue = ["someone else's song"]
         try await engine.play(spotifyTrack("a"))
-        #expect(fake.actions == ["RemoveAllTracksFromQueue", "AddURIToQueue", "SetAVTransportURI", "SetPlayMode", "Seek", "Play"])
+        // The group layout is read first (this fake has none to give).
+        #expect(fake.actions.first == "GetZoneGroupState")
+        #expect(fake.changes.map(\.action) == ["RemoveAllTracksFromQueue", "AddURIToQueue", "SetAVTransportURI", "SetPlayMode", "Seek", "Play"])
         #expect(fake.requests.allSatisfy { $0.host == "10.0.1.224" })
-        let add = fake.requests[1]
+        let add = fake.changes[1]
         #expect(add.argument("EnqueuedURI") == sonosURI("a"))
         #expect(add.argument("EnqueuedURIMetaData")?.contains("<desc id=\"cdudn\"") == true)
-        #expect(fake.requests[2].argument("CurrentURI") == "x-rincon-queue:RINCON_MOVE#0")
-        #expect(fake.requests[4].argument("Unit") == "TRACK_NR")
-        #expect(fake.requests[4].argument("Target") == "1")
+        #expect(fake.changes[2].argument("CurrentURI") == "x-rincon-queue:RINCON_MOVE#0")
+        #expect(fake.changes[4].argument("Unit") == "TRACK_NR")
+        #expect(fake.changes[4].argument("Target") == "1")
         #expect(fake.queue == [sonosURI("a")])
         #expect(engine.isPlaying)
     }
@@ -242,23 +244,48 @@ func sonosURI(_ id: String) -> String { "x-sonos-spotify:spotify%3atrack%3a\(id)
         #expect(fake.requests.isEmpty)
     }
 
-    @Test func groupingRoomsOnFirstPlay() async throws {
+    /// The layout can't be read (this fake has none): grouped as last known, as before.
+    @Test func groupingRoomsOnFirstPlayWithoutALayout() async throws {
         let target = SonosTarget(coordinator: .init(id: "RINCON_MOVE", name: "Sonos Move", host: "10.0.1.224"),
                                  joining: [.init(id: "RINCON_BEAM", name: "Bedroom", host: "10.0.1.161")], leavesGroup: true)
         let grouped = SonosEngine(target: target, reference: SonosTrackReference(service: .spotify, accountSerial: 4), transport: fake)
         try await grouped.play(spotifyTrack("a"))
-        #expect(fake.actions.prefix(2) == ["BecomeCoordinatorOfStandaloneGroup", "SetAVTransportURI"])
-        #expect(fake.requests[1].host == "10.0.1.161")
-        #expect(fake.requests[1].argument("CurrentURI") == "x-rincon:RINCON_MOVE")
+        #expect(fake.changes.prefix(2).map(\.action) == ["BecomeCoordinatorOfStandaloneGroup", "SetAVTransportURI"])
+        #expect(fake.changes[1].host == "10.0.1.161")
+        #expect(fake.changes[1].argument("CurrentURI") == "x-rincon:RINCON_MOVE")
         try await grouped.play(spotifyTrack("b"))
         #expect(fake.actions.filter { $0 == "BecomeCoordinatorOfStandaloneGroup" }.count == 1)
         #expect(target.name == "Sonos Move + Bedroom")
+    }
+
+    /// A start that fails says so in the engine's log: the action, the room and the error.
+    @Test func aFailedStartIsLogged() async throws {
+        let log = LogRecorder()
+        engine.log = { log.lines.append($0) }
+        fake.failing["RemoveAllTracksFromQueue"] = 800
+        await #expect(throws: SonosError.upnp(action: "RemoveAllTracksFromQueue", code: 800)) { try await engine.play(spotifyTrack("a")) }
+        let line = try #require(log.lines.first { $0.contains("RemoveAllTracksFromQueue") })
+        #expect(line.contains("Sonos Move"))
+        #expect(line.contains("10.0.1.224"))
+        #expect(line.contains("800"))
+    }
+
+    @Test func anUnplayableTrackIsLogged() async {
+        let log = LogRecorder()
+        engine.log = { log.lines.append($0) }
+        await #expect(throws: SonosTrackReference.Failure.self) { try await engine.play(QueueTrack(id: "spotify:episode:x", title: "x", artist: "y")) }
+        #expect(log.lines.contains { $0.contains("can't play x") })
     }
 }
 
 @MainActor
 final class EventRecorder {
     var events: [PlaybackEvent] = []
+}
+
+@MainActor
+final class LogRecorder {
+    var lines: [String] = []
 }
 
 /// The rules on their own: what each reading means.

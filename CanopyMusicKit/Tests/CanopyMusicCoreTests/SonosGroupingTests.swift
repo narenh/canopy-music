@@ -146,6 +146,131 @@ import Testing
         #expect(engine.target.joining.isEmpty)
     }
 
+    // MARK: The live layout at the first play
+
+    /// Joins and leaves sent to the speakers.
+    var regrouping: [SonosRequest] {
+        sim.changes.filter { $0.action == "BecomeCoordinatorOfStandaloneGroup" || $0.argument("CurrentURI")?.hasPrefix("x-rincon:") == true }
+    }
+
+    /// The real household when Start failed with 800: Bedroom leads with Move as a member, both are
+    /// chosen, and the target (saved at an earlier launch) has Move leading. Bedroom leads: nothing
+    /// is regrouped, and every command goes to it.
+    @Test func aChosenRoomAlreadyLeadingTheOthersIsAdopted() async throws {
+        sim.group(["RINCON_BEAM", "RINCON_MOVE"])
+        sim.play(.init(uri: "x-sonosapi-stream:s1234?sid=254", title: "KEXP"), in: "RINCON_BEAM")
+        let engine = engine(SonosTarget(coordinator: move, joining: [bedroom]))
+        var targets: [SonosTarget] = []
+        engine.onTargetChanged = { targets.append($0) }
+        try await engine.play(spotifyTrack("a"))
+        #expect(regrouping.isEmpty)
+        #expect(sim.changes.allSatisfy { $0.host == "10.0.0.1" })
+        #expect(engine.target.coordinator.id == "RINCON_BEAM")
+        #expect(engine.target.rooms.map(\.id) == ["RINCON_BEAM", "RINCON_MOVE"])
+        // The app hears of it (its saved output follows).
+        #expect(targets.last?.coordinator.id == "RINCON_BEAM")
+        #expect(targets.last?.leavesGroup == false)
+        #expect(sim.topology.contains(["RINCON_BEAM", "RINCON_MOVE"]))
+        #expect(sim.queue(of: "RINCON_BEAM") == [sonosURI("a")])
+        #expect(sim.state(of: "RINCON_MOVE") == .playing)
+        try await engine.stage(spotifyTrack("b"))
+        #expect(sim.changes.last?.host == "10.0.0.1")
+        #expect(sim.queue(of: "RINCON_BEAM") == [sonosURI("a"), sonosURI("b")])
+    }
+
+    /// Move chosen alone, a member of Bedroom's group (not chosen), with a saved target that says
+    /// it needn't leave: it leaves and plays by itself, and Bedroom carries on with its TV.
+    @Test func aChosenRoomInAnUnchosenRoomsGroupLeavesIt() async throws {
+        sim.group(["RINCON_BEAM", "RINCON_MOVE"])
+        sim.play(.init(uri: "x-sonos-htastream:RINCON_BEAM:spdif"), in: "RINCON_BEAM")
+        let engine = engine(SonosTarget(coordinator: move, leavesGroup: false))
+        try await engine.play(spotifyTrack("a"))
+        let first = try #require(sim.changes.first)
+        #expect(first.action == "BecomeCoordinatorOfStandaloneGroup")
+        #expect(first.host == "10.0.0.2")
+        #expect(sim.changes.allSatisfy { $0.host == "10.0.0.2" })
+        #expect(sim.topology.contains(["RINCON_MOVE"]))
+        #expect(sim.topology.contains(["RINCON_BEAM"]))
+        #expect(sim.state(of: "RINCON_MOVE") == .playing)
+        #expect(sim.state(of: "RINCON_BEAM") == .playing)
+        #expect(sim.queue(of: "RINCON_BEAM").isEmpty)
+    }
+
+    /// A saved target says the coordinator leaves a group, but it leads its own: the live layout
+    /// wins, so it doesn't leave (which would stop it), and the other room joins.
+    @Test func theLiveLayoutWinsOverASavedLeavesGroup() async throws {
+        let engine = engine(SonosTarget(coordinator: bedroom, joining: [move], leavesGroup: true))
+        try await engine.play(spotifyTrack("a"))
+        #expect(regrouping.map(\.action) == ["SetAVTransportURI"])
+        #expect(regrouping.first?.host == "10.0.0.2")
+        #expect(sim.topology.contains(["RINCON_BEAM", "RINCON_MOVE"]))
+        #expect(engine.target.leavesGroup == false)
+    }
+
+    /// A room that isn't chosen but is in the group leaves it, so the music plays only where chosen.
+    @Test func anUnchosenRoomInTheGroupLeavesIt() async throws {
+        sim.group(["RINCON_BEAM", "RINCON_MOVE", "RINCON_ONE"])
+        let engine = engine(SonosTarget(coordinator: bedroom, joining: [move]))
+        try await engine.play(spotifyTrack("a"))
+        #expect(regrouping.map(\.action) == ["BecomeCoordinatorOfStandaloneGroup"])
+        #expect(regrouping.first?.host == "10.0.0.3")
+        #expect(sim.topology.contains(["RINCON_BEAM", "RINCON_MOVE"]))
+        #expect(sim.topology.contains(["RINCON_ONE"]))
+        #expect(sim.state(of: "RINCON_MOVE") == .playing)
+    }
+
+    // MARK: Regrouped outside Canopy Music, mid-party
+
+    /// Sonos (or the Sonos app) hands the group to Move, Bedroom staying in it: the next poll sees
+    /// Bedroom is a member and follows Move, on the same queue, without a restart.
+    @Test func aHandoffOutsideCanopyMusicIsFollowed() async throws {
+        let engine = engine(SonosTarget(coordinator: bedroom, joining: [move]))
+        try await engine.play(spotifyTrack("a"))
+        try await engine.stage(spotifyTrack("b"))
+        try await SonosClient(transport: sim, host: "10.0.0.1").delegateCoordination(to: "RINCON_MOVE", rejoin: true)
+        let before = sim.requests.count
+        try await engine.applyLatestObservation()
+        #expect(engine.target.coordinator.id == "RINCON_MOVE")
+        #expect(engine.target.rooms.map(\.id) == ["RINCON_MOVE", "RINCON_BEAM"])
+        #expect(Set(sim.requests[before...].filter { !$0.isReadOnly }.map(\.action)).isDisjoint(with: restarts))
+        #expect(sim.state(of: "RINCON_MOVE") == .playing)
+        try await engine.stage(spotifyTrack("c"))
+        #expect(sim.changes.last?.host == "10.0.0.2")
+        #expect(sim.queue(of: "RINCON_MOVE") == [sonosURI("a"), sonosURI("c")])
+    }
+
+    /// A command refused with 800 (the handoff came between polls) isn't retried, but the group is
+    /// read at once and followed, so the next one goes to the new coordinator.
+    @Test func aRefusedCommandFollowsTheGroup() async throws {
+        let engine = engine(SonosTarget(coordinator: bedroom, joining: [move]))
+        try await engine.play(spotifyTrack("a"))
+        engine.pause()
+        await settle()
+        try await SonosClient(transport: sim, host: "10.0.0.1").delegateCoordination(to: "RINCON_MOVE", rejoin: true)
+        await #expect(throws: SonosError.upnp(action: "Play", code: 800)) { try await engine.resume() }
+        #expect(engine.target.coordinator.id == "RINCON_MOVE")
+        try await engine.resume()
+        #expect(sim.state(of: "RINCON_MOVE") == .playing)
+        #expect(sim.queue(of: "RINCON_MOVE") == [sonosURI("a")])
+    }
+
+    /// Bedroom is put in Kitchen's group (not ours) in the Sonos app while paused: the room is
+    /// lost, and the next play takes it back out of that group and plays there.
+    @Test func aRoomTakenIntoAnotherGroupIsTakenBack() async throws {
+        let engine = engine(SonosTarget(coordinator: bedroom))
+        try await engine.play(spotifyTrack("a"))
+        engine.pause()
+        await settle()
+        try await SonosClient(transport: sim, host: "10.0.0.1").setTransportURI(SonosURI.joinGroup(of: "RINCON_ONE"))
+        try await engine.applyLatestObservation()
+        #expect(engine.target.coordinator.id == "RINCON_BEAM")
+        try await engine.resume()
+        #expect(sim.topology.contains(["RINCON_BEAM"]))
+        #expect(sim.topology.contains(["RINCON_ONE"]))
+        #expect(sim.state(of: "RINCON_BEAM") == .playing)
+        #expect(sim.queue(of: "RINCON_BEAM") == [sonosURI("a")])
+    }
+
     // MARK: Dropping the engine
 
     @Test func aDroppedEngineThatNeverPlayedLeavesTheRoomAlone() async throws {

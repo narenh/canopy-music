@@ -233,7 +233,8 @@ public final class SonosSimulator: SonosTransport {
             if !isCoordinator { return ["CurrentURI": SonosURI.joinGroup(of: groups[g].coordinatorID)] }
             return ["CurrentURI": groups[g].elsewhere?.uri ?? SonosURI.queue(of: room.id), "NrTracks": "\(groups[g].queue.count)"]
         case "GetPositionInfo":
-            if !isCoordinator { return ["Track": "0", "TrackURI": SonosURI.joinGroup(of: groups[g].coordinatorID), "RelTime": "0:00:00"] }
+            // As a real member answers (a Move in a Beam's group): track 1, the coordinator's x-rincon.
+            if !isCoordinator { return ["Track": "1", "TrackURI": SonosURI.joinGroup(of: groups[g].coordinatorID), "RelTime": "NOT_IMPLEMENTED"] }
             return positionInfo(groups[g])
         default:
             break

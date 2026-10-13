@@ -1430,6 +1430,11 @@ final class AppModel {
             for index in target.joining.indices {
                 target.joining[index].host = sonos.player(target.joining[index].id)?.host ?? target.joining[index].host
             }
+            // The fallback for a first play that can't read the layout (it's read live then),
+            // kept current rather than as saved. Not once the engine has grouped: it owns that.
+            if sonosEngine?.isGrouped != true, let group = sonos.group(containing: target.coordinator.id) {
+                target.leavesGroup = group.coordinatorID != target.coordinator.id
+            }
             if target != output.target {
                 sonosOutput = SonosOutput(roomIDs: target.rooms.map(\.id), target: target)
                 if let engine = sonosEngine, !engine.isGrouped { engine.retarget(target) }

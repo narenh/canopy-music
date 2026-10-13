@@ -268,7 +268,8 @@ public final class SonosHousehold {
 
     /// A target for playing in `roomIDs` (the first is the coordinator). Every room is in it, even
     /// one already in the coordinator's group (joining again changes nothing), so the target is
-    /// exactly the rooms chosen.
+    /// exactly the rooms chosen. `leavesGroup` is from the last reading, only a fallback: the
+    /// engine reads the layout live at the first play, and may let another chosen room lead.
     public func target(rooms roomIDs: [String]) -> SonosTarget? {
         let rooms = roomIDs.compactMap(player)
         guard let first = rooms.first else { return nil }

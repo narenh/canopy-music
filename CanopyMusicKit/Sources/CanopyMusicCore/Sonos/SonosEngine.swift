@@ -1,7 +1,8 @@
 import Foundation
 
 /// Where a `SonosEngine` plays: a group's coordinator (commands go there), plus any rooms to
-/// pull into its group when playback starts.
+/// pull into its group when playback starts. Which room leads is settled from the live group
+/// layout at the first play (`SonosGroupingPlan`), so the coordinator here can change then.
 public struct SonosTarget: Codable, Hashable, Sendable {
     public struct Room: Codable, Hashable, Sendable {
         public var id: String
@@ -17,8 +18,9 @@ public struct SonosTarget: Codable, Hashable, Sendable {
     public var coordinator: Room
     /// Other rooms to join to the coordinator's group (each gets `x-rincon:{coordinator}`).
     public var joining: [Room]
-    /// The coordinator room is currently a non-coordinating member of another group, so it
-    /// leaves that group first.
+    /// The coordinator room was a non-coordinating member of another group when the household
+    /// was last read, so it leaves that group first. Only a fallback: the first play reads the
+    /// layout live and decides from that; this is used when the layout can't be read.
     public var leavesGroup: Bool
 
     public init(coordinator: Room, joining: [Room] = [], leavesGroup: Bool = false) {
@@ -33,6 +35,54 @@ public struct SonosTarget: Codable, Hashable, Sendable {
     public var rooms: [Room] { [coordinator] + joining }
 }
 
+/// How the engine takes its rooms over, decided from the group layout the speakers report right
+/// before the first play (the household's cached layout, or a target saved at an earlier launch,
+/// can be out of date: grouping in the Sonos app, an earlier session's grouping, or Sonos moving
+/// coordination itself).
+///
+/// - A chosen room that already leads other chosen rooms keeps the lead (the one leading the most,
+///   the target's own coordinator on a tie): nothing it leads is regrouped.
+/// - Otherwise the target's coordinator leads; if it's a member of another group it leaves that
+///   first. A chosen room in a group led by a room that isn't chosen is taken out of it (it joins
+///   ours, or leaves if it's the coordinator); the room that isn't chosen plays on as it was.
+/// - The other chosen rooms join, unless they're in the group already.
+/// - Rooms that aren't chosen but are in the coordinator's group leave it, so the music plays in
+///   exactly the chosen rooms.
+struct SonosGroupingPlan: Equatable {
+    /// The rooms as chosen, led by the room that leads; `leavesGroup` false.
+    var target: SonosTarget
+    /// The coordinator leaves the group it's a member of first.
+    var leaves: Bool
+    /// Rooms to join to the coordinator (`x-rincon:`).
+    var joining: [SonosTarget.Room]
+    /// Rooms in the coordinator's group that weren't chosen: each leaves it.
+    var dropping: [SonosTarget.Room]
+
+    /// nil when `groups` doesn't list the target's coordinator (the layout wasn't read).
+    init?(_ target: SonosTarget, groups: [SonosGroup]) {
+        func group(of id: String) -> SonosGroup? { groups.first { $0.members.contains { $0.id == id } } }
+        guard group(of: target.coordinator.id) != nil else { return nil }
+        let chosen = target.rooms
+        let ids = Set(chosen.map(\.id))
+        // Chosen rooms leading other chosen rooms, most first, then in the order chosen.
+        let leaders = chosen.enumerated().compactMap { index, room -> (room: SonosTarget.Room, count: Int, index: Int)? in
+            guard let led = groups.first(where: { $0.coordinatorID == room.id }) else { return nil }
+            let count = led.rooms.filter { ids.contains($0.id) }.count
+            return count > 1 ? (room, count, index) : nil
+        }
+        let coordinator = leaders.min { $0.count != $1.count ? $0.count > $1.count : $0.index < $1.index }?.room ?? target.coordinator
+        let current = group(of: coordinator.id)
+        leaves = current.map { $0.coordinatorID != coordinator.id } ?? false
+        let members = leaves ? [] : current?.rooms ?? []
+        let others = chosen.filter { $0.id != coordinator.id }
+        self.target = SonosTarget(coordinator: coordinator, joining: others)
+        joining = others.filter { room in !members.contains { $0.id == room.id } }
+        dropping = members.filter { !ids.contains($0.id) }.compactMap { member in
+            member.host.map { SonosTarget.Room(id: member.id, name: member.roomName, host: $0) }
+        }
+    }
+}
+
 /// What the engine reads back each poll, turned into what it means for the session.
 public enum SonosPlaybackRules {
     public struct Observation: Equatable, Sendable {
@@ -44,18 +94,24 @@ public enum SonosPlaybackRules {
         public var state: SonosTransportState?
         public var position: TimeInterval?
         public var duration: TimeInterval?
+        /// The room read is a member of this coordinator's group, not a coordinator (its track
+        /// URI is `x-rincon:{coordinator}`).
+        public var memberOf: String?
 
-        public init(trackNumber: Int, trackID: String?, state: SonosTransportState?, position: TimeInterval? = nil, duration: TimeInterval? = nil) {
+        public init(trackNumber: Int, trackID: String?, state: SonosTransportState?, position: TimeInterval? = nil, duration: TimeInterval? = nil,
+                    memberOf: String? = nil) {
             self.trackNumber = trackNumber
             self.trackID = trackID
             self.state = state
             self.position = position
             self.duration = duration
+            self.memberOf = memberOf
         }
 
         public init(_ info: SonosPositionInfo, state: SonosTransportState?) {
             self.init(trackNumber: info.track, trackID: info.trackURI.flatMap(SonosURI.canopyTrackID(of:)),
-                      state: state, position: info.position, duration: info.duration ?? info.item?.duration)
+                      state: state, position: info.position, duration: info.duration ?? info.item?.duration,
+                      memberOf: info.trackURI.flatMap(SonosURI.coordinator(ofMemberURI:)))
         }
     }
 
@@ -100,6 +156,9 @@ public enum SonosPlaybackRules {
 
     public static func step(_ o: Observation, _ c: Context) -> Step {
         guard let currentID = c.currentID else { return .nothing }
+        // Our coordinator went into another group (the engine follows a group led by one of our
+        // own rooms before this): whatever that group plays, the room isn't ours, playing or not.
+        if o.memberOf != nil { return .lostControl }
         guard let trackID = o.trackID else {
             // Not a service track at all, and playing: another source has the room. Not while
             // it's transitioning: between songs the player can have no track URI for a moment.
@@ -202,13 +261,22 @@ public final class SonosEngine: PlaybackEngine {
 
     // MARK: PlaybackEngine
 
-    /// Empties the group's Sonos queue, puts `track` in it and plays it.
+    /// Empties the group's Sonos queue, puts `track` in it and plays it. The first play (and one
+    /// taking the rooms back from another source) first sets the group up from the live layout.
     public func play(_ track: QueueTrack) async throws {
-        let uri = try reference.uri(for: track.id)
-        let metadata = try reference.metadata(for: track)
+        let uri: String
+        let metadata: String
+        do {
+            uri = try reference.uri(for: track.id)
+            metadata = try reference.metadata(for: track)
+        } catch {
+            log?("can't play \(track.title) on Sonos: \(error)")
+            throw error
+        }
         busy += 1
         defer { busy -= 1 }
         settleUntil = Date().addingTimeInterval(1.5)
+        let retaking = lostControl
         reportedEnd = false
         pausedByUs = false
         sawPlaying = false
@@ -216,27 +284,71 @@ public final class SonosEngine: PlaybackEngine {
         stagedTrack = nil
         stagedNumber = nil
         hasStarted = true
-        try await groupRoomsIfNeeded()
-        try await client.clearQueue()
-        let number = try await client.addToQueue(uri: uri, metadata: metadata, position: 0, asNext: false)
-        try await client.setTransportURI(SonosURI.queue(of: target.coordinator.id))
-        // Shuffle or repeat in the Sonos app would play the queue out of order.
-        try? await client.setPlayModeNormal()
-        if let crossfade { try? await client.setCrossfade(crossfade) }
-        try await client.seek(trackNumber: number)
-        try await client.play()
-        currentTrack = track
-        currentNumber = number
+        do {
+            try await groupRoomsIfNeeded(retaking: retaking)
+            try await reporting("RemoveAllTracksFromQueue") { try await client.clearQueue() }
+            let number = try await reporting("AddURIToQueue") { try await client.addToQueue(uri: uri, metadata: metadata, position: 0, asNext: false) }
+            try await reporting("SetAVTransportURI") { try await client.setTransportURI(SonosURI.queue(of: target.coordinator.id)) }
+            // Shuffle or repeat in the Sonos app would play the queue out of order.
+            try? await client.setPlayModeNormal()
+            if let crossfade { try? await client.setCrossfade(crossfade) }
+            try await reporting("Seek") { try await client.seek(trackNumber: number) }
+            try await reporting("Play") { try await client.play() }
+            currentTrack = track
+            currentNumber = number
+        } catch {
+            // The queue is being replaced anyway: nothing to take over from a new coordinator.
+            await noteRefusal(error, adoptQueue: false)
+            throw error
+        }
         cache(playing: true, time: 0)
-        log?("play \(track.title) at #\(number)")
+        log?("play \(track.title) at #\(currentNumber ?? 0) in \(target.name)")
         startPolling()
+    }
+
+    /// One command to the coordinator; a failure is logged with the action, the room and the error.
+    private func reporting<T>(_ action: String, _ command: () async throws -> T) async throws -> T {
+        do {
+            return try await command()
+        } catch {
+            log?("\(action) to \(target.coordinator.name) (\(target.coordinator.host)) failed: \(error)")
+            throw error
+        }
+    }
+
+    /// A command came back 800 (not the group's coordinator): the group changed hands outside
+    /// Canopy Music since the last poll. The coordinator is read now rather than at the next
+    /// poll: a group now led by one of our rooms is followed; any other group has taken the room,
+    /// and the next play takes it back (`lostControl`). The refused command isn't retried.
+    private func noteRefusal(_ error: any Error, adoptQueue: Bool = true) async {
+        guard case .upnp(_, let code)? = error as? SonosError, code == 800,
+              let info = try? await client.positionInfo(),
+              let leaderID = info.trackURI.flatMap(SonosURI.coordinator(ofMemberURI:)) else { return }
+        if let leader = target.rooms.first(where: { $0.id == leaderID }) {
+            await follow(to: leader, adoptQueue: adoptQueue)
+        } else {
+            log?("\(target.coordinator.name) is in another group (led by \(leaderID)): the next play takes it back")
+            lostControl = true
+        }
+    }
+
+    /// Our coordinator reads as a member of `leader`'s group, and `leader` is one of our rooms:
+    /// the group changed hands outside Canopy Music (the Sonos app, or Sonos moving coordination
+    /// itself). Commands and polls follow it, as after `removeRoom`'s handoff, and the queue
+    /// that moved with the group is taken over. The rooms stay as chosen.
+    private func follow(to leader: SonosTarget.Room, adoptQueue: Bool = true) async {
+        log?("\(target.coordinator.name) is a member of \(leader.name)'s group now: following it")
+        busy += 1
+        defer { busy -= 1 }
+        target = SonosTarget(coordinator: leader, joining: target.rooms.filter { $0.id != leader.id })
+        if adoptQueue { await adoptQueueAfterHandoff() }
     }
 
     /// Puts `track` right after the current song in the Sonos queue, then removes the song
     /// staged before it (now one further down). Inserting first means a failed removal still
     /// plays the right song next.
     public func stage(_ track: QueueTrack?) async throws {
-        guard let current = currentNumber else {
+        guard currentNumber != nil else {
             stagedTrack = nil
             stagedNumber = nil
             return
@@ -248,9 +360,17 @@ public final class SonosEngine: PlaybackEngine {
         // The player may already be on the staged song (a restage as a song ends): take that
         // first. This stage is then stale; the session stages again behind the new song.
         if try await applyLatestObservation() { throw CancellationError() }
+        // Read after the observation, which may have followed the group to a new coordinator.
+        guard let current = currentNumber else { throw CancellationError() }
         let previous = stagedNumber
         if let track, let uri, let metadata {
-            let number = try await client.addToQueue(uri: uri, metadata: metadata, position: current + 1, asNext: true)
+            let number: Int
+            do {
+                number = try await reporting("AddURIToQueue") { try await client.addToQueue(uri: uri, metadata: metadata, position: current + 1, asNext: true) }
+            } catch {
+                await noteRefusal(error)
+                throw error
+            }
             stagedTrack = track
             stagedNumber = number
             if previous != nil {
@@ -282,7 +402,12 @@ public final class SonosEngine: PlaybackEngine {
         busy += 1
         defer { busy -= 1 }
         settleUntil = Date().addingTimeInterval(1)
-        try await client.play()
+        do {
+            try await reporting("Play") { try await client.play() }
+        } catch {
+            await noteRefusal(error)
+            throw error
+        }
         cache(playing: true, time: cachedTime)
     }
 
@@ -309,8 +434,13 @@ public final class SonosEngine: PlaybackEngine {
         guard let stagedNumber else { throw CancellationError() }
         busy += 1
         defer { busy -= 1 }
-        try await client.seek(trackNumber: stagedNumber)
-        try await client.play()
+        do {
+            try await reporting("Seek") { try await client.seek(trackNumber: stagedNumber) }
+            try await reporting("Play") { try await client.play() }
+        } catch {
+            await noteRefusal(error)
+            throw error
+        }
         // Picked up at once rather than at the next poll.
         _ = try? await applyLatestObservation()
     }
@@ -333,10 +463,40 @@ public final class SonosEngine: PlaybackEngine {
 
     // MARK: Grouping
 
-    private func groupRoomsIfNeeded() async throws {
-        guard !hasGrouped else { return }
-        if target.leavesGroup { try await client.leaveGroup() }
-        for room in target.joining {
+    /// Sets the group up on the speakers at the first play, and again when taking the rooms back
+    /// from another source (they may have been regrouped meanwhile), from the layout the speakers
+    /// report now (`SonosGroupingPlan`). If no room answers with it, as last known
+    /// (`target.leavesGroup`, then every other room joins).
+    private func groupRoomsIfNeeded(retaking: Bool) async throws {
+        guard !hasGrouped || retaking else { return }
+        let joining: [SonosTarget.Room]
+        if let groups = await liveGroups(), let plan = SonosGroupingPlan(target, groups: groups) {
+            if plan.target.coordinator.id != target.coordinator.id {
+                log?("\(plan.target.coordinator.name) already leads \(plan.target.name): it leads, nothing is regrouped")
+            }
+            target = plan.target
+            if plan.leaves {
+                log?("\(target.coordinator.name) leaves its group first")
+                try await reporting("BecomeCoordinatorOfStandaloneGroup") { try await client.leaveGroup() }
+            }
+            for room in plan.dropping {
+                // Not chosen, but in the group: out of it, so the music plays only where chosen.
+                do {
+                    try await SonosClient(transport: transport, host: room.host).leaveGroup()
+                    log?("\(room.name) isn't chosen: it left the group")
+                } catch {
+                    log?("\(room.name) isn't chosen and couldn't leave the group: \(error)")
+                }
+            }
+            joining = plan.joining
+        } else {
+            log?("couldn't read the group layout: grouping as last known")
+            if target.leavesGroup {
+                try await reporting("BecomeCoordinatorOfStandaloneGroup") { try await client.leaveGroup() }
+            }
+            joining = target.joining
+        }
+        for room in joining {
             // A room that can't join doesn't stop the music in the others.
             do {
                 try await SonosClient(transport: transport, host: room.host).setTransportURI(SonosURI.joinGroup(of: target.coordinator.id))
@@ -346,6 +506,18 @@ public final class SonosEngine: PlaybackEngine {
         }
         hasGrouped = true
         target.leavesGroup = false
+    }
+
+    /// The group layout as the speakers report it now, from the first of our rooms that answers.
+    /// At most two are asked, so rooms that are off don't hold the start up for long (each try
+    /// is bounded by the transport's timeout). nil if neither answers.
+    private func liveGroups() async -> [SonosGroup]? {
+        for room in target.rooms.prefix(2) {
+            if let groups = try? await SonosClient(transport: transport, host: room.host).zoneGroups(), !groups.isEmpty {
+                return groups
+            }
+        }
+        return nil
     }
 
     /// The group is set up on the speakers (the first play did it): rooms join and leave it for
@@ -526,7 +698,14 @@ public final class SonosEngine: PlaybackEngine {
     /// Reads the player and acts on it. True when it moved on to the staged song.
     @discardableResult
     func applyLatestObservation() async throws -> Bool {
-        let info = try await client.positionInfo()
+        var info = try await client.positionInfo()
+        // Our coordinator is a member of a group led by another of our rooms: the group changed
+        // hands outside Canopy Music, and the rest goes to the new coordinator.
+        if let leaderID = info.trackURI.flatMap(SonosURI.coordinator(ofMemberURI:)), leaderID != target.coordinator.id,
+           let leader = target.rooms.first(where: { $0.id == leaderID }) {
+            await follow(to: leader)
+            info = try await client.positionInfo()
+        }
         let state = try await client.transportState()
         return apply(SonosPlaybackRules.Observation(info, state: state))
     }
@@ -564,7 +743,9 @@ public final class SonosEngine: PlaybackEngine {
             reportedEnd = true
             onEvent?(.reachedEnd)
         case .lostControl:
-            log?("another source has the room")
+            if !lostControl {
+                log?(observation.memberOf.map { "\(target.coordinator.name) is in another group (led by \($0))" } ?? "another source has the room")
+            }
             lostControl = true
             reportedEnd = true
         }

@@ -98,6 +98,9 @@ public struct PartySnapshot: Codable, Equatable, Sendable {
     /// Apple TV hubs: whether the TV can play Apple Music. Only in snapshots for hosts (a page
     /// whose socket gave a valid Host Control key); nil for everyone else and from other hubs.
     public var musicAccess: MusicAccess?
+    /// Apple TV hubs: Spotify's setup (sign-in, devices, the sign-in page). Hosts only, as
+    /// `musicAccess`.
+    public var spotify: SpotifySetup?
 }
 
 /// Owns the queue and keeps the player in step with it. Both the iPad UI and the phone server
@@ -169,8 +172,17 @@ public final class PartySession {
         didSet { if musicAccess != oldValue, remote == nil { broadcast() } }
     }
     /// A host's page asked the hub to check its music access again (and, if the TV has never
-    /// asked for Apple Music access, to ask now).
+    /// asked for Apple Music access, to ask now; with Spotify, to read its devices again).
     @ObservationIgnored public var onMusicAccessCheck: (@MainActor () -> Void)?
+    /// Apple TV hubs: Spotify's setup, for hosts' snapshots (set by the app).
+    public var spotifySetup: SpotifySetup? {
+        didSet { if spotifySetup != oldValue, remote == nil { broadcast() } }
+    }
+    /// Apple TV hubs: the Spotify sign-in a host's phone runs, whose answer comes back to
+    /// `/spotify/callback` (set by the app).
+    @ObservationIgnored public var spotifySignIn: SpotifyHubSignIn?
+    /// Apple TV hubs: the music service and Spotify's settings, for the host's setup page.
+    @ObservationIgnored public weak var setupHandler: (any HubSetupHandler)?
     /// A host revoked every other phone's Host Control; returns the new key for that host.
     @ObservationIgnored public var onForgetHostPhones: (@MainActor () -> String?)?
     /// The hub's guest address by IP, from the hub (display) or set by the app (hub).
@@ -189,8 +201,9 @@ public final class PartySession {
     /// Called each time the player actually starts a song (hub only), so the app can record that
     /// music has started in this zone. Not called for a loaded playlist or a failed start.
     @ObservationIgnored public var onSongStarted: (@MainActor () -> Void)?
-    public let catalog: any MusicCatalog
-    @ObservationIgnored public let engine: any PlaybackEngine
+    public private(set) var catalog: any MusicCatalog
+    /// Replaced only by `replaceService`, while nothing has been loaded.
+    @ObservationIgnored public private(set) var engine: any PlaybackEngine
 
     // MARK: Follow mode state (docs/multi-device.md)
 
@@ -370,6 +383,31 @@ public final class PartySession {
     /// A host's page asks for the hub's music access to be checked again.
     public func checkMusicAccess() {
         onMusicAccessCheck?()
+    }
+
+    /// Apple TV hubs, while the host sets the zone up: changes the music service under this same
+    /// session, so the phone server and the pages connected to it carry on. Only while nothing
+    /// has been loaded (no base playlist, no songs); false otherwise.
+    @discardableResult
+    public func replaceService(catalog: any MusicCatalog, engine: any PlaybackEngine, serviceName: String?) -> Bool {
+        guard remote == nil, state.playlistName == nil, !hasParty, state.history.isEmpty else { return false }
+        generation += 1
+        stagingRun += 1
+        stagingTask = nil
+        stagedItemID = nil
+        loadedItemID = nil
+        isPlaying = false
+        self.engine.onEvent = nil
+        tickTask?.cancel()
+        tickTask = nil
+        resetFollow(keepPlayerQueue: false)
+        self.catalog = catalog
+        self.engine = engine
+        engine.onEvent = { [weak self] event in self?.handle(event) }
+        if !engine.canReplaceStaged { startLateStagingTicker() }
+        self.serviceName = serviceName
+        broadcast()
+        return true
     }
 
     /// Ends the zone's session (hub only): stops playback, empties the queue, history and base
@@ -781,7 +819,7 @@ public final class PartySession {
             foreignUpcoming: foreignUpcoming.isEmpty ? nil : foreignUpcoming,
             playerIssue: playerIssue
         )
-        if isHostKey(key) { snap.musicAccess = musicAccess }
+        if isHostKey(key) { addHostDetails(to: &snap) }
         return snap
     }
 
@@ -790,6 +828,12 @@ public final class PartySession {
     private func isHostKey(_ key: String?) -> Bool {
         guard let hostKey, let key, !key.isEmpty else { return false }
         return key == hostKey
+    }
+
+    /// What only hosts see: an Apple TV's Apple Music access and Spotify setup.
+    private func addHostDetails(to snap: inout PartySnapshot) {
+        snap.musicAccess = musicAccess
+        snap.spotify = spotifySetup
     }
 
     /// Emits the current snapshot immediately, then again after every change. `includingWifi`
@@ -1181,6 +1225,21 @@ public final class PartySession {
     /// `-fakeSpotifyFollow` (debug builds): poses follow mode's state on any engine, so the UI can
     /// be seen without Spotify: a foreign track playing, the player's own queue, and our next song
     /// locked; or, with `issue`, the host's issue line (and nothing locked, as after giving up).
+    /// `-fakeSpotifyFollow` on an iPad or Apple TV hub: a track from outside the queue playing
+    /// ("From Spotify"), two songs in Spotify's own queue, and the next song locked; `issue` shows
+    /// the host's "Couldn't queue" line instead of the lock.
+    public func debugPoseSpotifyFollow(issue: Bool) {
+        let colors = { (bg: String, sec: String) in ArtworkColors(background: bg, primary: "#FFFFFF", secondary: sec) }
+        let external = QueueTrack(id: "spotify:track:fake-external", title: "Espresso", artist: "Sabrina Carpenter",
+                                  album: "Short n' Sweet", duration: 175, colors: colors("#5A3A1E", "#E8B07A"))
+        let foreign = [
+            QueueTrack(id: "spotify:track:fake-q1", title: "Good Luck, Babe!", artist: "Chappell Roan", duration: 218, colors: colors("#7A1F3D", "#F29BB8")),
+            QueueTrack(id: "spotify:track:fake-q2", title: "Birds of a Feather", artist: "Billie Eilish", duration: 210, colors: colors("#1E3A5A", "#8CB8E8")),
+        ]
+        serviceName = "Spotify"
+        debugPoseFollow(external: external, foreign: foreign, issue: issue ? "Couldn't queue the next song on Spotify" : nil)
+    }
+
     public func debugPoseFollow(external: QueueTrack?, foreign: [QueueTrack], issue: String? = nil) {
         guard remote == nil else { return }
         if externalCurrent?.track.id != external?.id {
@@ -1255,7 +1314,7 @@ public final class PartySession {
         for listener in listeners.values {
             var sent = snap
             if listener.withWifi { sent.wifi = wifi }
-            if isHostKey(listener.hostKey) { sent.musicAccess = musicAccess }
+            if isHostKey(listener.hostKey) { addHostDetails(to: &sent) }
             listener.continuation.yield(sent)
         }
     }

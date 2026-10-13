@@ -141,6 +141,15 @@ struct TVRootView: View {
                   let first = try? await session.catalog.libraryPlaylists().first else { return }
             try? await session.load(playlist: first)
             try? await session.play()
+            // `-fakeSpotifyFollow` (with `-spotifyFake signedIn`): Spotify's follow mode posed, as
+            // on the iPad: a track from outside the queue ("From Spotify"), Spotify's own queue
+            // and the locked next song; `-fakeSpotifyIssue` the host's issue line instead.
+            let args = ProcessInfo.processInfo.arguments
+            guard args.contains("-fakeSpotifyFollow") else { return }
+            while model.session === session {
+                session.debugPoseSpotifyFollow(issue: args.contains("-fakeSpotifyIssue"))
+                try? await Task.sleep(for: .seconds(1))
+            }
         }
         #endif
     }
@@ -326,6 +335,12 @@ struct TVZoneListView: View {
             .frame(width: 900)
             if model.authorizationDenied {
                 Text("Canopy Music needs Apple Music access to play here. Turn it on in Settings › General › Privacy & Security › Media & Apple Music.")
+                    .font(.system(size: 24))
+                    .foregroundStyle(.orange)
+                    .frame(width: 900)
+            }
+            if let problem = model.resumeProblem {
+                Text(problem)
                     .font(.system(size: 24))
                     .foregroundStyle(.orange)
                     .frame(width: 900)

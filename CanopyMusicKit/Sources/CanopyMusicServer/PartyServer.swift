@@ -76,6 +76,7 @@ public final class PartyServer: Sendable {
         await server.appendRoute("GET /splash.jpg", to: StaticFile("splash.jpg", type: "image/jpeg"))
         // A TV zone's setup: the Music bar (the iPad's own Apple Music icon).
         await server.appendRoute("GET /apple-music.png", to: StaticFile("apple-music.png", type: "image/png"))
+        await server.appendRoute("GET /spotify.png", to: StaticFile("spotify.png", type: "image/png"))
         // icon.png is square (iOS rounds home screen icons itself); favicon.png is already rounded.
         await server.appendRoute("GET /icon.png", to: StaticFile("icon.png", type: "image/png"))
         await server.appendRoute("GET /favicon.png", to: StaticFile("favicon.png", type: "image/png"))
@@ -288,6 +289,71 @@ public final class PartyServer: Sendable {
             return HTTPResponse(statusCode: .noContent)
         }
 
+        // An Apple TV zone's setup page: the music service, and Spotify (docs/multi-device.md ›
+        // Spotify on an Apple TV). Hosts only; what the TV makes of it comes back in hosts'
+        // snapshots (`spotify`).
+        func hostSetup(_ route: HTTPRoute, _ handle: @escaping @Sendable (HostSetupBody, HTTPRequest, any HubSetupHandler) async throws -> HTTPResponse) async {
+            await server.appendRoute(route) { request in
+                let body = try JSONDecoder.api.decode(HostSetupBody.self, from: await request.bodyData)
+                guard await session.isHost(key: body.key) else { return HTTPResponse(statusCode: .forbidden) }
+                guard let handler = await session.setupHandler else { return HTTPResponse(statusCode: .notImplemented) }
+                return try await handle(body, request, handler)
+            }
+        }
+        await hostSetup("POST /api/host/service") { body, _, handler in
+            let ok = await handler.chooseService(body.service ?? "")
+            return HTTPResponse(statusCode: ok ? .noContent : .conflict)
+        }
+        await hostSetup("POST /api/host/spotify/client-id") { body, _, handler in
+            await handler.setSpotifyClientID(String((body.spotifyClientId ?? "").prefix(64)))
+            return HTTPResponse(statusCode: .noContent)
+        }
+        // Checks the address (https, loads, has the relay's marker) on the TV, so the phone never
+        // needs to reach it, and saves it if it passes.
+        await hostSetup("POST /api/host/spotify/sign-in-page") { body, _, handler in
+            let result = await handler.setSpotifySignInPage(String((body.address ?? "").prefix(300)))
+            return try .json(["result": result.rawValue])
+        }
+        // Starts a sign-in on the TV (its verifier and nonce stay there) and answers with
+        // Spotify's page for the phone to open. The relay sends the phone back to the address it
+        // used for this request (`callbackTarget`).
+        await hostSetup("POST /api/host/spotify/sign-in") { _, request, _ in
+            guard let signIn = await session.spotifySignIn else { return HTTPResponse(statusCode: .notImplemented) }
+            let fallbacks = [await session.guestAddress, await session.lanAddress]
+            guard let target = Self.callbackTarget(hostHeader: request.headers[.host], fallbacks: fallbacks),
+                  let url = await signIn.begin(host: target.host, port: target.port) else {
+                return HTTPResponse(statusCode: .conflict)
+            }
+            return try .json(["url": url.absoluteString])
+        }
+        await hostSetup("POST /api/host/spotify/device") { body, _, handler in
+            let ok = await handler.chooseSpotifyDevice(id: body.id ?? "")
+            return HTTPResponse(statusCode: ok ? .noContent : .notFound)
+        }
+        // Another zone already plays from this Spotify account: the TV shows that zone as a
+        // display instead, and the page goes on to it.
+        await hostSetup("POST /api/host/spotify/join") { _, _, handler in
+            guard let address = await handler.joinSpotifyConflict() else { return HTTPResponse(statusCode: .notFound) }
+            return try .json(["address": address])
+        }
+        // Where the relay sends the phone back with Spotify's answer. It answers only while a
+        // sign-in started from the setup page is pending (and not expired), and only the answer
+        // with that sign-in's nonce; then it goes back to the setup page, which shows the result.
+        await server.appendRoute("GET /spotify/callback") { request in // SpotifyRelay.tvCallbackPath
+            guard let signIn = await session.spotifySignIn, await signIn.isPending else {
+                return Self.messagePage(.notFound, "This Spotify sign-in has finished or expired. Go back to the setup page and sign in again.")
+            }
+            let query = Dictionary(request.query.map { ($0.name, $0.value) }, uniquingKeysWith: { first, _ in first })
+            switch await signIn.complete(query) {
+            case .notOurs:
+                return Self.messagePage(.badRequest, "This isn't the Spotify sign-in Canopy Music started. Go back to the setup page and sign in again.")
+            case .notPending:
+                return Self.messagePage(.notFound, "This Spotify sign-in has finished or expired. Go back to the setup page and sign in again.")
+            case .signedIn, .cancelled, .failed:
+                return HTTPResponse(statusCode: .seeOther, headers: [.location: "/", .cacheControl: "no-store"])
+            }
+        }
+
         // Displays (`/ws?display=1`) also get the guest Wi‑Fi, to show its QR code; phones don't.
         // Hosts' pages (`/ws?key=<Host Control key>`) also get what only hosts see.
         await server.appendRoute("GET /ws?display=1", to: .webSocket(SnapshotSocket(session: session, includesWifi: true)))
@@ -487,6 +553,18 @@ struct HostBody: Decodable {
     var time: TimeInterval?
 }
 
+/// An Apple TV zone's setup page: the music service and Spotify's settings.
+struct HostSetupBody: Decodable {
+    var key: String
+    /// "appleMusic" or "spotify".
+    var service: String?
+    var spotifyClientId: String?
+    /// The Spotify sign-in page as typed (empty: the default).
+    var address: String?
+    /// A Spotify Connect device.
+    var id: String?
+}
+
 extension PartyServer {
     @MainActor
     static func playback(_ body: PlaybackBody, session: PartySession) async -> HTTPResponse {
@@ -502,6 +580,38 @@ extension PartyServer {
         default: return HTTPResponse(statusCode: .badRequest)
         }
         return HTTPResponse(statusCode: .ok)
+    }
+
+    /// Where the relay should send the phone back after a TV's Spotify sign-in: the address the
+    /// phone used for this hub (its `Host` header), as the page was loaded from it, so the page
+    /// comes back with the same saved host key. A `.local` name or a private IPv4 address only
+    /// (the relay forwards to nothing else); otherwise the first of `fallbacks` (the hub's
+    /// `.local` address, then its IP address) that is one. Port nil means 80.
+    static func callbackTarget(hostHeader: String?, fallbacks: [String?]) -> (host: String, port: Int?)? {
+        for candidate in [hostHeader] + fallbacks {
+            guard let candidate, !candidate.isEmpty else { continue }
+            var host = candidate
+            var port: Int?
+            if let colon = candidate.lastIndex(of: ":") {
+                guard let number = Int(candidate[candidate.index(after: colon)...]), (1...65535).contains(number) else { continue }
+                host = String(candidate[..<colon])
+                port = number == 80 ? nil : number
+            }
+            if SpotifyRelay.isForwardableHost(host) { return (host, port) }
+        }
+        return nil
+    }
+
+    /// A one-line page for a browser that landed on the hub (the Spotify callback's dead ends).
+    static func messagePage(_ status: HTTPStatusCode, _ message: String) -> HTTPResponse {
+        let escaped = message.replacingOccurrences(of: "&", with: "&amp;").replacingOccurrences(of: "<", with: "&lt;")
+        let html = """
+        <!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">\
+        <title>Canopy Music</title><link rel="stylesheet" href="/app.css"></head><body><main class="message-page">\
+        <img class="brand-logo" src="/logo.png" alt="Canopy Music"><p>\(escaped)</p><a class="primary-btn" href="/">Back to setup</a>\
+        </main></body></html>
+        """
+        return HTTPResponse(statusCode: status, headers: [.contentType: "text/html; charset=utf-8", .cacheControl: "no-store"], body: Data(html.utf8))
     }
 
     /// A QR code as a crisp PNG (each module scaled up without smoothing).

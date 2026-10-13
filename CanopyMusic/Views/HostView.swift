@@ -594,11 +594,38 @@ private struct SettingsSheet: View {
     @Environment(\.dismiss) private var dismiss
     @State private var confirmingEnd = false
     @State private var savingPlaylist = false
+    #if DEBUG
+    @State private var debugSignInPage = false
+    #endif
 
     var body: some View {
         @Bindable var model = model
         NavigationStack {
             Form {
+                // Spotify zones (the service is switched on the start screen's Music row, before Start).
+                if model.provider == .spotify {
+                    Section {
+                        if model.spotifyAuth.isSignedIn, let name = model.spotifyDisplayName {
+                            LabeledContent("Signed in as", value: name)
+                        }
+                        NavigationLink {
+                            SpotifySignInPageSettings()
+                                .environment(model)
+                        } label: {
+                            LabeledContent("Sign-in page", value: model.spotifyOwnSignInPage == nil ? "Default" : "Your own")
+                        }
+                        LabeledContent("Spotify requests", value: "\(model.spotifyAPI.requestCount) (\(Int(model.spotifyAPI.requestsPerMinute.rounded()))/min)")
+                        if model.spotifyAPI.rateLimitedCount > 0 {
+                            LabeledContent("Rate limited", value: "\(model.spotifyAPI.rateLimitedCount)×")
+                                .foregroundStyle(.orange)
+                        }
+                    } header: {
+                        Text("Spotify")
+                    } footer: {
+                        Text("The sign-in page is only used when you sign in. Changing it doesn't sign you out.")
+                    }
+                    .listRowBackground(Color.white.opacity(0.08))
+                }
                 Section {
                     Toggle("Queue from phones", isOn: $model.phoneQueueEnabled)
                     Toggle("Reorder from phones", isOn: $model.phoneReorderEnabled)
@@ -661,19 +688,6 @@ private struct SettingsSheet: View {
                     Text("Used when crossfade is on. Apple Music's AutoMix isn't available to other apps.")
                 }
                 .listRowBackground(Color.white.opacity(0.08))
-                // The service is switched on the start screen's Music row, before Start.
-                if model.provider == .spotify {
-                    Section {
-                        LabeledContent("Spotify requests", value: "\(model.spotifyAPI.requestCount) (\(Int(model.spotifyAPI.requestsPerMinute.rounded()))/min)")
-                        if model.spotifyAPI.rateLimitedCount > 0 {
-                            LabeledContent("Rate limited", value: "\(model.spotifyAPI.rateLimitedCount)×")
-                                .foregroundStyle(.orange)
-                        }
-                    } header: {
-                        Text("Music Service")
-                    }
-                    .listRowBackground(Color.white.opacity(0.08))
-                }
                 // A party to save, or a zone to end, only once it's live.
                 if model.isLive, model.session.partySaveInfo.offersSave {
                     Section {
@@ -697,6 +711,14 @@ private struct SettingsSheet: View {
             .sheet(isPresented: $savingPlaylist) { PartyPlaylistSheet(purpose: .save).environment(model) }
             #if DEBUG
             .onAppear { if ProcessInfo.processInfo.arguments.contains("-showSave") { savingPlaylist = true } }
+            // `-showSignInPage`: Settings › Spotify › Sign-in page, for screenshots.
+            .navigationDestination(isPresented: $debugSignInPage) { SpotifySignInPageSettings().environment(model) }
+            .task {
+                guard ProcessInfo.processInfo.arguments.contains("-showSignInPage") else { return }
+                // Once the sheet has finished coming up (a push during it is dropped).
+                try? await Task.sleep(for: .seconds(2.5))
+                debugSignInPage = true
+            }
             #endif
             .navigationTitle("Settings")
             .navigationBarTitleDisplayMode(.inline)

@@ -288,6 +288,29 @@ public final class PartyServer: Sendable {
             WebLog.append(String(decoding: try await request.bodyData.prefix(32_768), as: UTF8.self))
             return HTTPResponse(statusCode: .noContent)
         }
+        // Debug builds: the raw Apple Music responses behind motion artwork (`MotionArtwork`), to
+        // check its field names on a real device. `?album=<catalog album id>`, `?song=<catalog
+        // song id>` (its first album), or `?current` (the song playing now).
+        await server.appendRoute("GET /api/debug/motion") { request in
+            var song = request.query["song"]
+            if request.query["current"] != nil { song = await session.state.current?.track.id }
+            let album = request.query["album"]
+            func text(_ status: HTTPStatusCode, _ message: String) -> HTTPResponse {
+                HTTPResponse(statusCode: status, headers: [.contentType: "text/plain; charset=utf-8"], body: Data((message + "\n").utf8))
+            }
+            guard song != nil || album != nil else {
+                return text(.badRequest, "Add ?album=<catalog album id>, ?song=<catalog song id> or ?current (nothing is playing).")
+            }
+            guard let lookup = await session.catalog.motionArtwork else {
+                return text(.notImplemented, "This zone's music service has no motion artwork lookup (Apple Music only).")
+            }
+            do {
+                return HTTPResponse(statusCode: .ok, headers: [.contentType: "application/json", .cacheControl: "no-store"],
+                                    body: try await lookup.probe(albumID: album, songID: song))
+            } catch {
+                return .serviceFailed(error)
+            }
+        }
         #endif
     }
 }

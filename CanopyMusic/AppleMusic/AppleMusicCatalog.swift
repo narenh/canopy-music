@@ -38,6 +38,8 @@ struct AppleMusicCatalog: MusicCatalog {
     var memory: CatalogMatchMemory = .shared
     /// How the most recent library playlist loads went, including which tracks were left out.
     var reports = PlaylistLoadReports()
+    /// Animated album artwork for Now Playing (see `MotionArtwork`).
+    let motionArtwork: MotionArtworkLookup? = MotionArtworkLookup(fetch: AppleMusicCatalog.catalogData)
 
     /// Tracks left out of the last library playlist loaded through this catalog (not on Apple Music,
     /// or no confident match). 0 before any library playlist has loaded.
@@ -494,6 +496,13 @@ struct AppleMusicCatalog: MusicCatalog {
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
         request.httpBody = try JSONEncoder().encode(body)
         return try await MusicDataRequest(urlRequest: request).response().data
+    }
+
+    /// A catalog API path in the account's storefront ("albums/123?extend=editorialVideo"), raw.
+    private static func catalogData(_ path: String) async throws -> Data {
+        let storefront = try await MusicDataRequest.currentCountryCode
+        guard let url = URL(string: "https://api.music.apple.com/v1/catalog/\(storefront)/\(path)") else { throw AppleMusicError.badResponse }
+        return try await MusicDataRequest(urlRequest: URLRequest(url: url)).response().data
     }
 
     private func fetch<T: Decodable>(_ path: String) async throws -> T {

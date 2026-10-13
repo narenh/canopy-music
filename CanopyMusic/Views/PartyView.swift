@@ -411,6 +411,8 @@ struct NowPlayingView: View {
             // Always in the middle of the column's height, whatever the window's shape.
             VStack(spacing: 20) {
                 ArtworkView(track: item?.track, large: true, cornerRadius: 18)
+                    // Animated album artwork, where there is some (experimental: `MotionArtwork`).
+                    .overlay { MotionArtworkView(track: item?.track, catalog: session.catalog, cornerRadius: 18) }
                     .frame(width: side, height: side)
                     .shadow(color: .black.opacity(0.5), radius: 40, y: 20)
                     .id(item?.id)

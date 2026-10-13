@@ -14,9 +14,13 @@ public protocol MusicCatalog: Sendable {
     var playlistDestination: String? { get }
     /// Creates a playlist with `tracks`, in order, in the signed-in account.
     func savePlaylist(name: String, description: String, tracks: [QueueTrack]) async throws
+    /// Finds animated album artwork for Now Playing (see `MotionArtwork`). nil for services
+    /// without it.
+    var motionArtwork: MotionArtworkLookup? { get }
 }
 
 public extension MusicCatalog {
+    var motionArtwork: MotionArtworkLookup? { nil }
     func loadReport(for playlist: PlaylistSummary) async -> PlaylistLoadReport? { nil }
     var playlistDestination: String? { nil }
     func savePlaylist(name: String, description: String, tracks: [QueueTrack]) async throws {

@@ -1113,12 +1113,23 @@ private struct TVDrift<Content: View>: View {
         return 1
     }
 
+    /// How fast it drifts: 1 normally. Debug builds: `-driftSpeed <multiplier>`.
+    private static var speed: Double {
+        #if DEBUG
+        let args = ProcessInfo.processInfo.arguments
+        if let i = args.firstIndex(of: "-driftSpeed"), i + 1 < args.count, let value = Double(args[i + 1]) {
+            return max(0, value)
+        }
+        #endif
+        return 1
+    }
+
     var body: some View {
         let strength = reduceMotion ? 0 : Self.strength
         GeometryReader { geo in
             // 30 frames a second is smooth at these speeds (a few points a second).
             TimelineView(.animation(minimumInterval: 1.0 / 30, paused: strength == 0)) { timeline in
-                let pose = Self.pose(at: timeline.date.timeIntervalSinceReferenceDate, strength: strength, size: geo.size)
+                let pose = Self.pose(at: timeline.date.timeIntervalSinceReferenceDate * Self.speed, strength: strength, size: geo.size)
                 content
                     .frame(width: geo.size.width, height: geo.size.height)
                     .scaleEffect(pose.scale)

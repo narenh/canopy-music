@@ -68,10 +68,19 @@ public actor CatalogMatchMemory {
     private let now: @Sendable () -> Date
     private var stored: Stored
 
-    /// Kept in Application Support/catalog-matches.json.
+    /// Kept in Application Support/catalog-matches.json; in Caches on Apple TV, which doesn't let
+    /// apps write Application Support.
     public static let shared = CatalogMatchMemory(
-        url: URL.applicationSupportDirectory.appending(path: "catalog-matches.json")
+        url: Self.directory.appending(path: "catalog-matches.json")
     )
+
+    private static var directory: URL {
+        #if os(tvOS)
+        URL.cachesDirectory
+        #else
+        URL.applicationSupportDirectory
+        #endif
+    }
 
     /// `url` nil keeps everything in memory only.
     public init(url: URL?, now: @escaping @Sendable () -> Date = Date.init) {

@@ -101,8 +101,10 @@ final class TVModel {
 
     // MARK: Hub
 
-    /// The hub's queue, kept between launches until the zone is ended.
-    private static var storeURL: URL { URL.applicationSupportDirectory.appending(path: "tv-party.json") }
+    /// The hub's queue, kept between launches until the zone is ended. In Caches: tvOS doesn't let
+    /// apps create Application Support (the simulator does), so saving there silently failed and
+    /// no zone came back. The system may clear Caches when storage is low; the zone then ends.
+    private static var storeURL: URL { URL.cachesDirectory.appending(path: "tv-party.json") }
 
     /// This TV has a zone that wasn't ended (and didn't come back by itself at launch): the list
     /// offers to resume it, and creating a new zone asks first.
@@ -180,7 +182,6 @@ final class TVModel {
     /// Makes this TV the hub of its zone: a new, empty one, or the one it had (from the saved queue).
     private func openZone(fresh: Bool) {
         let store = Self.storeURL
-        try? FileManager.default.createDirectory(at: .applicationSupportDirectory, withIntermediateDirectories: true)
         if usesDemo {
             #if DEBUG
             session = PartySession(catalog: DemoCatalog(), engine: DemoPlaybackEngine(), storeURL: store)

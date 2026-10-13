@@ -282,6 +282,20 @@ struct HostSettingsTests {
         #expect(hub.state.current?.track.id == original.first)
     }
 
+    @Test func localNamePreview() async throws {
+        let hub = PartySession(catalog: DemoCatalog(), engine: DemoPlaybackEngine())
+        let (server, task) = try #require(await PartyServer.start(session: hub, ports: [18800]))
+        defer { task.cancel(); Task { await server.stop() } }
+        func preview(_ zone: String) async throws -> String? {
+            let query = zone.addingPercentEncoding(withAllowedCharacters: .alphanumerics) ?? ""
+            let (data, _) = try await URLSession.shared.data(from: URL(string: "http://127.0.0.1:18800/api/local-name?zone=\(query)")!)
+            return (try JSONSerialization.jsonObject(with: data) as? [String: Any])?["address"] as? String
+        }
+        #expect(try await preview("Café Upstairs") == FriendlyHostname.localName(forZone: "Café Upstairs") + ".local:18800")
+        #expect(try await preview("  ") == nil)
+        #expect(try await preview("🎉") == nil)
+    }
+
     @Test func forgettingHostsGivesTheAskerANewKey() async throws {
         let hub = PartySession(catalog: DemoCatalog(), engine: DemoPlaybackEngine())
         hub.hostKey = "old"
@@ -311,6 +325,13 @@ struct LocalNameTests {
         #expect(FriendlyHostname.localName(forZone: nil) == "music")
         #expect(FriendlyHostname.localName(forZone: "") == "music")
         #expect(FriendlyHostname.localName(forZone: "🎉🎉") == "music")
+    }
+
+    @Test func typedNamePreview() {
+        #expect(FriendlyHostname.typedLocalName(forZone: "Living Room") == FriendlyHostname.localName(forZone: "Living Room"))
+        #expect(FriendlyHostname.typedLocalName(forZone: "Music") == FriendlyHostname.localName(forZone: "Music"))
+        #expect(FriendlyHostname.typedLocalName(forZone: "") == nil)
+        #expect(FriendlyHostname.typedLocalName(forZone: "🎉 !") == nil)
     }
 
     @Test func fitsInADNSLabel() {

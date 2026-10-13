@@ -387,6 +387,9 @@
     $("queue-off").hidden = !queueOff;
     renderHost();
     if (settingsOpen()) fillSettings();
+    // The hub's address can arrive (or change) while a zone name is being edited.
+    if (!$("setup").hidden) setupAddress();
+    if (!$("edit-modal").hidden) editAddress();
     const playing = !!(current && snap.playback.isPlaying);
     $("t-play").innerHTML = playing ? icons.pause : icons.play;
     $("t-play").setAttribute("aria-label", playing ? "Pause" : "Play");
@@ -1254,12 +1257,32 @@
     debugScreen("setup opened");
     $("setup-you").value = myName || "";
     $("setup-name").value = snap.zoneName || "";
+    setupAddress();
     $("setup-sub").textContent = snap.hubKind === "tv"
       ? "Music will play from your Apple TV. Use Control Center to change audio output."
       : "You're hosting this zone. Guests can join once music is playing.";
     await setupPicker.open();
     if (setupPick) setupPicker.select(setupPick.id);
   }
+  /** Keeps `line` showing the `.local` address that the zone name typed in `input` gives (the
+   * hub works it out, as it names itself), or for the saved name, the hub's actual address.
+   * Hidden when the name is empty or has no letters or digits. Returns the update function. */
+  function addressPreview(input, line, active = () => true) {
+    let asked = 0;
+    const show = (address) => { line.textContent = address || ""; line.hidden = !address; };
+    async function update() {
+      const name = input.value.trim(), asking = ++asked;
+      if (!name || !active()) { show(null); return; }
+      if (snap && name === snap.zoneName && snap.address) { show(snap.address); return; }
+      let address = null;
+      try { address = (await (await fetch(`/api/local-name?zone=${encodeURIComponent(name)}`)).json()).address; } catch {}
+      if (asking === asked) show(address);
+    }
+    input.addEventListener("input", update);
+    return update;
+  }
+  const setupAddress = addressPreview($("setup-name"), $("setup-address"));
+
   const setupPicker = playlistPicker("setup", "setup-playlists", "setup-empty", (p) => {
     setupPick = p;
     $("setup-start").disabled = false;
@@ -1419,12 +1442,14 @@
     },
   };
   let editing = null;
+  const editAddress = addressPreview($("edit-input"), $("edit-address"), () => editing === editors.name);
   document.querySelectorAll("[data-edit]").forEach((button) => button.addEventListener("click", () => {
     editing = editors[button.dataset.edit];
     const input = $("edit-input");
     $("edit-title").textContent = editing.title;
     input.maxLength = editing.max;
     input.value = editing.value();
+    editAddress();
     $("edit-modal").hidden = false;
     setTimeout(() => input.focus(), 50);
   }));

@@ -1254,7 +1254,9 @@
     debugScreen("setup opened");
     $("setup-you").value = myName || "";
     $("setup-name").value = snap.zoneName || "";
-    $("setup-sub").textContent = `You're hosting ${snap.hubKind === "tv" ? "the Apple TV" : "this zone"}. Guests can join once music is playing.`;
+    $("setup-sub").textContent = snap.hubKind === "tv"
+      ? "Music will play from your Apple TV. Use Control Center to change audio output."
+      : "You're hosting this zone. Guests can join once music is playing.";
     await setupPicker.open();
     if (setupPick) setupPicker.select(setupPick.id);
   }

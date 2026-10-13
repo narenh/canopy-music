@@ -137,11 +137,13 @@ struct SpotifySignInPageSettings: View {
                 } label: {
                     row("Default", detail: "music.canopysf.com", checked: !ownChosen)
                 }
+                .buttonStyle(.plain)
                 Button {
                     ownChosen = true
                 } label: {
                     row("Your own", detail: model.spotifyOwnSignInPage, checked: ownChosen)
                 }
+                .buttonStyle(.plain)
                 if ownChosen {
                     SpotifySignInPageField(isUsable: $usable, showsHelp: false)
                         .listRowBackground(Color.clear)

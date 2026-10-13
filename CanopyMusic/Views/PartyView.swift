@@ -49,9 +49,10 @@ struct PartyView: View {
             let width = min(geo.size.width, geo.size.height * 1.6)
             let right = min(width * 0.46, 640)
             HStack(spacing: 0) {
-                leftPane
+                leftPane(centered: geo.size.height > geo.size.width)
                     .frame(width: width - right)
-                rightPane
+                // Narrower than on an 11" iPad in landscape, the QR card stacks its codes.
+                rightPane(compactQR: right < 540)
                     .padding(.vertical, 24)
                     .padding(.trailing, 24)
             }
@@ -94,7 +95,9 @@ struct PartyView: View {
 
     // MARK: Left pane
 
-    private var leftPane: some View {
+    /// `centered`: in portrait the artwork is held back by the column's width, so Now Playing sits
+    /// in the middle of the spare height rather than at the bottom.
+    private func leftPane(centered: Bool) -> some View {
         VStack(spacing: 0) {
             HStack(spacing: 18) {
                 LogoView(height: 34)
@@ -111,7 +114,7 @@ struct PartyView: View {
             .padding(.bottom, 12)
 
             ZStack {
-                NowPlayingView(item: current, session: session)
+                NowPlayingView(item: current, session: session, centered: centered)
                     .opacity(searchActive ? 0 : 1)
                     .scaleEffect(searchActive ? 0.96 : 1)
                 if searchActive {
@@ -183,7 +186,7 @@ struct PartyView: View {
 
     // MARK: Right pane
 
-    private var rightPane: some View {
+    private func rightPane(compactQR: Bool) -> some View {
         VStack(alignment: .leading, spacing: 0) {
             HStack(alignment: .firstTextBaseline) {
                 Text("Up next")
@@ -223,7 +226,7 @@ struct PartyView: View {
 
             // The on-screen keyboard squeezes this pane; give the space to the queue instead.
             if model.showsGuestQR, !softwareKeyboardShown {
-                GuestQRCard()
+                GuestQRCard(compact: compactQR)
                     .padding(16)
                     .transition(.opacity.combined(with: .move(edge: .bottom)))
             }
@@ -395,6 +398,8 @@ struct PartyView: View {
 struct NowPlayingView: View {
     let item: QueueItem?
     let session: PartySession
+    /// Centered in the spare height instead of resting at the bottom.
+    var centered = false
     @Environment(AppModel.self) private var model
 
     var body: some View {
@@ -451,6 +456,7 @@ struct NowPlayingView: View {
                         TransportControls(session: session)
                     }
                 }
+                if centered { Spacer(minLength: 0) }
             }
             .frame(maxWidth: .infinity)
             .animation(.spring(duration: 0.6, bounce: 0.15), value: item?.id)
@@ -653,12 +659,22 @@ private struct ProgressBar: View {
 // MARK: - QR card
 
 struct GuestQRCard: View {
+    /// Too narrow for both codes side by side (portrait, small windows): the Wi‑Fi code goes
+    /// below the phone code, so the text keeps its room.
+    var compact = false
     @Environment(AppModel.self) private var model
 
     var body: some View {
         HStack(spacing: 18) {
             if let url = model.guestURL {
-                qr(url.absoluteString)
+                if compact {
+                    VStack(spacing: 14) {
+                        qr(url.absoluteString)
+                        if let wifi = model.wifiJoinPayload { wifiQR(wifi) }
+                    }
+                } else {
+                    qr(url.absoluteString)
+                }
                 VStack(alignment: .leading, spacing: 4) {
                     Text("Queue from your phone")
                         .font(.system(size: 19, weight: .bold))
@@ -673,24 +689,7 @@ struct GuestQRCard: View {
                 }
                 .foregroundStyle(.white)
                 Spacer(minLength: 0)
-                if let wifi = model.wifiJoinPayload {
-                    if model.wifiSimpleQR {
-                        VStack(spacing: 4) {
-                            QRCodeView(payload: wifi, inverted: true)
-                                .frame(width: 64, height: 64)
-                                .opacity(0.75)
-                            Text("Join Wi\u{2011}Fi")
-                                .font(.system(size: 11, weight: .semibold))
-                                .foregroundStyle(.white.opacity(0.5))
-                        }
-                    } else {
-                        // The Wi‑Fi symbol says what it is, so no caption; it takes the caption's room.
-                        HalftoneQRCode(payload: wifi, symbol: "wifi", symbolScale: 0.6, dotScale: 0.7)
-                            .frame(width: 80, height: 80)
-                            .opacity(0.75)
-                            .accessibilityLabel("Join Wi\u{2011}Fi QR code")
-                    }
-                }
+                if !compact, let wifi = model.wifiJoinPayload { wifiQR(wifi) }
             } else {
                 Label("Phone queueing is off. Connect the iPad to Wi\u{2011}Fi.", systemImage: "wifi.slash")
                     .font(.system(size: 15))
@@ -699,6 +698,25 @@ struct GuestQRCard: View {
         }
         .padding(14)
         .background(.white.opacity(0.08), in: RoundedRectangle(cornerRadius: 20, style: .continuous))
+    }
+
+    @ViewBuilder private func wifiQR(_ wifi: String) -> some View {
+        if model.wifiSimpleQR {
+            VStack(spacing: 4) {
+                QRCodeView(payload: wifi, inverted: true)
+                    .frame(width: 64, height: 64)
+                    .opacity(0.75)
+                Text("Join Wi\u{2011}Fi")
+                    .font(.system(size: 11, weight: .semibold))
+                    .foregroundStyle(.white.opacity(0.5))
+            }
+        } else {
+            // The Wi‑Fi symbol says what it is, so no caption; it takes the caption's room.
+            HalftoneQRCode(payload: wifi, symbol: "wifi", symbolScale: 0.6, dotScale: 0.7)
+                .frame(width: 80, height: 80)
+                .opacity(0.75)
+                .accessibilityLabel("Join Wi\u{2011}Fi QR code")
+        }
     }
 
     private func qr(_ payload: String, size: CGFloat = 108) -> some View {

@@ -521,6 +521,85 @@ struct SkippingCatalog: MusicCatalog {
     }
 }
 
+/// A hub's new session (End then a new zone, a service change, a relaunch) counts versions from
+/// 0 again; its snapshots carry a new epoch so pages and displays that stay open take them.
+@MainActor
+@Suite struct SessionEpochTests {
+    @Test func eachSessionHasItsOwnEpoch() async throws {
+        let first = PartySession(catalog: StubCatalog(ids: ["a"]), engine: FakeEngine())
+        let second = PartySession(catalog: StubCatalog(ids: ["a"]), engine: FakeEngine())
+        #expect(first.epoch != second.epoch)
+        #expect(first.snapshot().epoch == first.epoch)
+        let sent = try JSONDecoder().decode(PartySnapshot.self, from: JSONEncoder().encode(first.snapshot()))
+        #expect(sent.epoch == first.epoch)
+    }
+
+    @Test func aDisplayTakesALowerVersionFromANewSession() async throws {
+        let hub = PartySession(catalog: StubCatalog(ids: ["a", "b", "c", "d"]), engine: FakeEngine())
+        try await hub.load(playlist: base)
+        try await hub.play()
+        hub.add(track("x"), by: guest)
+        await hub.skip()
+        let display = PartySession(remote: RecordingRemote(clientID: "kitchen"))
+        display.apply(hub.snapshot())
+        #expect(display.state.current?.track.id == "b")
+        #expect(display.state.version == hub.state.version)
+        #expect(hub.state.version > 1)
+
+        // The hub started over (End, then a new zone; or a relaunch): version 1, new epoch.
+        let next = PartySession(catalog: StubCatalog(ids: ["z"]), engine: FakeEngine())
+        try await next.load(playlist: base)
+        let fresh = next.snapshot()
+        #expect(fresh.version < display.state.version)
+        display.apply(fresh)
+        #expect(display.state.upNext.map(\.track.id) == ["z"])
+        #expect(display.state.current == nil)
+        #expect(display.state.version == fresh.version)
+    }
+
+    @Test func lowerVersionsFromTheSameSessionAreStillSkipped() async throws {
+        let hub = PartySession(catalog: StubCatalog(ids: ["a", "b", "c"]), engine: FakeEngine())
+        try await hub.load(playlist: base)
+        try await hub.play()
+        let older = hub.snapshot()
+        await hub.skip()
+        let display = PartySession(remote: RecordingRemote(clientID: "kitchen"))
+        display.apply(hub.snapshot())
+        #expect(display.state.current?.track.id == "b")
+        display.apply(older) // late over the socket
+        #expect(display.state.current?.track.id == "b")
+        // An optimistic local edit bumps the display's version; the hub's older snapshot is skipped
+        // too, until the hub's copy of the edit arrives.
+        display.add(track("x"), by: Requester(origin: .ipad))
+        display.apply(hub.snapshot())
+        #expect(display.state.upNext.contains { $0.track.id == "x" })
+        hub.add(track("x"), by: Requester(origin: .ipad))
+        display.apply(hub.snapshot())
+        #expect(display.state.version == hub.state.version)
+    }
+
+    /// Snapshots from older hubs carry no epoch: compared by version alone, as before.
+    @Test func snapshotsWithoutAnEpochCompareByVersion() async throws {
+        let hub = PartySession(catalog: StubCatalog(ids: ["a", "b", "c"]), engine: FakeEngine())
+        try await hub.load(playlist: base)
+        try await hub.play()
+        var older = hub.snapshot()
+        older.epoch = nil
+        await hub.skip()
+        var newer = hub.snapshot()
+        newer.epoch = nil
+        let display = PartySession(remote: RecordingRemote(clientID: "kitchen"))
+        display.apply(newer)
+        display.apply(older)
+        #expect(display.state.current?.track.id == "b")
+        // And one that decodes without the field at all.
+        var json = try #require(try JSONSerialization.jsonObject(with: JSONEncoder().encode(newer)) as? [String: Any])
+        json["epoch"] = nil
+        let decoded = try JSONDecoder().decode(PartySnapshot.self, from: JSONSerialization.data(withJSONObject: json))
+        #expect(decoded.epoch == nil)
+    }
+}
+
 /// Ending a zone clears the session and its saved queue, so the next zone starts empty.
 @MainActor
 @Suite struct EndZoneTests {

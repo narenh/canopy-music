@@ -63,6 +63,10 @@ public struct PartySnapshot: Codable, Equatable, Sendable {
     /// The hub's guest Wi‑Fi, in snapshots for displays only (never for guests' phones), so a
     /// display shows the same "Join Wi‑Fi" code. nil from older hubs.
     public var wifi: WifiDetails?
+    /// Which session of the hub `version` counts in (`PartySession.epoch`). A page or display
+    /// that sees a new epoch takes that snapshot whatever its version, since the counter started
+    /// over. nil from older hubs: versions are compared as before.
+    public var epoch: String?
 }
 
 /// Owns the queue and keeps the player in step with it. Both the iPad UI and the phone server
@@ -77,6 +81,14 @@ public final class PartySession {
     public private(set) var isPlaying = false
     /// Set when this session mirrors another device's zone (display mode).
     @ObservationIgnored public let remote: (any ZoneRemote)?
+    /// Identifies this session object in its snapshots. `state.version` counts up within it; a
+    /// new session (after End, a service change or a relaunch) starts the count over, and
+    /// listeners that still hold the old count would drop every snapshot until it caught up.
+    /// Fresh per object rather than saved with the queue: a queue restored from disk may be a
+    /// save behind what pages saw, so its count must not be trusted against theirs either.
+    @ObservationIgnored public let epoch = UUID().uuidString
+    /// Display mode: the epoch of the last snapshot taken from the hub.
+    @ObservationIgnored private var hubEpoch: String?
     /// Zone details from the hub, for a display; this device's own, for a hub.
     public private(set) var hubKind: HubKind?
     /// The hub device's ID (stable across launches and renames).
@@ -189,10 +201,14 @@ public final class PartySession {
 
     /// The hub's latest snapshot (display mode). A snapshot older than an optimistic local edit
     /// is skipped, so the edit doesn't flicker back; `force` takes it anyway (after a refused edit).
+    /// The first snapshot of a new session on the hub (a new `epoch`) is taken whatever its
+    /// version, since the hub's count started over; versions are compared from there on.
     public func apply(_ snapshot: PartySnapshot, force: Bool = false) {
         guard remote != nil else { return }
-        if force || snapshot.version >= state.version {
+        let newEpoch = snapshot.epoch != nil && snapshot.epoch != hubEpoch
+        if force || newEpoch || snapshot.version >= state.version {
             state = QueueState(mirroring: snapshot)
+            hubEpoch = snapshot.epoch
         }
         var playback = snapshot.playback
         // The hub's clock may differ from ours; time it from when it arrived.
@@ -578,7 +594,8 @@ public final class PartySession {
             skippedOnLoad: skippedOnLoad.isEmpty ? nil : skippedOnLoad.count,
             skippedTitles: skippedOnLoad.isEmpty ? nil : skippedOnLoad.prefix(Self.skippedTitlesInSnapshots).map(\.title),
             screensaverWhilePlaying: hubKind == .tv ? screensaverWhilePlaying : nil,
-            wifi: includingWifi ? wifi : nil
+            wifi: includingWifi ? wifi : nil,
+            epoch: epoch
         )
     }
 

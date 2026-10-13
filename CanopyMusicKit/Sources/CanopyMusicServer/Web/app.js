@@ -271,7 +271,12 @@
     // A different hub now answers at this address (the old one left and another took the name):
     // start over, so this hub gets its own host key, not the other's.
     if (hubID && next.hubID && next.hubID !== hubID) { location.reload(); return; }
-    if (snap && next.version < snap.version) return;
+    // The hub started a new session (End, a service change, a relaunch): its version count
+    // started over, so this snapshot is taken whatever its number, and compared from here on.
+    // Older hubs send no epoch and are compared by version alone, as before.
+    const newSession = snap && next.epoch && next.epoch !== snap.epoch;
+    if (newSession) { debugLog(`new session on the hub (v${next.version})`); later.version = null; }
+    else if (snap && next.version < snap.version) return;
     if (!snap) debugLog(`first snapshot v${next.version} playlist="${next.playlistName || ""}" hostChecked=${hostChecked}`);
     snap = next;
     render();

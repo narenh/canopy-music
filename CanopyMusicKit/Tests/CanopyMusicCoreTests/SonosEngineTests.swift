@@ -199,6 +199,20 @@ func sonosURI(_ id: String) -> String { "x-sonos-spotify:spotify%3atrack%3a\(id)
         #expect(fake.changes.suffix(6).map(\.action) == ["RemoveAllTracksFromQueue", "AddURIToQueue", "SetAVTransportURI", "SetPlayMode", "Seek", "Play"])
     }
 
+    /// It looked like another source took the room, but the group is on our song after all: a
+    /// pause (the music moving to another output) still stops it.
+    @Test func pauseStopsOurSongAfterAMisreadTakeover() async throws {
+        try await engine.play(spotifyTrack("a"))
+        try await engine.applyLatestObservation()
+        fake.foreignURI = "x-sonos-htastream:RINCON_MOVE:spdif"
+        try await engine.applyLatestObservation()
+        fake.foreignURI = nil
+        engine.pause()
+        await settle()
+        #expect(fake.changes.last?.action == "Pause")
+        #expect(fake.state == .paused)
+    }
+
     @Test func nothingIsSentBeforeItHasPlayed() async {
         engine.pause()
         engine.seek(to: 30)
@@ -292,6 +306,8 @@ struct SonosPlaybackRulesTests {
         let c = C(currentID: a, currentNumber: 1, sawPlaying: true)
         #expect(SonosPlaybackRules.step(O(trackNumber: 1, trackID: nil, state: .playing), c) == .lostControl)
         #expect(SonosPlaybackRules.step(O(trackNumber: 1, trackID: nil, state: .paused), c) == .nothing)
+        // Between songs, no track for a moment: not someone else yet.
+        #expect(SonosPlaybackRules.step(O(trackNumber: 1, trackID: nil, state: .transitioning), c) == .nothing)
     }
 
     @Test func nothingOfOursYet() {

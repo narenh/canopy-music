@@ -2,13 +2,14 @@ import Foundation
 
 /// The UPnP services Canopy Music talks to on a Sonos player (port 1400).
 public enum SonosUPnPService: String, Sendable {
-    case avTransport, queue, renderingControl, zoneGroupTopology, musicServices, contentDirectory, groupManagement
+    case avTransport, queue, renderingControl, groupRenderingControl, zoneGroupTopology, musicServices, contentDirectory, groupManagement
 
     public var controlPath: String {
         switch self {
         case .avTransport: "/MediaRenderer/AVTransport/Control"
         case .queue: "/MediaRenderer/Queue/Control"
         case .renderingControl: "/MediaRenderer/RenderingControl/Control"
+        case .groupRenderingControl: "/MediaRenderer/GroupRenderingControl/Control"
         case .zoneGroupTopology: "/ZoneGroupTopology/Control"
         case .musicServices: "/MusicServices/Control"
         case .contentDirectory: "/MediaServer/ContentDirectory/Control"
@@ -21,6 +22,7 @@ public enum SonosUPnPService: String, Sendable {
         case .avTransport: "urn:schemas-upnp-org:service:AVTransport:1"
         case .queue: "urn:schemas-sonos-com:service:Queue:1"
         case .renderingControl: "urn:schemas-upnp-org:service:RenderingControl:1"
+        case .groupRenderingControl: "urn:schemas-upnp-org:service:GroupRenderingControl:1"
         case .zoneGroupTopology: "urn:schemas-upnp-org:service:ZoneGroupTopology:1"
         case .musicServices: "urn:schemas-upnp-org:service:MusicServices:1"
         case .contentDirectory: "urn:schemas-upnp-org:service:ContentDirectory:1"
@@ -68,7 +70,7 @@ public struct SonosRequest: Sendable, Equatable {
     /// Actions that only read. The debug probe and discovery use only these.
     public static let readOnlyActions: Set<String> = [
         "GetZoneGroupState", "ListAvailableServices", "Browse", "GetPositionInfo", "GetTransportInfo",
-        "GetMediaInfo", "GetTransportSettings", "GetCrossfadeMode", "GetVolume",
+        "GetMediaInfo", "GetTransportSettings", "GetCrossfadeMode", "GetVolume", "GetGroupVolume",
     ]
 
     public var isReadOnly: Bool { Self.readOnlyActions.contains(action) }
@@ -83,6 +85,8 @@ public enum SonosError: Error, LocalizedError, Equatable {
     case unreachable
     /// No account for the zone's service was found on the Sonos.
     case noAccount
+    /// The group's last room can't leave it: the music has to play somewhere.
+    case lastRoom
 
     public var errorDescription: String? {
         switch self {
@@ -91,6 +95,7 @@ public enum SonosError: Error, LocalizedError, Equatable {
         case .http(let action, let status): "Sonos answered \(action) with HTTP \(status)."
         case .unreachable: "The Sonos speaker isn't answering. Check it's on and on this Wi\u{2011}Fi."
         case .noAccount: "Sonos has no account for this music service. Add it in the Sonos app."
+        case .lastRoom: "Music has to play in at least one room."
         }
     }
 }
@@ -195,6 +200,20 @@ public struct SonosClient: Sendable {
         ]))
     }
 
+    /// This player's own volume (0–100).
+    public func volume() async throws -> Int {
+        let reply = try await call(.renderingControl, "GetVolume", [Self.instance, .init("Channel", "Master")])
+        guard let volume = reply["CurrentVolume"].flatMap(Int.init) else { throw SonosError.badResponse(action: "GetVolume") }
+        return volume
+    }
+
+    /// The group's volume (sent to its coordinator).
+    public func groupVolume() async throws -> Int {
+        let reply = try await call(.groupRenderingControl, "GetGroupVolume", [Self.instance])
+        guard let volume = reply["CurrentVolume"].flatMap(Int.init) else { throw SonosError.badResponse(action: "GetGroupVolume") }
+        return volume
+    }
+
     public func deviceDescription() async throws -> SonosPlayer? {
         SonosParse.deviceDescription(try await transport.get(host: host, path: "/xml/device_description.xml"), host: host)
     }
@@ -251,4 +270,29 @@ public struct SonosClient: Sendable {
     public func leaveGroup() async throws {
         try await call(.avTransport, "BecomeCoordinatorOfStandaloneGroup", [Self.instance])
     }
+
+    /// Sent to a group's coordinator: hands the group (its queue and what's playing) to `roomID`,
+    /// another member. With `rejoin` false this player leaves the group.
+    public func delegateCoordination(to roomID: String, rejoin: Bool) async throws {
+        try await call(.avTransport, "DelegateGroupCoordinationTo", [
+            Self.instance, .init("NewCoordinator", roomID), .init("RejoinGroup", rejoin ? "1" : "0"),
+        ])
+    }
+
+    public func setVolume(_ volume: Int) async throws {
+        try await call(.renderingControl, "SetVolume", [Self.instance, .init("Channel", "Master"), .init("DesiredVolume", "\(Self.clamp(volume))")])
+    }
+
+    /// Sent to a group's coordinator before a group volume change: the members' volumes as they
+    /// are now, so `setGroupVolume` keeps their balance.
+    public func snapshotGroupVolume() async throws {
+        try await call(.groupRenderingControl, "SnapshotGroupVolume", [Self.instance])
+    }
+
+    /// Sent to a group's coordinator: moves every member's volume in proportion to the last snapshot.
+    public func setGroupVolume(_ volume: Int) async throws {
+        try await call(.groupRenderingControl, "SetGroupVolume", [Self.instance, .init("DesiredVolume", "\(Self.clamp(volume))")])
+    }
+
+    static func clamp(_ volume: Int) -> Int { min(100, max(0, volume)) }
 }

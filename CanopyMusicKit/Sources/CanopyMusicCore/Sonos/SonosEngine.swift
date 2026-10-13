@@ -27,7 +27,10 @@ public struct SonosTarget: Codable, Hashable, Sendable {
         self.leavesGroup = leavesGroup
     }
 
-    public var name: String { ([coordinator] + joining).map(\.name).joined(separator: " + ") }
+    public var name: String { rooms.map(\.name).joined(separator: " + ") }
+
+    /// Every room it plays in, coordinator first.
+    public var rooms: [Room] { [coordinator] + joining }
 }
 
 /// What the engine reads back each poll, turned into what it means for the session.
@@ -98,8 +101,9 @@ public enum SonosPlaybackRules {
     public static func step(_ o: Observation, _ c: Context) -> Step {
         guard let currentID = c.currentID else { return .nothing }
         guard let trackID = o.trackID else {
-            // Not a service track at all: another source has the room.
-            return isPlaying(o.state) ? .lostControl : .nothing
+            // Not a service track at all, and playing: another source has the room. Not while
+            // it's transitioning: between songs the player can have no track URI for a moment.
+            return o.state == .playing ? .lostControl : .nothing
         }
         if let stagedID = c.stagedID, trackID == stagedID, o.trackNumber == c.stagedNumber || trackID != currentID {
             return .advancedToStaged
@@ -130,10 +134,23 @@ public final class SonosEngine: PlaybackEngine {
     public let canReplaceStaged = true
     public var onEvent: (@MainActor (PlaybackEvent) -> Void)?
 
-    public let target: SonosTarget
+    /// Where it plays now. Rooms join and leave while it plays (`addRoom`, `removeRoom`), and the
+    /// coordinator can change hands; commands and polls follow it.
+    public private(set) var target: SonosTarget {
+        didSet {
+            if target.coordinator.id != oldValue.coordinator.id { client = SonosClient(transport: transport, host: target.coordinator.host) }
+            if target != oldValue { onTargetChanged?(target) }
+        }
+    }
     public let reference: SonosTrackReference
-    private let client: SonosClient
+    private var client: SonosClient
     private let transport: any SonosTransport
+    /// After each change of `target`, so the app can remember the rooms for the next launch.
+    public var onTargetChanged: (@MainActor (SonosTarget) -> Void)?
+    /// The session's current song as restored at launch: the group may still be playing it from
+    /// before (Sonos plays on while the app is gone), and then it's ours to pause on `shutDown`.
+    public var restoredTrackID: String?
+    private var isShutDown = false
 
     private var currentTrack: QueueTrack?
     private var currentNumber: Int?
@@ -149,7 +166,8 @@ public final class SonosEngine: PlaybackEngine {
     public private(set) var hasStarted = false
     private var hasGrouped = false
     private var crossfade: Bool?
-    /// Commands in flight: polls wait, so they don't read a half-built queue.
+    /// Commands in flight: polls wait, so they don't read a half-built queue (or a group that's
+    /// changing hands).
     private var busy = 0
     private var settleUntil = Date.distantPast
     private var lastPlaying: Bool?
@@ -271,9 +289,20 @@ public final class SonosEngine: PlaybackEngine {
     public func pause() {
         pausedByUs = true
         cache(playing: false, time: currentTime)
-        guard hasStarted, !lostControl else { return }
+        guard hasStarted else { return }
         settleUntil = Date().addingTimeInterval(1)
-        Task { [client] in try? await client.pause() }
+        guard lostControl else {
+            Task { [client] in try? await client.pause() }
+            return
+        }
+        // Another source seemed to have the room: it's left alone, unless the group is on our
+        // songs after all (a misread), which mustn't play on under the next output.
+        let ours = Set([currentTrack?.id, stagedTrack?.id].compactMap { $0 })
+        Task { [client] in
+            guard let info = try? await client.positionInfo(), let id = info.trackURI.flatMap(SonosURI.canopyTrackID(of:)), ours.contains(id),
+                  let state = try? await client.transportState(), SonosPlaybackRules.isPlaying(state) else { return }
+            try? await client.pause()
+        }
     }
 
     public func skipToStaged() async throws {
@@ -316,6 +345,135 @@ public final class SonosEngine: PlaybackEngine {
             }
         }
         hasGrouped = true
+        target.leavesGroup = false
+    }
+
+    /// The group is set up on the speakers (the first play did it): rooms join and leave it for
+    /// real from now on. Before that, they only change `target`.
+    public var isGrouped: Bool { hasGrouped }
+
+    /// Before anything has played: a new target outright (the rooms are grouped at the first play).
+    public func retarget(_ next: SonosTarget) {
+        guard !hasGrouped else { return }
+        target = next
+    }
+
+    /// Adds a room while the music plays: it joins the coordinator's group (`x-rincon:`) and
+    /// plays in sync, from wherever the group is, without the song restarting. A room that's
+    /// busy with something else leaves that for this. Before the first play it's only noted.
+    /// `waitUntilGrouped` says when Sonos has it in the group.
+    public func addRoom(_ room: SonosTarget.Room) async throws {
+        guard !target.rooms.contains(where: { $0.id == room.id }) else { return }
+        if hasGrouped {
+            busy += 1
+            defer { busy -= 1 }
+            try await SonosClient(transport: transport, host: room.host).setTransportURI(SonosURI.joinGroup(of: target.coordinator.id))
+            log?("\(room.name) joining \(target.coordinator.name)")
+        }
+        target.joining.append(room)
+    }
+
+    /// Reads the group's topology until `roomID` is in the coordinator's group, for up to
+    /// `timeout`. True once it is.
+    public func waitUntilGrouped(_ roomID: String, timeout: Duration = .seconds(10), every interval: Duration = .milliseconds(500)) async -> Bool {
+        let clock = ContinuousClock()
+        let deadline = clock.now + timeout
+        while clock.now < deadline, !Task.isCancelled {
+            if let groups = try? await client.zoneGroups(),
+               groups.contains(where: { $0.coordinatorID == target.coordinator.id && $0.members.contains { $0.id == roomID } }) {
+                return true
+            }
+            try? await Task.sleep(for: interval)
+        }
+        return false
+    }
+
+    /// Takes a room out while the music plays on in the others, without a restart. A member
+    /// leaves the group (`BecomeCoordinatorOfStandaloneGroup`). The coordinator first hands the
+    /// group to the next room (`DelegateGroupCoordinationTo`, not rejoining), which takes the
+    /// queue and what's playing with it; commands and polls then go to the new coordinator. If
+    /// the new coordinator turns out not to be on our queue, the song is put back there at the
+    /// same place (a short gap rather than silence). Either way the room that left is stopped if
+    /// it plays on by itself. The last room can't be removed.
+    public func removeRoom(_ roomID: String) async throws {
+        guard target.rooms.count > 1, let room = target.rooms.first(where: { $0.id == roomID }) else { throw SonosError.lastRoom }
+        guard hasGrouped else {
+            // Nothing set up on the speakers yet.
+            if roomID == target.coordinator.id {
+                target = SonosTarget(coordinator: target.joining[0], joining: Array(target.joining.dropFirst()))
+            } else {
+                target.joining.removeAll { $0.id == roomID }
+            }
+            return
+        }
+        busy += 1
+        defer { busy -= 1 }
+        settleUntil = Date().addingTimeInterval(2)
+        let leaving = SonosClient(transport: transport, host: room.host)
+        if roomID != target.coordinator.id {
+            try await leaving.leaveGroup()
+            target.joining.removeAll { $0.id == roomID }
+            log?("\(room.name) left the group")
+        } else {
+            let next = target.joining[0]
+            try await leaving.delegateCoordination(to: next.id, rejoin: false)
+            target = SonosTarget(coordinator: next, joining: Array(target.joining.dropFirst()))
+            log?("\(room.name) handed the group to \(next.name)")
+            await adoptQueueAfterHandoff()
+        }
+        await silence(leaving, name: room.name)
+    }
+
+    /// After a handoff: the new coordinator should be playing our queue (the group's queue moves
+    /// with coordination). Its position tells us the track numbers from here on. If it isn't on
+    /// our song, the song goes back on, on this coordinator, where it was.
+    private func adoptQueueAfterHandoff() async {
+        guard let currentTrack else { return }
+        let wasPlaying = cachedPlaying
+        let position = currentTime
+        // Sonos takes a moment to hand over.
+        for attempt in 0..<4 {
+            if attempt > 0 { try? await Task.sleep(for: .milliseconds(500)) }
+            guard let media = try? await client.mediaInfo(), let info = try? await client.positionInfo() else { continue }
+            let onQueue = media["CurrentURI"] == SonosURI.queue(of: target.coordinator.id)
+            let trackID = info.trackURI.flatMap(SonosURI.canopyTrackID(of:))
+            if onQueue, trackID == currentTrack.id {
+                // The queue came over whole, so the staged song is where it was relative to ours.
+                if let old = currentNumber, let staged = stagedNumber { stagedNumber = staged + info.track - old }
+                currentNumber = info.track
+                log?("\(target.coordinator.name) took over our queue at #\(info.track)")
+                return
+            }
+        }
+        log?("\(target.coordinator.name) isn't on our queue after the handoff: putting the song back")
+        let staged = stagedTrack
+        do {
+            try await play(currentTrack)
+            if position > 1 { try await client.seek(to: position) }
+            if !wasPlaying {
+                pausedByUs = true
+                try await client.pause()
+                cache(playing: false, time: position)
+            } else {
+                cache(playing: true, time: position)
+            }
+            if let staged { try await stage(staged) }
+        } catch {
+            log?("couldn't put the song back on \(target.coordinator.name): \(error)")
+        }
+    }
+
+    /// A room that left the group mustn't carry on with our music by itself.
+    private func silence(_ room: SonosClient, name: String) async {
+        for attempt in 0..<2 {
+            if attempt > 0 { try? await Task.sleep(for: .seconds(1)) }
+            guard let state = try? await room.transportState() else { return }
+            if SonosPlaybackRules.isPlaying(state) {
+                log?("\(name) plays on by itself: pausing it")
+                try? await room.pause()
+                return
+            }
+        }
     }
 
     // MARK: Polling
@@ -338,8 +496,26 @@ public final class SonosEngine: PlaybackEngine {
         poller = nil
     }
 
+    /// The session dropped this engine (after pausing it, which reaches the speakers only if this
+    /// engine played there). One that never played, restored after a relaunch, may find the group
+    /// still playing the session's song from before: that's ours, so it's paused. Anything else
+    /// in the room is left alone.
+    public func shutDown() {
+        guard !isShutDown else { return }
+        isShutDown = true
+        stop()
+        guard !hasStarted, let expected = restoredTrackID else { return }
+        Task { [client, log] in
+            guard let info = try? await client.positionInfo(),
+                  info.trackURI.flatMap(SonosURI.canopyTrackID(of:)) == expected,
+                  let state = try? await client.transportState(), SonosPlaybackRules.isPlaying(state) else { return }
+            log?("still playing our song from before: pausing it")
+            try? await client.pause()
+        }
+    }
+
     func poll() async {
-        guard busy == 0, Date() > settleUntil, currentTrack != nil else { return }
+        guard !isShutDown, busy == 0, Date() > settleUntil, currentTrack != nil else { return }
         do {
             _ = try await applyLatestObservation()
         } catch {

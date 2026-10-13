@@ -47,8 +47,6 @@ final class AppModel {
 
     /// True until a music service has been chosen on the first-launch screen.
     private(set) var needsOnboarding: Bool
-    /// Setup was reopened from Settings › Change Service (skips the network step).
-    private(set) var isChangingService = false
 
     let spotifyAuth: SpotifyAuth
     /// Mirrors `SpotifyConfig.clientID` so views update when it's entered.
@@ -383,16 +381,29 @@ final class AppModel {
         defaults.set(next.rawValue, forKey: "provider")
     }
 
-    func changeService() {
-        isChangingService = true
-        needsOnboarding = true
-    }
-
     func finishOnboarding() {
-        isChangingService = false
         needsOnboarding = false
     }
 
+    /// The start screen's Music row, before Start only (a live zone's service changes only by
+    /// ending it). Nothing is live, so this just swaps the private session. Spotify is signed in
+    /// first (the row's sheet does that), then asks where music plays, as setup does; Apple Music
+    /// asks for access if it hasn't yet, and a refusal shows in the row.
+    func switchService(to next: Provider) {
+        guard zoneRole == .hub, !isLive, !isStartingZone, next != provider else { return }
+        chooseProvider(next)
+        switch next {
+        case .spotify:
+            isPickingSpotifyDevice = true
+        case .appleMusic:
+            if MusicAuthorization.currentStatus == .notDetermined { Task { await requestAuthorization() } }
+        default:
+            break
+        }
+    }
+
+    /// Only while nothing is live (setup, the start screen): the session is private, so it's
+    /// simply replaced.
     func setProvider(_ next: Provider) {
         guard next != provider else { return }
         session.shutdown()
@@ -405,7 +416,6 @@ final class AppModel {
         connectHostControl()
         libraryPlaylistsCache = []
         applyCrossfade()
-        Task { await restartServer() }
     }
 
     /// Changing the Spotify app means existing tokens no longer apply.

@@ -2,30 +2,46 @@ import SwiftUI
 import UIKit
 
 /// Host Music section rows for Spotify: who's signed in, and where music plays with a live status.
+/// On the start screen (`switchService` set) the first row, and its chevron, open the service menu.
 struct SpotifyStatusRows: View {
     @Environment(AppModel.self) private var model
+    let switchService: ((AppModel.Provider) -> Void)?
 
     var body: some View {
         @Bindable var model = model
         if model.spotifyClientID.isEmpty || !model.spotifyAuth.isSignedIn {
-            Button {
-                Task { await model.signInToSpotify() }
-            } label: {
-                Label("Sign in to Spotify", systemImage: "person.crop.circle.badge.plus")
+            HStack(spacing: 12) {
+                Button {
+                    Task { await model.signInToSpotify() }
+                } label: {
+                    Label("Sign in to Spotify", systemImage: "person.crop.circle.badge.plus")
+                }
+                .disabled(model.spotifyClientID.isEmpty)
+                Spacer(minLength: 8)
+                if let switchService {
+                    ServiceMenu(choose: switchService) { ServiceChevron() }
+                }
             }
-            .disabled(model.spotifyClientID.isEmpty)
         } else {
             HStack(spacing: 12) {
-                Image("SpotifyIcon")
-                    .resizable()
-                    .frame(width: 28, height: 28)
-                VStack(alignment: .leading, spacing: 2) {
-                    Text("Spotify")
-                    if let name = model.spotifyDisplayName {
-                        Text("Signed in as \(name)")
-                            .font(.footnote)
-                            .foregroundStyle(.secondary)
+                ServiceMenu(choose: switchService) {
+                    HStack(spacing: 12) {
+                        Image("SpotifyIcon")
+                            .resizable()
+                            .frame(width: 28, height: 28)
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text("Spotify")
+                            if let name = model.spotifyDisplayName {
+                                Text("Signed in as \(name)")
+                                    .font(.footnote)
+                                    .foregroundStyle(.secondary)
+                            }
+                        }
+                        Spacer(minLength: 8)
                     }
+                }
+                if let switchService {
+                    ServiceMenu(choose: switchService) { ServiceChevron() }
                 }
             }
             .task {
@@ -54,7 +70,7 @@ struct SpotifyStatusRows: View {
                 .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
-            .spotifyDevicePicker()
+            // The picker itself is presented by host mode (`HostView`).
             // Keep the status current while host mode is open (one request every 10 s).
             .task {
                 while !Task.isCancelled {

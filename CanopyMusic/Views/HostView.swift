@@ -13,8 +13,28 @@ struct HostView: View {
     @State private var showSkipped = false
     @State private var confirmingEnd = false
     @State private var scrollTarget: UUID?
+    /// Switching to Spotify from the Music row before it's signed in: setup's sign-in step.
+    @State private var signingInToSpotify = false
+    @State private var signedInToSpotify = false
 
     private var session: PartySession { model.session }
+
+    /// The Music row's service menu: only on the start screen (nil in a live zone).
+    private var switchService: ((AppModel.Provider) -> Void)? {
+        model.isLive ? nil : { next in chooseService(next) }
+    }
+
+    /// Spotify signs in first if it isn't yet (backing out keeps the current service), then
+    /// asks where music plays (`AppModel.switchService`).
+    private func chooseService(_ next: AppModel.Provider) {
+        guard next != model.provider else { return }
+        if next == .spotify, !model.spotifyAuth.isSignedIn || model.spotifyClientID.isEmpty {
+            signedInToSpotify = false
+            signingInToSpotify = true
+        } else {
+            model.switchService(to: next)
+        }
+    }
 
     /// Start on the start screen; Back to party (just locking) in a live zone.
     private var canPressStart: Bool {
@@ -50,6 +70,23 @@ struct HostView: View {
                 .presentationBackground(.ultraThinMaterial)
                 .preferredColorScheme(.dark)
         }
+        // "Where should music play?": the Spotify rows, Start finding no device, or switching.
+        .spotifyDevicePicker()
+        .fullScreenCover(isPresented: $signingInToSpotify, onDismiss: {
+            if signedInToSpotify { model.switchService(to: .spotify) }
+        }) {
+            ZStack {
+                LinearGradient(colors: [Color(white: 0.11), Color(white: 0.04)], startPoint: .top, endPoint: .bottom)
+                    .ignoresSafeArea()
+                SpotifySetupStep(back: { signingInToSpotify = false }) {
+                    signedInToSpotify = true
+                    signingInToSpotify = false
+                }
+            }
+            .tint(AppModel.Provider.spotify.accent)
+            .foregroundStyle(.white)
+            .preferredColorScheme(.dark)
+        }
         #if DEBUG
         .onAppear {
             if ProcessInfo.processInfo.arguments.contains(where: ["-showSettings", "-showSave"].contains) { showSettings = true }
@@ -57,6 +94,13 @@ struct HostView: View {
             if ProcessInfo.processInfo.arguments.contains("-confirmEnd") { confirmingEnd = true }
             if ProcessInfo.processInfo.arguments.contains("-showSkipped") {
                 Task { try? await Task.sleep(for: .seconds(2)); showSkipped = true }
+            }
+            // `-switchService appleMusic|spotify`: picks that service from the Music row's menu
+            // 2 s in (the simulator can't be tapped from here).
+            let args = ProcessInfo.processInfo.arguments
+            if let i = args.firstIndex(of: "-switchService"), i + 1 < args.count,
+               let next = AppModel.Provider(rawValue: args[i + 1]), let switchService {
+                Task { try? await Task.sleep(for: .seconds(2)); switchService(next) }
             }
         }
         #endif
@@ -107,13 +151,23 @@ struct HostView: View {
             .padding(.top, 20)
 
             Form {
+                // The service row switches services on the start screen only (its chevron menu);
+                // in a live zone it just shows the service.
                 Section("Music") {
                     if model.provider == .spotify {
-                        SpotifyStatusRows()
+                        SpotifyStatusRows(switchService: switchService)
                     } else if model.isDemo {
-                        Label("Demo mode: fake songs, no audio", systemImage: "theatermasks")
+                        HStack(spacing: 12) {
+                            ServiceMenu(choose: switchService) {
+                                Label("Demo mode: fake songs, no audio", systemImage: "theatermasks")
+                                    .frame(maxWidth: .infinity, alignment: .leading)
+                            }
+                            if let switchService {
+                                ServiceMenu(choose: switchService) { ServiceChevron() }
+                            }
+                        }
                     } else {
-                        AppleMusicStatusRow(showOffer: $showSubscriptionOffer)
+                        AppleMusicStatusRow(showOffer: $showSubscriptionOffer, switchService: switchService)
                     }
                 }
                 .listRowBackground(Color.white.opacity(0.08))
@@ -290,25 +344,34 @@ private struct WifiPasswordField: View {
 
 // MARK: - Apple Music
 
-/// The service with a one-line status; problem states carry their fix in the row.
+/// The service with a one-line status; problem states carry their fix in the row. On the start
+/// screen the row (and its chevron) opens the service menu.
 private struct AppleMusicStatusRow: View {
     @Environment(AppModel.self) private var model
     @Binding var showOffer: Bool
+    let switchService: ((AppModel.Provider) -> Void)?
 
     var body: some View {
         HStack(spacing: 12) {
-            Image("AppleMusicIcon")
-                .resizable()
-                .frame(width: 28, height: 28)
-                .clipShape(RoundedRectangle(cornerRadius: 7, style: .continuous))
-                .saturation(model.authorization == .authorized ? 1 : 0)
-                .opacity(model.authorization == .authorized ? 1 : 0.5)
-            VStack(alignment: .leading, spacing: 2) {
-                Text("Apple Music")
-                status
+            ServiceMenu(choose: switchService) {
+                HStack(spacing: 12) {
+                    Image("AppleMusicIcon")
+                        .resizable()
+                        .frame(width: 28, height: 28)
+                        .clipShape(RoundedRectangle(cornerRadius: 7, style: .continuous))
+                        .saturation(model.authorization == .authorized ? 1 : 0)
+                        .opacity(model.authorization == .authorized ? 1 : 0.5)
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("Apple Music")
+                        status
+                    }
+                    Spacer(minLength: 8)
+                }
             }
-            Spacer(minLength: 8)
             action
+            if let switchService {
+                ServiceMenu(choose: switchService) { ServiceChevron() }
+            }
         }
     }
 
@@ -346,6 +409,54 @@ private struct AppleMusicStatusRow: View {
             Button("Connect") { Task { await model.requestAuthorization() } }
                 .buttonStyle(.glassProminent)
         }
+    }
+}
+
+// MARK: - Switching services
+
+/// The start screen's service switcher: the Music row, and its down chevron, open a menu of the
+/// services. In a live zone (`choose` is nil) it's just the row: the service changes only by
+/// ending the zone.
+struct ServiceMenu<Content: View>: View {
+    @Environment(AppModel.self) private var model
+    let choose: ((AppModel.Provider) -> Void)?
+    @ViewBuilder let label: Content
+
+    var body: some View {
+        if let choose {
+            Menu {
+                ForEach([AppModel.Provider.appleMusic, .spotify], id: \.self) { provider in
+                    Button {
+                        choose(provider)
+                    } label: {
+                        if provider == model.provider {
+                            Label(provider.title, systemImage: "checkmark")
+                        } else {
+                            Text(provider.title)
+                        }
+                    }
+                }
+            } label: {
+                label.contentShape(Rectangle())
+            }
+            .menuStyle(.button)
+            .buttonStyle(.plain)
+            .accessibilityHint("Switches the music service")
+        } else {
+            label
+        }
+    }
+}
+
+/// The down chevron at the end of the Music row.
+struct ServiceChevron: View {
+    var body: some View {
+        Image(systemName: "chevron.down")
+            .font(.footnote.weight(.semibold))
+            .foregroundStyle(.secondary)
+            .frame(width: 24, height: 28)
+            .contentShape(Rectangle())
+            .accessibilityLabel("Music service")
     }
 }
 
@@ -508,32 +619,19 @@ private struct SettingsSheet: View {
                     Text("Used when crossfade is on. Apple Music's AutoMix isn't available to other apps.")
                 }
                 .listRowBackground(Color.white.opacity(0.08))
-                Section {
-                    Button {
-                        dismiss()
-                        model.changeService()
-                    } label: {
-                        HStack {
-                            Text(model.provider.title)
-                                .foregroundStyle(.primary)
-                            Spacer()
-                            Text("Change Service")
-                                .foregroundStyle(.tint)
-                        }
-                        .contentShape(Rectangle())
-                    }
-                    .buttonStyle(.plain)
-                    if model.provider == .spotify {
+                // The service is switched on the start screen's Music row, before Start.
+                if model.provider == .spotify {
+                    Section {
                         LabeledContent("Spotify requests", value: "\(model.spotifyAPI.requestCount) (\(Int(model.spotifyAPI.requestsPerMinute.rounded()))/min)")
                         if model.spotifyAPI.rateLimitedCount > 0 {
                             LabeledContent("Rate limited", value: "\(model.spotifyAPI.rateLimitedCount)×")
                                 .foregroundStyle(.orange)
                         }
+                    } header: {
+                        Text("Music Service")
                     }
-                } header: {
-                    Text("Music Service")
+                    .listRowBackground(Color.white.opacity(0.08))
                 }
-                .listRowBackground(Color.white.opacity(0.08))
                 // A party to save, or a zone to end, only once it's live.
                 if model.isLive, model.session.partySaveInfo.offersSave {
                     Section {

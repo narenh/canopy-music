@@ -24,12 +24,8 @@ struct OnboardingView: View {
                         back: { go(.chooser) },
                         done: {
                             model.chooseProvider(.spotify)
-                            if model.isChangingService {
-                                model.finishOnboarding()
-                            } else {
-                                networkBack = .spotify
-                                go(.network)
-                            }
+                            networkBack = .spotify
+                            go(.network)
                         }
                     )
                     // Spotify green regardless of the current service (a fresh install defaults to Apple Music).
@@ -61,7 +57,7 @@ struct OnboardingView: View {
             VStack(spacing: 10) {
                 Text("Where's your music?")
                     .font(.system(size: 40, weight: .bold))
-                Text("Pick the service you'll play from. You can switch later in Settings.")
+                Text("Pick the service you'll play from. You can switch later, before you press Start.")
                     .font(.system(size: 18))
                     .foregroundStyle(.white.opacity(0.6))
             }
@@ -75,12 +71,8 @@ struct OnboardingView: View {
                         model.chooseProvider(.appleMusic)
                         Task {
                             await model.requestAuthorization()
-                            if model.isChangingService {
-                                model.finishOnboarding()
-                            } else {
-                                networkBack = .chooser
-                                go(.network)
-                            }
+                            networkBack = .chooser
+                            go(.network)
                         }
                     }
                     ServiceCard(
@@ -88,10 +80,11 @@ struct OnboardingView: View {
                         name: "Spotify",
                         detail: "Controls Spotify on this \(DeviceKind.noun) or an Apple TV. Needs Premium and a free developer app."
                     ) {
-                        // Already set up (e.g. switching back from Apple Music): no need to sign in again.
+                        // Already signed in (e.g. a reinstall kept the sign-in): no need to sign in again.
                         if model.spotifyAuth.isSignedIn, !model.spotifyClientID.isEmpty {
                             model.chooseProvider(.spotify)
-                            if model.isChangingService { model.finishOnboarding() } else { networkBack = .chooser; go(.network) }
+                            networkBack = .chooser
+                            go(.network)
                         } else {
                             // Spotify is only chosen once sign-in succeeds in the next step.
                             go(.spotify)
@@ -149,13 +142,18 @@ private struct ServiceCard: View {
 }
 
 /// Client ID + sign-in. There's no skip: Spotify isn't selectable until this succeeds.
-/// Used by onboarding and when switching to Spotify in Settings.
+/// Used by onboarding and when switching to Spotify on the start screen.
 struct SpotifySetupStep: View {
     @Environment(AppModel.self) private var model
     @State private var clientID = SpotifyConfig.clientID
     @State private var working = false
     let back: () -> Void
     let done: () -> Void
+
+    init(back: @escaping () -> Void, done: @escaping () -> Void) {
+        self.back = back
+        self.done = done
+    }
 
     private static let readme = URL(string: "https://github.com/narenh/canopy-music#spotify")!
 

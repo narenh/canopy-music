@@ -307,6 +307,9 @@ final class TVModel {
             serverTask = nil
             let old = server
             server = nil
+            // No QR codes until the new server is up (`startServer` sets these again).
+            guestURL = nil
+            friendlyURL = nil
             hostname.unregister()
             advertiser.stop()
             Task {

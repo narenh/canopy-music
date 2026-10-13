@@ -580,8 +580,9 @@ struct TVPartyView: View {
                             LinearGradient(colors: [.black, .clear], startPoint: .top, endPoint: .bottom).frame(height: 90)
                         }
                     }
-                    // Hidden while the host has queueing from phones off.
-                    if session.phonesCanQueue {
+                    // Hidden while the host has queueing from phones off, and while there's no server
+                    // to scan to (starting, restarting after the background, or failed).
+                    if session.phonesCanQueue, model.shownGuestURL != nil {
                         TVJoinCard()
                     }
                 }

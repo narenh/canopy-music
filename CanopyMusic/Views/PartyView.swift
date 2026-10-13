@@ -69,7 +69,8 @@ struct PartyView: View {
         .background { ThemedBackground(track: current?.track, theme: theme) }
         .overlay { FlightLayer(flights: flights, destinations: rowFrames, fallback: fallbackDestination) }
         .environment(\.artworkTheme, theme)
-        .animation(.easeInOut(duration: 1.2), value: theme)
+        // The song's colours change with the background, over the same 2 s.
+        .animation(.linear(duration: 2), value: theme)
         .preferredColorScheme(.dark)
         .statusBarHidden()
         .persistentSystemOverlays(.hidden)

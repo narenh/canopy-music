@@ -84,7 +84,9 @@ private struct BlurredArtworkLayer: View {
             guard let url, loaded == nil, source.blurredImage(for: url) == nil else { return }
             let image = await source.loadBlurred(url)
             guard !Task.isCancelled, let image else { return }
-            withAnimation(.easeInOut(duration: 1.2)) { loaded = image }
+            // Arriving after the song change, so outside its animation: the same 2 s linear fade
+            // the song change has on both apps.
+            withAnimation(.linear(duration: 2)) { loaded = image }
         }
     }
 }

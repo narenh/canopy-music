@@ -55,7 +55,9 @@ final class SpotifyEngine: FollowingPlaybackEngine {
         poller = Task { [weak self] in
             while !Task.isCancelled {
                 try? await Task.sleep(for: Self.pollInterval)
-                await self?.poll()
+                // A dropped engine (a service change) stops polling.
+                guard let self else { return }
+                await self.poll()
             }
         }
     }

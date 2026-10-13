@@ -12,8 +12,14 @@ import UIKit
 @main
 struct CanopyMusicTVApp: App {
     @State private var model = TVModel()
+    @Environment(\.scenePhase) private var scenePhase
 
     var body: some Scene {
+        scene
+            .onChange(of: scenePhase) { _, phase in model.scenePhaseChanged(phase) }
+    }
+
+    private var scene: some Scene {
         WindowGroup {
             #if DEBUG
             if ProcessInfo.processInfo.arguments.contains("-playTest") {
@@ -281,6 +287,36 @@ final class TVModel {
     func playPause() {
         guard role == .hub || session.displaysCanControl else { return }
         Task { await session.togglePlayPause() }
+    }
+
+    /// Set when the app goes to the background (Home, another app).
+    @ObservationIgnored private var wasBackgrounded = false
+
+    /// tvOS closes an app's listening sockets while it's in the background, so a hub coming back
+    /// starts its server, `.local` name and announcement again (as the iPad does).
+    func scenePhaseChanged(_ phase: ScenePhase) {
+        switch phase {
+        case .background:
+            wasBackgrounded = true
+        case .active:
+            guard wasBackgrounded else { return }
+            wasBackgrounded = false
+            guard role == .hub else { return }
+            debugLog("back from the background: restarting the server")
+            serverTask?.cancel()
+            serverTask = nil
+            let old = server
+            server = nil
+            hostname.unregister()
+            advertiser.stop()
+            Task {
+                await old?.stop()
+                guard role == .hub, server == nil else { return }
+                await startServer()
+            }
+        default:
+            break
+        }
     }
 
     private func startServer() async {

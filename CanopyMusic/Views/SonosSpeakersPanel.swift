@@ -47,30 +47,16 @@ struct SonosSpeakersPanel: View {
     private var ticked: [SonosPlayer] { household.rooms.filter { model.isSonosRoomTicked($0.id) } }
 
     var body: some View {
-        ScrollView {
-            VStack(alignment: .leading, spacing: 4) {
-                HStack(alignment: .firstTextBaseline) {
-                    Text("Speakers").font(.headline)
-                    Spacer()
-                    Text("Sonos").font(.caption).foregroundStyle(.secondary)
-                }
-                .padding(.horizontal, 18)
-                .padding(.bottom, 6)
-                if ticked.count > 1 {
-                    GroupVolume(rooms: ticked)
-                        .padding(.horizontal, 14)
-                        .padding(.bottom, 6)
-                }
-                ForEach(household.rooms) { room in
-                    SonosPanelRow(room: room, onlyTicked: ticked.count == 1 && model.isSonosRoomTicked(room.id))
-                }
+        // As tall as the rooms need, so the popover fits them as rooms are ticked and readings
+        // arrive; it only scrolls when the popover has less room than that (from the top, so the
+        // header and All Speakers stay in view).
+        FitHeight {
+            ScrollView {
+                content
             }
-            .padding(.vertical, 14)
+            .scrollBounceBehavior(.basedOnSize)
         }
-        .scrollBounceBehavior(.basedOnSize)
         .frame(width: 340)
-        .frame(maxHeight: 520)
-        .fixedSize(horizontal: false, vertical: true)
         .preferredColorScheme(.dark)
         .tint(.white)
         .task {
@@ -79,6 +65,46 @@ struct SonosSpeakersPanel: View {
                 try? await Task.sleep(for: .seconds(2))
             }
         }
+    }
+
+    private var content: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            HStack(alignment: .firstTextBaseline) {
+                Text("Speakers").font(.headline)
+                Spacer()
+                Text("Sonos").font(.caption).foregroundStyle(.secondary)
+            }
+            .padding(.horizontal, 18)
+            .padding(.bottom, 6)
+            if ticked.count > 1 {
+                GroupVolume(rooms: ticked)
+                    .padding(.horizontal, 14)
+                    .padding(.bottom, 6)
+            }
+            ForEach(household.rooms) { room in
+                SonosPanelRow(room: room, onlyTicked: ticked.count == 1 && model.isSonosRoomTicked(room.id))
+            }
+        }
+        // The last row brings 6 of its own below it (and a slider a little more), so the bottom
+        // needs less than the top for the two to look even.
+        .padding(.top, 14)
+        .padding(.bottom, 8)
+    }
+}
+
+/// Sizes its one subview (a ScrollView) to the subview's ideal height, or less when offered less,
+/// and pins it to the top. A popover sizes itself from this, so it always fits the content; and
+/// in the moment before the popover catches up with taller content, the ScrollView is cut short
+/// at the bottom instead of the overflow being centred, which hid the header and All Speakers.
+private struct FitHeight: Layout {
+    func sizeThatFits(proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) -> CGSize {
+        guard let view = subviews.first else { return .zero }
+        let ideal = view.sizeThatFits(ProposedViewSize(width: proposal.width, height: nil))
+        return CGSize(width: ideal.width, height: min(ideal.height, proposal.height ?? .infinity))
+    }
+
+    func placeSubviews(in bounds: CGRect, proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) {
+        subviews.first?.place(at: bounds.origin, anchor: .topLeading, proposal: ProposedViewSize(bounds.size))
     }
 }
 

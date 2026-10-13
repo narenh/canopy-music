@@ -144,8 +144,6 @@ final class AppModel {
         didSet {
             defaults.set(phoneReorderEnabled, forKey: "phoneReorderEnabled")
             session.phonesCanReorder = phoneReorderEnabled
-        configureHubSession()
-        connectHostControl()
         }
     }
 
@@ -351,7 +349,9 @@ final class AppModel {
         defaults.set(next.rawValue, forKey: "provider")
         session = Self.makeSession(next, spotify: spotifyAPI)
         session.phonesCanReorder = phoneReorderEnabled
-        watchZoneStart()
+        // The new session gets this zone's settings, host control and web-page hooks, as at launch.
+        configureHubSession()
+        connectHostControl()
         libraryPlaylistsCache = []
         applyCrossfade()
         Task { await restartServer() }

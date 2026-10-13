@@ -10,6 +10,8 @@ struct TVRootView: View {
     /// Menu › End once songs guests added have played: the sheet that saves them first.
     @State private var endingWithSave = false
     @State private var easterEgg = LyricsEasterEgg()
+    /// The song the party screen shows, while it's there (`TVShownSongKey`).
+    @State private var partySong: TVShownSong?
 
     /// `-capture` (debug builds, as on the iPad): screenshots for the App Store and the README,
     /// so the lyrics takeover never shows in them.
@@ -31,11 +33,13 @@ struct TVRootView: View {
         // The same takeover as the iPad's, as a hub or a display (a display's time comes from
         // its hub's snapshots).
         let takeover = model.role == .choosing || Self.capturing ? nil : easterEgg.takeover(for: current)
+        // The party screen's song while it's showing, which changes as its slide starts.
+        let backgroundItem = partySong.map(\.item) ?? current
         ZStack {
-            TVBackground(track: current?.track, theme: ArtworkTheme(current?.track.colors))
-                // Changes to the new song's evenly over the party screen's slide to it
-                // (`TVPartyView.showCurrent`).
-                .animation(.linear(duration: TVPartyView.slide), value: current?.id)
+            TVBackground(track: backgroundItem?.track, theme: ArtworkTheme(backgroundItem?.track.colors))
+                // Changes evenly to the new song's, starting with the party screen's slide and
+                // settling after it (`TVPartyView.showCurrent`).
+                .animation(.linear(duration: 1.5), value: backgroundItem?.id)
             switch model.role {
             case .choosing:
                 TVZoneListView()
@@ -57,6 +61,7 @@ struct TVRootView: View {
             }
         }
         .animation(.easeInOut(duration: 0.5), value: model.role)
+        .onPreferenceChange(TVShownSongKey.self) { partySong = $0 }
         // A zone (hub or display) keeps the screen awake while music plays, unless its hub allows
         // the screensaver then too; paused, and at the zone list, tvOS's screensaver takes over.
         .onChange(of: keepsScreenAwake, initial: true) { _, awake in
@@ -492,7 +497,7 @@ struct TVPartyView: View {
     @State private var stepper = RemoteStepper()
     /// The song the now-playing column shows. When the song changes (remote, a phone, or the song
     /// ending) the new song's art and text push the old one's out sideways, like turning a page
-    /// (`showCurrent`); the background changes evenly over the same time.
+    /// (`showCurrent`); the background changes evenly from the same moment, settling after it.
     @State private var shown: QueueItem?
     @State private var started = false
     /// Which way the last slide went: forward brings the new song in from the right.
@@ -501,7 +506,9 @@ struct TVPartyView: View {
     @State private var slideEnds: ContinuousClock.Instant?
     /// Width of the now-playing column, edge to edge (the slide's clip).
     @State private var columnWidth: CGFloat = 1000
-    static let slide = 0.28
+    static let slide = 0.5
+    /// Fast at first, then slowing to a stop: the pages arrive and settle (an ease-out quint).
+    static let slideAnimation = Animation.timingCurve(0.22, 1, 0.36, 1, duration: slide)
     /// The logo's visible top and left margin from the screen edges, level with the capitals in
     /// "Up next". The image has 6.5pt of empty space above the arc and 1pt to its left.
     static let logoInset: CGFloat = 71
@@ -599,6 +606,7 @@ struct TVPartyView: View {
         .onMoveCommand(perform: move)
         // A newer change cancels this one part way, and `showCurrent` goes on to the newest song.
         .task(id: model.session.state.current?.id) { await showCurrent() }
+        .preference(key: TVShownSongKey.self, value: TVShownSong(item: current))
         #if DEBUG
         // `-autoStep`: 6 s after the party shows, presses right three times at once, then left
         // 2 s later (simctl can't press the remote's buttons). Only the first right should go,
@@ -675,9 +683,18 @@ struct TVPartyView: View {
             do { try await Task.sleep(until: slideEnds, clock: .continuous) } catch { return }
         }
         guard shown?.id != session.state.current?.id else { return }
+        // The new song's art is loaded before it slides in (Up next has usually loaded it
+        // already); after a moment it slides anyway, and the art shows when it's loaded.
+        if let url = TVArtwork.url(for: session.state.current?.track) {
+            let start = ContinuousClock.now
+            let ready = await TVArtworkCache.shared.ready(url, within: .milliseconds(300))
+            model.debugLog("artwork \(ready ? "ready" : "not ready") after \(ContinuousClock.now - start)")
+            if Task.isCancelled { return }
+        }
         let goingForward = slidesForward(from: shown)
         slideEnds = .now + .seconds(Self.slide)
-        withAnimation(.easeInOut(duration: Self.slide)) {
+        // Both pages move in this one animation, so they stay together.
+        withAnimation(Self.slideAnimation) {
             forward = goingForward
             shown = session.state.current
         }
@@ -693,6 +710,20 @@ struct TVPartyView: View {
             let went = await stepper.step(session, forward: forward)
             model.debugLog("remote \(forward ? "right" : "left"): \(went ? "now \(session.state.current?.track.title ?? "-")" : "ignored")")
         }
+    }
+}
+
+/// The song the party screen shows (its `nil` is "Nothing playing"), for the background to follow.
+struct TVShownSong: Equatable {
+    let item: QueueItem?
+}
+
+/// Set by the party screen; nil while it isn't showing.
+struct TVShownSongKey: PreferenceKey {
+    static let defaultValue: TVShownSong? = nil
+
+    static func reduce(value: inout TVShownSong?, nextValue: () -> TVShownSong?) {
+        value = value ?? nextValue()
     }
 }
 
@@ -853,6 +884,19 @@ struct TVArtwork: View {
     let track: QueueTrack?
     var cornerRadius: CGFloat = 8
 
+    /// The image a track shows.
+    static func url(for track: QueueTrack?) -> URL? {
+        #if DEBUG
+        // `-demoArtworkURLs`: demo tracks (which have none) get a remote image each, to try the
+        // artwork's loading in the simulator.
+        if track?.artworkURL == nil, track?.thumbnailURL == nil, let id = track?.id,
+           ProcessInfo.processInfo.arguments.contains("-demoArtworkURLs") {
+            return URL(string: "https://picsum.photos/seed/\(id)/600")
+        }
+        #endif
+        return track?.artworkURL ?? track?.thumbnailURL
+    }
+
     var body: some View {
         ZStack {
             LinearGradient(
@@ -864,12 +908,92 @@ struct TVArtwork: View {
             )
             // In an overlay so a filled image can't grow the view past the size it's given.
             Color.clear.overlay {
-                if let url = track?.artworkURL ?? track?.thumbnailURL {
-                    AsyncImage(url: url) { $0.resizable().scaledToFill() } placeholder: { Color.clear }
+                if let url = Self.url(for: track) {
+                    TVArtworkImage(url: url).id(url)
                 }
             }
         }
         .clipShape(RoundedRectangle(cornerRadius: cornerRadius, style: .continuous))
+    }
+}
+
+/// Artwork from `TVArtworkCache`: an image already loaded shows from the first frame (so a page
+/// sliding in or out has its real art), and one that isn't loads and then shows.
+private struct TVArtworkImage: View {
+    let url: URL
+    @State private var loaded: UIImage?
+
+    var body: some View {
+        if let image = loaded ?? TVArtworkCache.shared.image(for: url) {
+            Image(uiImage: image).resizable().scaledToFill()
+        } else {
+            Color.clear.task { loaded = await TVArtworkCache.shared.load(url) }
+        }
+    }
+}
+
+/// Decoded artwork in memory, by URL, shared by every artwork on the TV (the party screen loads
+/// a song's before sliding to it, and Up next's rows load the songs coming up).
+@MainActor
+final class TVArtworkCache {
+    static let shared = TVArtworkCache()
+    private let images = NSCache<NSURL, UIImage>()
+    private var loading: [URL: Task<UIImage?, Never>] = [:]
+
+    private init() {
+        images.countLimit = 80
+    }
+
+    func image(for url: URL) -> UIImage? {
+        images.object(forKey: url as NSURL)
+    }
+
+    /// The image at `url`, loaded and decoded once however many ask; nil if it fails.
+    func load(_ url: URL) async -> UIImage? {
+        if let image = image(for: url) { return image }
+        if let task = loading[url] { return await task.value }
+        let task = Task<UIImage?, Never> {
+            guard let (data, _) = try? await URLSession.shared.data(from: url),
+                  let image = await UIImage(data: data)?.byPreparingForDisplay() else { return nil }
+            return image
+        }
+        loading[url] = task
+        let image = await task.value
+        loading[url] = nil
+        if let image { images.setObject(image, forKey: url as NSURL) }
+        return image
+    }
+
+    /// Waits until the image at `url` is ready, or `limit` has passed (it keeps loading then).
+    /// Returns whether it's ready.
+    func ready(_ url: URL, within limit: Duration) async -> Bool {
+        if image(for: url) != nil { return true }
+        await withCheckedContinuation { continuation in
+            let once = Once(continuation)
+            Task { @MainActor in
+                _ = await self.load(url)
+                once.resume()
+            }
+            Task { @MainActor in
+                try? await Task.sleep(for: limit)
+                once.resume()
+            }
+        }
+        return image(for: url) != nil
+    }
+
+    /// Resumes a wait once, whichever finishes first.
+    @MainActor private final class Once {
+        private var continuation: CheckedContinuation<Void, Never>?
+
+        init(_ continuation: CheckedContinuation<Void, Never>) {
+            self.continuation = continuation
+        }
+
+        func resume() {
+            continuation?.resume()
+            continuation = nil
+        }
     }
 }
 

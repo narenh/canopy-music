@@ -28,7 +28,11 @@ struct SpotifyStatusRows: View {
                     }
                 }
             }
-            .task { if model.spotifyDisplayName == nil { await model.refreshSpotifyProfile() } }
+            .task {
+                if model.spotifyDisplayName == nil || model.spotifyAuth.accountFingerprint == nil {
+                    await model.refreshSpotifyProfile()
+                }
+            }
 
             Button {
                 model.isPickingSpotifyDevice = true

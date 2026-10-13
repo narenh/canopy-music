@@ -18,6 +18,10 @@ final class SpotifyEngine: PlaybackEngine {
     private var reportedEnd = false
     private var lastPlaying: Bool?
     private var poller: Task<Void, Never>?
+    /// This engine has started playback. Spotify plays one stream per account, so one that
+    /// hasn't must not pause it: what's playing is another zone's (or the Spotify app's), and
+    /// dropping an unused session (`PartySession.shutdown`, e.g. joining that zone) pauses.
+    private var hasStartedPlayback = false
     /// Skip polling while a command we sent is still settling on Spotify's side.
     private var settleUntil = Date.distantPast
     /// When we last asked Spotify to play a specific track, and whether we've retried it.
@@ -59,6 +63,7 @@ final class SpotifyEngine: PlaybackEngine {
         stagedURI = nil
         reportedEnd = false
         pausedByUs = false
+        hasStartedPlayback = true
         do {
             try await api.send("PUT", "/me/player/play", query: deviceQuery, body: Body(uris: [track.id]))
         } catch SpotifyError.noDevice {
@@ -81,6 +86,7 @@ final class SpotifyEngine: PlaybackEngine {
 
     func resume() async throws {
         pausedByUs = false
+        hasStartedPlayback = true
         settleUntil = Date().addingTimeInterval(1.5)
         do {
             try await api.send("PUT", "/me/player/play", query: deviceQuery)
@@ -103,6 +109,7 @@ final class SpotifyEngine: PlaybackEngine {
         pausedByUs = true
         settleUntil = Date().addingTimeInterval(1.5)
         cache(playing: false, time: currentTime)
+        guard hasStartedPlayback else { return }
         Task { try? await api.send("PUT", "/me/player/pause", query: deviceQuery) }
     }
 

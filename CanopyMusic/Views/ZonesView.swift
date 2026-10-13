@@ -12,7 +12,7 @@ struct ZoneListView: View {
     @State private var confirmingCreate = false
 
     var body: some View {
-        let zones = model.zoneBrowser.zones.filter { $0.hubID != model.deviceID }
+        let zones = model.otherZones
         ZStack {
             LinearGradient(colors: [Color(white: 0.13), Color(white: 0.06)], startPoint: .top, endPoint: .bottom)
                 .ignoresSafeArea()
@@ -36,7 +36,7 @@ struct ZoneListView: View {
                         }
                         Section {
                             ZoneRow(icon: "plus", title: "Create a new zone", subtitle: "Music plays from this \(DeviceKind.noun)") {
-                                if model.canResumeZone { confirmingCreate = true } else { model.beginCreatingZone() }
+                                createZone()
                             }
                         }
                     }
@@ -72,6 +72,12 @@ struct ZoneListView: View {
         // With `-autoCreate <name>`, presses Create 8 s later and creates <name> without a PIN.
         .task {
             let args = ProcessInfo.processInfo.arguments
+            // `-fakeSpotifyConflict <zone>`: presses "Create a new zone", which asks about that zone.
+            if args.contains("-fakeSpotifyConflict") {
+                try? await Task.sleep(for: .seconds(1))
+                createZone()
+                return
+            }
             guard args.contains("-confirmCreate"), model.canResumeZone else { return }
             confirmingCreate = true
             guard let i = args.firstIndex(of: "-autoCreate"), i + 1 < args.count else { return }
@@ -92,6 +98,12 @@ struct ZoneListView: View {
             model.join(zone)
         }
         #endif
+    }
+
+    /// With Spotify, another zone on the account asks first (`AppModel.spotifyConflict`).
+    private func createZone() {
+        guard model.mayCreateZone() else { return }
+        if model.canResumeZone { confirmingCreate = true } else { model.beginCreatingZone() }
     }
 
     private func zoneRows(_ zones: [ZoneListing]) -> some View {

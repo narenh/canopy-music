@@ -1,4 +1,5 @@
 import AuthenticationServices
+import CanopyMusicCore
 import CryptoKit
 import Foundation
 import Security
@@ -65,13 +66,32 @@ final class SpotifyAuth {
     }
 
     private(set) var isSignedIn: Bool
+    /// This sign-in's account as zones announce it (`SpotifyAccount.fingerprint`), never the id
+    /// itself. Fetched once per sign-in (`AppModel.refreshSpotifyProfile`), so nil until then
+    /// (e.g. offline); signing out or in again clears it.
+    private(set) var accountFingerprint: String? {
+        didSet {
+            UserDefaults.standard.set(accountFingerprint, forKey: Self.accountDefaultsKey)
+            if accountFingerprint != oldValue { onAccountChanged?() }
+        }
+    }
+    /// Called when `accountFingerprint` changes (the zone re-announces it).
+    @ObservationIgnored var onAccountChanged: (@MainActor () -> Void)?
     @ObservationIgnored private var tokens: Tokens?
     @ObservationIgnored private var refreshTask: Task<String, Error>?
     @ObservationIgnored private let presenter = PresentationAnchor()
+    private static let accountDefaultsKey = "spotifyAccount"
 
     init() {
         tokens = Keychain.load(Tokens.self)
         isSignedIn = tokens != nil
+        accountFingerprint = tokens == nil ? nil : UserDefaults.standard.string(forKey: Self.accountDefaultsKey)
+    }
+
+    /// The signed-in account's user id (from `GET /v1/me`); only its fingerprint is kept.
+    func setAccount(userID: String) {
+        guard isSignedIn, !userID.isEmpty else { return }
+        accountFingerprint = SpotifyAccount.fingerprint(userID: userID)
     }
 
     /// The sign-in allows saving playlists. Sign-ins from before that was asked for need to sign
@@ -115,12 +135,15 @@ final class SpotifyAuth {
             "client_id": SpotifyConfig.clientID,
             "code_verifier": verifier,
         ])
+        // Possibly another account: fetched again for this sign-in.
+        accountFingerprint = nil
     }
 
     func signOut() {
         tokens = nil
         Keychain.delete()
         isSignedIn = false
+        accountFingerprint = nil
     }
 
     /// A valid access token, refreshing it if it's about to expire.

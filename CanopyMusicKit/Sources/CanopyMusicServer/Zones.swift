@@ -9,6 +9,8 @@ import Observation
 
 public enum ZoneService {
     public static let type = "_canopymusic._tcp"
+    /// TXT key for the Spotify account fingerprint (Spotify hubs only; older peers ignore it).
+    public static let spotifyAccountKey = "spotify"
 }
 
 /// A zone found on the network.
@@ -24,8 +26,32 @@ public struct ZoneListing: Identifiable, Hashable, Sendable {
     /// Identifies the hub device, so a device can tell its own zone apart.
     public var hubID: String?
     public var nowPlaying: String?
+    /// The Spotify account the hub plays from (`SpotifyAccount.fingerprint`); nil for Apple Music
+    /// zones, TVs, hubs not signed in yet and older hubs.
+    public var spotifyAccount: String?
+
+    public init(id: String, name: String, kind: HubKind, device: String? = nil, address: String,
+                hubID: String? = nil, nowPlaying: String? = nil, spotifyAccount: String? = nil) {
+        self.id = id
+        self.name = name
+        self.kind = kind
+        self.device = device
+        self.address = address
+        self.hubID = hubID
+        self.nowPlaying = nowPlaying
+        self.spotifyAccount = spotifyAccount
+    }
 
     public var baseURL: URL? { URL(string: "http://\(address)") }
+
+    /// Another zone already using this Spotify account (`fingerprint`), from the zones on the
+    /// network. Every zone listed counts as active: a hub announces its zone only while it's
+    /// running. A device's own zone (`ownHubID`) never counts, and an unknown account (not
+    /// fetched yet) matches nothing.
+    public static func usingSpotifyAccount(_ fingerprint: String?, in zones: [ZoneListing], ownHubID: String) -> ZoneListing? {
+        guard let fingerprint, !fingerprint.isEmpty else { return nil }
+        return zones.first { $0.hubID != ownHubID && $0.spotifyAccount == fingerprint }
+    }
 }
 
 // MARK: - Hub: advertise
@@ -138,7 +164,8 @@ public final class ZoneBrowser {
             device: txt["device"].flatMap { $0.isEmpty ? nil : $0 },
             address: address,
             hubID: txt["hub"],
-            nowPlaying: txt["playing"].flatMap { $0.isEmpty ? nil : $0 }
+            nowPlaying: txt["playing"].flatMap { $0.isEmpty ? nil : $0 },
+            spotifyAccount: txt[ZoneService.spotifyAccountKey].flatMap { $0.isEmpty ? nil : $0 }
         )
     }
 }

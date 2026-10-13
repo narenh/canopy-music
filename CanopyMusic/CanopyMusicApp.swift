@@ -1,4 +1,5 @@
 import CanopyMusicCore
+import CanopyMusicServer
 import SwiftUI
 import UIKit
 
@@ -195,6 +196,17 @@ struct RootView: View {
             }
         }
         .animation(.easeInOut(duration: 0.6), value: takeover?.item.id)
+        // Spotify plays one stream per account: another zone already on this device's account
+        // asks before this device starts using it (`AppModel.spotifyConflict`).
+        .alert("Another zone is using this Spotify account",
+               isPresented: Binding(get: { model.spotifyConflict != nil }, set: { _ in }),
+               presenting: model.spotifyConflict) { _ in
+            Button("Cancel", role: .cancel) { model.cancelSpotifyConflict() }
+            Button("Join") { model.joinSpotifyConflict() }
+        } message: { conflict in
+            Text("End \(conflict.zone.name) to start a new one from here, or join it as a display.")
+        }
+        .onChange(of: model.otherZones) { model.recheckSpotifyAccount() }
         .task(id: current?.id) {
             model.zoneSongChanged()
             if let current, easterEgg.matches(current.track) { await easterEgg.loadIfNeeded() }

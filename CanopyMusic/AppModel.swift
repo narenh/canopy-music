@@ -217,9 +217,15 @@ final class AppModel {
         var role = ZoneRole.choosing
         var locked = false
         if record.restoresOnLaunch, let provider, Self.canRestore(provider, spotifyAuth: spotifyAuth) {
-            role = .hub
-            locked = record.wasLocked
-            isRestoringZone = true
+            if provider == .spotify, spotifyAuth.accountFingerprint != nil {
+                // Spotify: only once no other zone turns out to be using the account, so it starts
+                // at the list and `startOnLaunch()` goes back in (or asks there).
+                restoresAfterSpotifyCheck = true
+            } else {
+                role = .hub
+                locked = record.wasLocked
+                isRestoringZone = true
+            }
         }
         #if DEBUG
         // Debug launches that go straight to a party.
@@ -230,6 +236,7 @@ final class AppModel {
             role = .hub
             locked = false
             isRestoringZone = false
+            restoresAfterSpotifyCheck = false
             // Hosting, as `becomeHub()` records, so ending it and relaunching can be tested.
             record.hosting(fresh: true)
         }
@@ -285,7 +292,21 @@ final class AppModel {
             spotifyDevices = state == "selfOffline" ? [tv] : [own, tv]
             spotifyDevicesLoaded = true
         }
+        // `-fakeSpotifyConflict <zone>`: Spotify, with a zone of that name on the network using the
+        // same account (Spotify can't be reached in the simulator). The zone list then presses
+        // "Create a new zone", which asks.
+        if let i = args.firstIndex(of: "-fakeSpotifyConflict"), i + 1 < args.count {
+            self.provider = .spotify
+            let account = SpotifyAccount.fingerprint(userID: "debug-user")
+            debugSpotifyAccount = account
+            debugZones = [ZoneListing(id: args[i + 1], name: args[i + 1], kind: .ipad, address: "192.0.2.1",
+                                      hubID: "debug-other-hub", nowPlaying: "Dreams – Fleetwood Mac", spotifyAccount: account)]
+        }
         #endif
+        spotifyAuth.onAccountChanged = { [weak self] in
+            self?.advertiseZone()
+            self?.recheckSpotifyAccount()
+        }
 
         URLCache.shared = URLCache(memoryCapacity: 64 << 20, diskCapacity: 512 << 20)
 
@@ -352,10 +373,17 @@ final class AppModel {
         #endif
     }
 
-    /// First-launch choice; always records it, even if it matches the default.
-    func chooseProvider(_ next: Provider) {
+    /// First-launch choice; always records it, even if it matches the default. Switching this
+    /// zone to Spotify first checks no other zone is using the account: false (and the alert)
+    /// if one is, keeping the current service.
+    @discardableResult
+    func chooseProvider(_ next: Provider) -> Bool {
+        if next == .spotify, provider != .spotify, zoneRole == .hub, !spotifyAccountIsFree(for: .switchProvider) {
+            return false
+        }
         setProvider(next)
         defaults.set(next.rawValue, forKey: "provider")
+        return true
     }
 
     func changeService() {
@@ -377,6 +405,7 @@ final class AppModel {
         defaults.set(next.rawValue, forKey: "provider")
         session = Self.makeSession(next, spotify: spotifyAPI)
         session.phonesCanReorder = phoneReorderEnabled
+        songStartedWhileHosting = false
         // The new session gets this zone's settings, host control and web-page hooks, as at launch.
         configureHubSession()
         connectHostControl()
@@ -408,11 +437,14 @@ final class AppModel {
         }
     }
 
+    /// The signed-in name, and the account's id for the zone announcement (only its fingerprint
+    /// is kept, `SpotifyAuth.accountFingerprint`).
     func refreshSpotifyProfile() async {
-        struct Me: Decodable { var display_name: String? }
+        struct Me: Decodable { var id: String?; var display_name: String? }
         guard spotifyAuth.isSignedIn,
               let me = try? await spotifyAPI.get("/me", as: Me.self) else { return }
         spotifyDisplayName = me.display_name
+        if let id = me.id { spotifyAuth.setAccount(userID: id) }
     }
 
     /// Quietly refreshes the device list; failures keep the last list rather than alerting.
@@ -549,7 +581,131 @@ final class AppModel {
     @ObservationIgnored private let zoneRecord = ZoneRecord()
     /// Launching straight back into the zone; `startOnLaunch()` falls back to the list if it can't.
     @ObservationIgnored private var isRestoringZone = false
+    /// A Spotify zone to go straight back into once no other zone turns out to be using the account.
+    @ObservationIgnored private var restoresAfterSpotifyCheck = false
     @ObservationIgnored private var advertisedPlaying: String?
+    /// A song has started since this device last became a hub (or changed service).
+    @ObservationIgnored private var songStartedWhileHosting = false
+    #if DEBUG
+    /// `-fakeSpotifyConflict`: a made-up account and a zone using it.
+    @ObservationIgnored private var debugSpotifyAccount: String?
+    private var debugZones: [ZoneListing] = []
+    #endif
+
+    /// Zones on the network other than this device's own.
+    var otherZones: [ZoneListing] {
+        var zones = zoneBrowser.zones
+        #if DEBUG
+        zones += debugZones
+        #endif
+        return zones.filter { $0.hubID != deviceID }
+    }
+
+    // MARK: One zone per Spotify account
+
+    /// Another zone using this device's Spotify account, and what this device was about to do
+    /// (Spotify plays one stream per account; two zones on one would fight over it).
+    struct SpotifyAccountConflict {
+        enum Trigger {
+            /// "Create a new zone" on the list, or its last step.
+            case create, finishCreate
+            /// Resume on the list, or the automatic restore at launch.
+            case resume, restore
+            /// Changing this zone's service to Spotify.
+            case switchProvider
+            /// This device's Spotify zone is set up but nothing has played yet.
+            case hosting
+        }
+        let zone: ZoneListing
+        let trigger: Trigger
+    }
+    /// Shows "Another zone is using this Spotify account" until it's answered.
+    private(set) var spotifyConflict: SpotifyAccountConflict?
+
+    /// The account as zones announce it; nil while it isn't known (not fetched yet, e.g. offline).
+    var spotifyAccountFingerprint: String? {
+        #if DEBUG
+        if let debugSpotifyAccount { return debugSpotifyAccount }
+        #endif
+        return spotifyAuth.isSignedIn ? spotifyAuth.accountFingerprint : nil
+    }
+
+    /// Before this device starts using its Spotify account: true if no zone on the network is
+    /// already; otherwise asks (`spotifyConflict`) and nothing goes ahead until it's answered.
+    /// An account not known yet doesn't block.
+    private func spotifyAccountIsFree(for trigger: SpotifyAccountConflict.Trigger) -> Bool {
+        guard let zone = ZoneListing.usingSpotifyAccount(spotifyAccountFingerprint, in: otherZones, ownHubID: deviceID) else {
+            return true
+        }
+        spotifyConflict = SpotifyAccountConflict(zone: zone, trigger: trigger)
+        return false
+    }
+
+    /// When the zones on the network (or the account) change: a zone on this account appearing
+    /// while this device's Spotify zone hasn't started playing asks too.
+    func recheckSpotifyAccount() {
+        guard spotifyConflict == nil, zoneRole == .hub, provider == .spotify,
+              !songStartedWhileHosting, !session.isPlaying else { return }
+        _ = spotifyAccountIsFree(for: .hosting)
+    }
+
+    /// Cancel: what asked doesn't happen, and the other zone is left alone.
+    func cancelSpotifyConflict() {
+        guard let conflict = spotifyConflict else { return }
+        spotifyConflict = nil
+        switch conflict.trigger {
+        case .create, .resume, .restore:
+            break // still on the zone list
+        case .finishCreate:
+            zoneRole = .choosing
+        case .switchProvider:
+            // The previous service stays; back to host mode if this was Change Service.
+            if isChangingService { finishOnboarding() }
+        case .hosting:
+            stopHostingForSpotify()
+        }
+    }
+
+    /// Join: shows the other zone as a display instead; no Spotify session is kept here.
+    func joinSpotifyConflict() {
+        guard let conflict = spotifyConflict else { return }
+        spotifyConflict = nil
+        if conflict.trigger == .switchProvider || conflict.trigger == .hosting {
+            isChangingService = false
+            if provider != .none { needsOnboarding = false }
+        }
+        // A zone here where music never started isn't one to come back to (as at launch).
+        if conflict.trigger == .hosting, !zoneRecord.hasStarted { clearZone() }
+        join(conflict.zone)
+    }
+
+    /// Back to the zone list without starting: a zone where music has played stays resumable,
+    /// one where it never has is ended (as a launch would).
+    private func stopHostingForSpotify() {
+        guard zoneRecord.hasStarted else {
+            endZone()
+            return
+        }
+        zoneRecord.stoppedHosting()
+        zoneRole = .choosing
+        isLocked = false
+        UIApplication.shared.isIdleTimerDisabled = false
+        Task { await stopServer() }
+    }
+
+    /// "Create a new zone" on the list: with Spotify, false (and the alert) if another zone is
+    /// using the account.
+    func mayCreateZone() -> Bool {
+        provider != .spotify || spotifyAccountIsFree(for: .create)
+    }
+
+    /// Launch: the zone browse's first results (or a definite "nothing"), for at most `seconds`.
+    private func waitForZoneBrowse(seconds: Double) async {
+        let deadline = Date().addingTimeInterval(seconds)
+        while !zoneBrowser.hasSearched, Date() < deadline {
+            try? await Task.sleep(for: .milliseconds(100))
+        }
+    }
 
     /// This iPad has a zone that wasn't ended (and didn't come back by itself at launch), so the
     /// list offers to resume it, and creating a new zone asks first. Ending the zone clears it.
@@ -574,6 +730,7 @@ final class AppModel {
 
     /// A new zone always starts empty: a zone this iPad still had is ended first (the list asked).
     func finishCreatingZone(name: String, pin: String?) {
+        guard provider != .spotify || spotifyAccountIsFree(for: .finishCreate) else { return }
         clearZone()
         let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
         zoneName = trimmed.isEmpty ? DeviceKind.name : String(trimmed.prefix(40))
@@ -583,11 +740,13 @@ final class AppModel {
 
     /// Back into the zone this iPad had, locked if it was: host mode stays behind the PIN.
     func resumeZone() {
+        guard provider != .spotify || spotifyAccountIsFree(for: .resume) else { return }
         becomeHub(fresh: false)
     }
 
     private func becomeHub(fresh: Bool) {
         let locked = !fresh && zoneRecord.wasLocked
+        songStartedWhileHosting = false
         zoneRole = .hub
         zoneRecord.hosting(fresh: fresh)
         if locked { lock() } else { isLocked = false }
@@ -601,6 +760,20 @@ final class AppModel {
     /// Launch: starts the phone server, and if this launch went straight back into the zone but it
     /// can't be announced, falls back to the zone list (which offers Resume), keeping the zone.
     func startOnLaunch() async {
+        // Zones on the network: the list, and checking for another zone on this Spotify account.
+        zoneBrowser.start()
+        // A sign-in from before zones announced their account (or one made offline).
+        if spotifyAuth.isSignedIn, spotifyAuth.accountFingerprint == nil {
+            Task { await refreshSpotifyProfile() }
+        }
+        if restoresAfterSpotifyCheck {
+            restoresAfterSpotifyCheck = false
+            await waitForZoneBrowse(seconds: 3)
+            // Something chosen on the list meanwhile wins; a zone on this account asks there.
+            guard zoneRole == .choosing, spotifyConflict == nil, spotifyAccountIsFree(for: .restore) else { return }
+            becomeHub(fresh: false)
+            isRestoringZone = true
+        }
         if isRestoringZone, isLocked { lock() } // keeps the screen awake, as locking does
         await startServerIfNeeded()
         guard isRestoringZone else { return }
@@ -685,6 +858,11 @@ final class AppModel {
         ]
         // Which Mac this is, beside `kind=ipad` (older peers ignore it); nothing on an iPad.
         if let device = DeviceKind.device { txt["device"] = device }
+        // The Spotify account (a fingerprint, never the id or name), so another device can see
+        // it's in use before starting a zone on it. Only once known; never for Apple Music.
+        if provider == .spotify, let account = spotifyAccountFingerprint {
+            txt[ZoneService.spotifyAccountKey] = account
+        }
         zoneAdvertiser.advertise(name: zoneName, port: server.port, txt: txt)
     }
 
@@ -733,6 +911,7 @@ final class AppModel {
     private func watchZoneStart() {
         session.onSongStarted = { [weak self] in
             guard let self, self.zoneRole == .hub else { return }
+            self.songStartedWhileHosting = true
             self.zoneRecord.started()
         }
     }

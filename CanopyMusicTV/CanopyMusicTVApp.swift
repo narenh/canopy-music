@@ -121,7 +121,9 @@ final class TVModel {
     /// offers to resume it, and creating a new zone asks first.
     var canResumeZone: Bool { zoneRecord.hasZone }
 
-    /// Creates a new, empty zone. A zone this TV still had is ended first (the list asked).
+    /// Creates a new, empty zone: "Scan to host", with the server running for the phone that sets
+    /// it up, but not announced and not recorded until its music starts (`ZoneRecord.songStarted`).
+    /// A zone this TV still had is ended first (the list asked).
     func createZone() async {
         debugLog("createZone")
         guard await authorize() else { return }
@@ -135,7 +137,8 @@ final class TVModel {
         debugLog("resumeZone")
         guard await authorize() else { return }
         openZone(fresh: false)
-        // Never set up: back to "Scan to host", with its code, rather than "Continue on your phone".
+        // Its saved queue is gone (tvOS may clear Caches): back to "Scan to host", with its code,
+        // rather than "Continue on your phone".
         if session.isWaitingForSetup {
             zoneRecord.hostJoined = false
             hostJoined = false
@@ -145,13 +148,15 @@ final class TVModel {
 
     /// Launch: straight back into the zone if this TV was hosting it when the app quit or crashed.
     /// Music stays paused. If it can't (no Apple Music access, no network), the list offers Resume.
-    /// A zone where music never started is ended instead: the TV starts at the zone list, with
-    /// nothing to resume.
+    /// A zone exists only once its music has started, so there's always something to come back to,
+    /// except for a zone an older build recorded at Create where music never started, and a zone
+    /// whose saved queue tvOS cleared: those are ended, and the TV starts at the zone list.
     private func restoreZoneIfNeeded() {
         zoneRecord.settleStarted(songsPlayed: QueueState.saved(at: Self.storeURL)?.log.isEmpty == false)
-        if zoneRecord.endsOnLaunch {
+        let queueCleared = zoneRecord.hasZone && !FileManager.default.fileExists(atPath: Self.storeURL.path)
+        if zoneRecord.endsOnLaunch || queueCleared {
             // As End does. Nothing else is running yet: no server, Bonjour or `.local` name.
-            debugLog("zone never started; ending it")
+            debugLog("nothing to come back to; ending the zone")
             try? FileManager.default.removeItem(at: Self.storeURL)
             zoneRecord.ended()
             return
@@ -167,13 +172,6 @@ final class TVModel {
         TVZoneListView.didAutoCreate = true // `-createZone` is for a launch that starts at the list
         #endif
         openZone(fresh: false)
-        // A zone that was never set up (no playlist picked, even if a phone had scanned) isn't
-        // worth coming back to: its QR has gone, so nothing could control it. End it, as End does.
-        if session.isWaitingForSetup {
-            debugLog("restored zone was never set up; ending it")
-            stopZone()
-            return
-        }
         Task {
             await startServer()
             if role == .hub, server == nil || guestURL == nil {
@@ -202,8 +200,13 @@ final class TVModel {
             let cache = SongCache()
             session = PartySession(catalog: AppleMusicCatalog(cache: cache), engine: AppleMusicEngine(cache: cache), storeURL: store)
         }
-        if fresh { session.end() } // the same clearing as End
-        zoneRecord.hosting(fresh: fresh)
+        if fresh {
+            // The same clearing as End. The new zone is recorded once its music starts.
+            session.end()
+            zoneRecord.ended()
+        } else {
+            zoneRecord.resumedHosting()
+        }
         // A zone that had a host (or a playlist) is past "Scan to host".
         hostJoined = !fresh && (zoneRecord.hostJoined || session.hasParty || session.state.playlistName != nil)
         hostname.rename(to: FriendlyHostname.localName(forZone: zoneName))
@@ -217,7 +220,7 @@ final class TVModel {
                                    simpleQR: defaults.bool(forKey: "wifiSimpleQR"))
         hostControl.attach(to: session) { [weak self] _ in
             guard let self, !self.hostJoined else { return }
-            self.zoneRecord.hostJoined = true
+            self.zoneRecord.hostJoined = true // a zone not recorded yet takes it when it begins
             withAnimation(.easeInOut(duration: 0.8)) { self.hostJoined = true }
         }
         session.onSettingsChanged = { [weak self] in
@@ -234,8 +237,12 @@ final class TVModel {
             self.advertise()
         }
         session.onStopRequested = { [weak self] in self?.stopZone() }
-        // Only a zone where music has started comes back after a crash.
-        session.onSongStarted = { [weak self] in self?.zoneRecord.started() }
+        // The zone becomes real when its music starts (a phone's "Start the music"): only then is
+        // it recorded, so only then does it come back after a crash or offer Resume.
+        session.onSongStarted = { [weak self] in
+            guard let self else { return }
+            self.zoneRecord.songStarted(hostJoined: self.hostJoined)
+        }
         role = .hub
     }
 

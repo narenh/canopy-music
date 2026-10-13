@@ -71,45 +71,47 @@
 </main>
 
 <!-- Host: first setup of a zone run by an Apple TV (it has no screens of its own for this). -->
-<!-- Both pickers: a column filling the screen, with the list as the only part that scrolls. -->
+<!-- Both pickers: everything above the footer scrolls as one (so the list gets the whole screen),
+     the search sticks to the top once the header has gone, and the footer stays put. -->
 <section id="setup" class="sheet picker-sheet" hidden>
-  <div class="picker-head">
-  <img class="brand-logo" src="/logo.png" alt="Canopy Music">
-  <h2 class="sheet-title">Set up this zone</h2>
-  <p class="sheet-sub" id="setup-sub">You're hosting. Guests can join once music is playing.</p>
-  <p class="muted-label">Your name</p>
-  <input class="text-input" id="setup-you" maxlength="24" placeholder="Optional" autocomplete="given-name" enterkeyhint="next">
-  <p class="muted-label" style="margin-top:18px">Zone name</p>
-  <input class="text-input" id="setup-name" maxlength="40" autocomplete="off" enterkeyhint="done">
-  <p class="muted-label" style="margin-top:18px">Base playlist</p>
-  <div class="picker-search"><label class="search-field"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg><input id="setup-search" type="search" placeholder="Find a playlist" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false" enterkeyhint="search"></label></div>
-  </div>
-  <div class="picker-list" id="setup-scroll">
+  <div class="picker-scroll" id="setup-scroll">
+    <img class="brand-logo" src="/logo.png" alt="Canopy Music">
+    <h2 class="sheet-title">Set up this zone</h2>
+    <p class="sheet-sub" id="setup-sub">You're hosting. Guests can join once music is playing.</p>
+    <p class="muted-label">Your name</p>
+    <input class="text-input" id="setup-you" maxlength="24" placeholder="Optional" autocomplete="given-name" enterkeyhint="next">
+    <p class="muted-label" style="margin-top:18px">Zone name</p>
+    <input class="text-input" id="setup-name" maxlength="40" autocomplete="off" enterkeyhint="done">
+    <p class="muted-label" style="margin-top:18px">Base playlist</p>
+    <div class="picker-search"><label class="search-field"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg><input id="setup-search" type="search" placeholder="Find a playlist" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false" enterkeyhint="search"></label></div>
     <ul class="playlists" id="setup-playlists"></ul>
     <p class="empty" id="setup-empty" hidden></p>
     <p class="muted-label picker-catalog-head" id="setup-catalog-head" hidden></p>
     <ul class="playlists" id="setup-catalog"></ul>
   </div>
   <div class="picker-foot">
+    <label class="picker-shuffle"><span>Shuffle</span><input type="checkbox" class="switch" id="setup-shuffle" checked></label>
     <button class="primary-btn wide" id="setup-start" type="button" disabled><span class="spinner" hidden></span><span class="label">Start the music</span></button>
   </div>
 </section>
 
 <!-- Host: choose the base playlist. -->
 <section id="playlists" class="sheet over picker-sheet" hidden>
-  <div class="picker-head">
-    <div class="search-bar">
-      <h2 class="sheet-title" style="flex:1;margin:0">Base playlist</h2>
+  <div class="picker-scroll" id="playlists-scroll">
+    <div class="picker-title">
+      <h2 class="sheet-title">Base playlist</h2>
       <button class="text-btn" id="playlists-done" type="button">Done</button>
     </div>
-    <label class="search-field"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg><input id="playlists-search" type="search" placeholder="Find a playlist" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false" enterkeyhint="search"></label>
-    <p class="sheet-sub picker-note">Changing it starts the queue over; requests are cleared.</p>
-  </div>
-  <div class="picker-list" id="playlists-scroll">
+    <p class="sheet-sub">Changing it starts the queue over; requests are cleared.</p>
+    <div class="picker-search"><label class="search-field"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg><input id="playlists-search" type="search" placeholder="Find a playlist" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false" enterkeyhint="search"></label></div>
     <ul class="playlists" id="playlist-list"></ul>
     <p class="empty" id="playlists-empty" hidden></p>
     <p class="muted-label picker-catalog-head" id="playlists-catalog-head" hidden></p>
     <ul class="playlists" id="playlists-catalog"></ul>
+  </div>
+  <div class="picker-foot">
+    <label class="picker-shuffle"><span>Shuffle</span><input type="checkbox" class="switch" id="playlists-shuffle" checked></label>
+    <button class="primary-btn wide" id="playlists-use" type="button" disabled><span class="spinner" hidden></span><span class="label">Use this playlist</span></button>
   </div>
 </section>
 

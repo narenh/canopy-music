@@ -1012,8 +1012,10 @@
     }
     search.addEventListener("input", () => {
       filter();
-      // Back to the first match.
-      $(`${prefix}-scroll`).scrollTop = 0;
+      // Back to the first match, keeping the search where it is if it's stuck to the top.
+      const scroll = $(`${prefix}-scroll`);
+      const top = list.offsetTop - search.closest(".picker-search").offsetHeight;
+      if (scroll.scrollTop > top) scroll.scrollTop = Math.max(0, top);
     });
 
     return {
@@ -1040,7 +1042,7 @@
           showEmpty("Couldn't load playlists.");
         }
       },
-      /** Checks the chosen row (setup). */
+      /** Checks the chosen row (none for null). */
       select(id) {
         for (const li of [...rows, ...catalogList.children]) {
           const on = li.dataset.id === id;
@@ -1072,28 +1074,39 @@
     }
   }
 
-  // Changing the base playlist from the host page (on top of the settings sheet).
-  // The sheet stays open, with a spinner on the chosen row, until the hub has loaded it (a big
-  // library playlist can take several seconds).
-  const changePicker = playlistPicker("playlists", "playlist-list", "playlists-empty", async (p) => {
-    const sheet = $("playlists");
-    if (sheet.classList.contains("busy")) return;
-    if (!confirm(`Switch to "${p.name}"? The queue starts over and requests are cleared.`)) return;
-    const row = [...sheet.querySelectorAll(".playlist-row")].find((li) => li.dataset.id === p.id && !li.hidden);
-    const spinner = document.createElement("span");
-    spinner.className = "spinner";
-    sheet.classList.add("busy");
-    if (row) { row.classList.add("loading"); row.append(spinner); }
+  /** A picker's footer button: a spinner and `busyLabel` while the hub works, the list and Shuffle dimmed. */
+  function pickerBusy(prefix, button, busy, label) {
+    button.disabled = busy;
+    button.querySelector(".spinner").hidden = !busy;
+    button.querySelector(".label").textContent = label;
+    $(`${prefix}-shuffle`).disabled = busy;
+    $(prefix).classList.toggle("busy", busy);
+  }
+
+  // Changing the base playlist from the host page (on top of the settings sheet): a row selects,
+  // the button confirms. The sheet stays open, with a spinner in the button, until the hub has
+  // loaded it (a big library playlist can take several seconds).
+  let changePick = null;
+  const changePicker = playlistPicker("playlists", "playlist-list", "playlists-empty", (p) => {
+    if ($("playlists").classList.contains("busy")) return;
+    changePick = p;
+    $("playlists-use").disabled = false;
+    changePicker.select(p.id);
+  });
+  $("playlists-use").addEventListener("click", async () => {
+    const sheet = $("playlists"), button = $("playlists-use"), p = changePick;
+    if (!p || sheet.classList.contains("busy")) return;
+    const hasQueue = !!(snap && (snap.current || snap.upNext.length));
+    if (hasQueue && !confirm(`Switch to "${p.name}"? The queue starts over and requests are cleared.`)) return;
+    pickerBusy("playlists", button, true, "Loading…");
     try {
-      const reply = await api("/api/host/playlist", { key: hostKey, playlist: p, play: !!(snap && snap.playback.isPlaying) });
+      const reply = await api("/api/host/playlist", {
+        key: hostKey, playlist: p, play: !!(snap && snap.playback.isPlaying), shuffle: $("playlists-shuffle").checked,
+      });
       sheet.hidden = true;
       toastSkipped(reply);
     } catch { toast("Couldn't change the playlist"); }
-    finally {
-      sheet.classList.remove("busy");
-      if (row) row.classList.remove("loading");
-      spinner.remove();
-    }
+    finally { pickerBusy("playlists", button, false, "Use this playlist"); button.disabled = !changePick; }
   });
   $("settings-playlist-change").addEventListener("click", () => {
     $("playlists").hidden = false;
@@ -1119,11 +1132,7 @@
   /** Start the music: a spinner and "Starting…" until the hub answers (a big playlist can take a while). */
   function setupBusy(busy) {
     setupStarting = busy;
-    const button = $("setup-start");
-    button.disabled = busy;
-    button.querySelector(".spinner").hidden = !busy;
-    button.querySelector(".label").textContent = busy ? "Starting…" : "Start the music";
-    $("setup").classList.toggle("busy", busy);
+    pickerBusy("setup", $("setup-start"), busy, busy ? "Starting…" : "Start the music");
   }
   $("setup-start").addEventListener("click", async () => {
     if (!setupPick || setupStarting) return;
@@ -1133,7 +1142,7 @@
     try {
       const name = $("setup-name").value.trim();
       if (name) await api("/api/host/settings", { key: hostKey, zoneName: name });
-      const reply = await api("/api/host/playlist", { key: hostKey, playlist: setupPick, play: true });
+      const reply = await api("/api/host/playlist", { key: hostKey, playlist: setupPick, play: true, shuffle: $("setup-shuffle").checked });
       setupDismissed = true;
       setupBusy(false);
       $("setup").hidden = true;
@@ -1143,6 +1152,10 @@
       toast("Couldn't start. Try again.");
     }
   });
+    changePick = null;
+    $("playlists-use").disabled = true;
+    $("playlists-shuffle").checked = true;
+    changePicker.select(null);
 
   // Another host: the hub draws the QR code.
   $("settings-invite").addEventListener("click", () => {

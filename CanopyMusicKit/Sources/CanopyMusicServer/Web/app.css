@@ -139,13 +139,6 @@ svg { width: 18px; height: 18px; fill: none; stroke: currentColor; stroke-width:
 /* Opened as the first screen, under the splash: the splash's fade reveals it. */
 .sheet.instant { animation: none; }
 html.sheet-open, html.sheet-open body { overflow: hidden; }
-/* Sticks flush with the top: the sheet's top padding would otherwise show rows above it. */
-.sheet-head {
-  position: sticky; z-index: 1; background: var(--base); padding-bottom: 12px;
-  top: calc(-14px - env(safe-area-inset-top)); margin-top: calc(-14px - env(safe-area-inset-top)); padding-top: calc(14px + env(safe-area-inset-top));
-}
-.sheet-head .search-bar { position: static; }
-.picker-search { margin-bottom: 10px; }
 .picker-catalog-head { margin-top: 18px; }
 .playlist-row[hidden] { display: none; }
 @keyframes sheet-in { from { opacity: 0; transform: translateY(14px); } }
@@ -216,27 +209,36 @@ html.sheet-open, html.sheet-open body { overflow: hidden; }
 .primary-btn.wide { width: 100%; padding: 14px; font-size: 16px; display: flex; align-items: center; justify-content: center; gap: 10px; }
 /* Solid even when disabled, so it reads clearly. */
 .primary-btn:disabled { background: var(--surface-2); color: var(--text-2); }
-/* Picker sheets: header, then the list (the only part that scrolls), then a footer of its own.
-   Sized to the visible viewport (--vvh, set from visualViewport) so the keyboard doesn't cover it. */
+/* Picker sheets: everything but the footer scrolls as one (title, fields, search, list), so the
+   list gets the whole screen; the search sticks to the top once the rest has scrolled off; the
+   footer stays put. Sized to the visible viewport (--vvh, set from visualViewport) so the
+   keyboard doesn't cover the footer. */
 .sheet.picker-sheet {
-  overflow: hidden; display: flex; flex-direction: column; padding-bottom: 0;
+  overflow: hidden; display: flex; flex-direction: column; padding: env(safe-area-inset-top) 0 0;
   top: var(--vvt, 0px); bottom: auto; height: 100vh; height: 100dvh; height: var(--vvh, 100dvh);
 }
 .sheet.picker-sheet[hidden] { display: none; }
-.picker-head { flex: none; }
-.picker-head .search-bar { position: static; }
-.picker-note { margin: 10px 2px 4px; }
-.picker-list {
-  flex: 1 1 auto; min-height: 0; overflow-y: auto; -webkit-overflow-scrolling: touch; overscroll-behavior: contain;
-  margin: 0 -16px; padding: 4px 16px 12px;
+.picker-scroll {
+  flex: 1 1 auto; min-height: 0; position: relative;
+  overflow-y: auto; -webkit-overflow-scrolling: touch; overscroll-behavior: contain;
+  padding: 14px 16px 12px;
 }
-.picker-list:last-child { padding-bottom: calc(env(safe-area-inset-bottom) + 16px); }
+.picker-title { display: flex; align-items: center; gap: 12px; margin: 4px 0 6px; }
+.picker-title .sheet-title { flex: 1; margin: 0 2px; }
+/* Stuck 8px below the top (the scroller's 14px padding less 6), with an opaque band above (the
+   shadow) and below (the padding), so rows scrolling under it don't show. */
+.picker-search {
+  position: sticky; top: -6px; z-index: 1; background: var(--base); box-shadow: 0 -8px 0 var(--base);
+  margin: 0 -16px; padding: 0 16px 10px;
+}
+.picker-scroll .playlists { margin-top: 2px; }
 .picker-foot {
-  flex: none; margin: 0 -16px; padding: 12px 16px calc(env(safe-area-inset-bottom) + 12px);
+  flex: none; padding: 4px 16px calc(env(safe-area-inset-bottom) + 12px);
   background: var(--base); border-top: 1px solid var(--line);
 }
-.picker-sheet.busy .playlist-row { pointer-events: none; }
-.picker-sheet.busy .playlist-row:not(.loading):not(.selected) { opacity: .5; }
+.picker-shuffle { display: flex; justify-content: space-between; align-items: center; gap: 12px; padding: 8px 2px 12px; font-size: 15px; }
+.picker-sheet.busy .playlist-row, .picker-sheet.busy .picker-shuffle { pointer-events: none; }
+.picker-sheet.busy .playlist-row:not(.selected), .picker-sheet.busy .picker-shuffle { opacity: .5; }
 .playlist-row .spinner { margin-left: auto; }
 .spinner {
   flex: none; width: 18px; height: 18px; border-radius: 50%;

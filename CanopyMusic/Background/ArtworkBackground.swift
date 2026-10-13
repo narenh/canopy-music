@@ -17,8 +17,8 @@ struct ArtworkBackground: View {
     /// The image to blur (each app has its own rules, and debug-only demo art).
     let artworkURL: URL?
     let theme: ArtworkTheme
-    /// Where blurred copies come from: the TV's artwork cache (which makes one with each image
-    /// it loads), or `BlurredArtworkCache` on the iPad.
+    /// Where blurred copies come from: the artwork cache, which makes one with each image it
+    /// loads (`ArtworkCache`).
     let source: any BlurredArtworkSource
     /// The TV shows the song's colours as a gradient until its art is ready, or when it has none;
     /// the iPad shows only the base colour then.
@@ -44,7 +44,7 @@ struct ArtworkBackground: View {
     }
 }
 
-/// Blurred copies of artwork, by image URL, for `ArtworkBackground`.
+/// Blurred copies of artwork, by image URL, for `ArtworkBackground` (`ArtworkCache` on both apps).
 @MainActor protocol BlurredArtworkSource: AnyObject {
     /// The blurred copy, if it's ready.
     func blurredImage(for url: URL) -> UIImage?
@@ -91,7 +91,8 @@ private struct BlurredArtworkLayer: View {
 
 /// Makes the background's blurred copy of an image: shrunk to `side` square, blurred, and
 /// saturated 1.4×. Blurred this much, drawn as big as the window it looks like the full image
-/// blurred there by SwiftUI, and drifting never re-blurs.
+/// blurred there by SwiftUI, and drifting never re-blurs. The image given is already small (the
+/// cache decodes at the size drawn: `ArtworkCache.blurBucket` at most when it's loaded for this).
 enum BlurredArtwork {
     /// Side of the blurred copy, in pixels.
     static let side: CGFloat = 64
@@ -130,40 +131,6 @@ enum BlurredArtwork {
         guard let output = color.outputImage,
               let cgImage = context.createCGImage(output, from: input.extent) else { return nil }
         return UIImage(cgImage: cgImage)
-    }
-}
-
-/// Blurred copies of artwork by URL, for a background whose app has no artwork cache of its own
-/// (the iPad's artwork is `AsyncImage`). Downloads go through `URLSession.shared`, so an image
-/// Now Playing already loaded usually comes from the URL cache.
-@MainActor
-final class BlurredArtworkCache: BlurredArtworkSource {
-    static let shared = BlurredArtworkCache()
-    private let images = NSCache<NSURL, UIImage>()
-    private var loading: [URL: Task<UIImage?, Never>] = [:]
-
-    private init() {
-        images.countLimit = 60
-    }
-
-    func blurredImage(for url: URL) -> UIImage? {
-        images.object(forKey: url as NSURL)
-    }
-
-    func loadBlurred(_ url: URL) async -> UIImage? {
-        if let image = blurredImage(for: url) { return image }
-        if let task = loading[url] { return await task.value }
-        let task = Task<UIImage?, Never> {
-            defer { loading[url] = nil }
-            guard let (data, _) = try? await URLSession.shared.data(from: url) else { return nil }
-            let blurred = await Task.detached(priority: .userInitiated) {
-                UIImage(data: data).flatMap(BlurredArtwork.make(from:))
-            }.value
-            if let blurred { images.setObject(blurred, forKey: url as NSURL) }
-            return blurred
-        }
-        loading[url] = task
-        return await task.value
     }
 }
 

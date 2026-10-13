@@ -9,15 +9,13 @@ struct ArtworkView: View {
     var cornerRadius: CGFloat = 8
 
     var body: some View {
-        // `-demoArtworkURLs` (debug builds): demo tracks get a remote image each.
-        let url = (large ? (track?.artworkURL ?? track?.thumbnailURL) : (track?.thumbnailURL ?? track?.artworkURL)) ?? DemoArtwork.url(for: track)
         ZStack {
             placeholder
-            if let url {
-                AsyncImage(url: url, transaction: Transaction(animation: .easeOut(duration: 0.25))) { phase in
-                    if let image = phase.image {
-                        image.resizable().scaledToFill()
-                    }
+            // Decoded at the size it's drawn, from the thumbnail for rows (`ArtworkCache`). In an
+            // overlay so a filled image can't grow the view past the size it's given.
+            Color.clear.overlay {
+                if let url = ArtworkURL.url(for: track, large: large) {
+                    ArtworkImage(url: url, fadesIn: true).id(url)
                 }
             }
         }
@@ -44,8 +42,8 @@ struct ThemedBackground: View {
 
     var body: some View {
         ArtworkBackground(
-            track: track, artworkURL: track?.artworkURL ?? DemoArtwork.url(for: track),
-            theme: theme, source: BlurredArtworkCache.shared
+            track: track, artworkURL: ArtworkURL.url(for: track, large: true),
+            theme: theme, source: ArtworkCache.shared
         )
         .animation(.easeInOut(duration: 1.2), value: track?.id)
     }

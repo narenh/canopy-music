@@ -37,8 +37,8 @@ struct TVRootView: View {
         let backgroundItem = partySong.map(\.item) ?? current
         ZStack {
             ArtworkBackground(
-                track: backgroundItem?.track, artworkURL: TVArtwork.url(for: backgroundItem?.track),
-                theme: ArtworkTheme(backgroundItem?.track.colors), source: TVArtworkCache.shared, colorsUntilLoaded: true
+                track: backgroundItem?.track, artworkURL: ArtworkURL.url(for: backgroundItem?.track, large: true),
+                theme: ArtworkTheme(backgroundItem?.track.colors), source: ArtworkCache.shared, colorsUntilLoaded: true
             )
                 // Changes evenly to the new song's, starting with the party screen's slide and
                 // settling after it (`TVPartyView.showCurrent`).
@@ -509,6 +509,9 @@ struct TVPartyView: View {
     @State private var slideEnds: ContinuousClock.Instant?
     /// Width of the now-playing column, edge to edge (the slide's clip).
     @State private var columnWidth: CGFloat = 1000
+    /// The Now Playing art's side as laid out, for the size its images are decoded at.
+    @State private var artSide: CGFloat = 600
+    @Environment(\.displayScale) private var displayScale
     static let slide = 0.5
     /// Fast at first, then slowing to a stop: the pages arrive and settle (an ease-out quint).
     static let slideAnimation = Animation.timingCurve(0.22, 1, 0.36, 1, duration: slide)
@@ -545,6 +548,7 @@ struct TVPartyView: View {
                     }
                 }
                 .frame(width: art, alignment: .leading)
+                .onGeometryChange(for: CGFloat.self, of: \.size.width) { artSide = $0 }
                 // Centered in whatever the sidebar leaves.
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
                 .onGeometryChange(for: CGFloat.self, of: \.size.width) { columnWidth = $0 }
@@ -609,6 +613,10 @@ struct TVPartyView: View {
         .onMoveCommand(perform: move)
         // A newer change cancels this one part way, and `showCurrent` goes on to the newest song.
         .task(id: model.session.state.current?.id) { await showCurrent() }
+        // The next song or two's art at Now Playing size, loaded ahead so the slide to it has it
+        // (`showCurrent` waits only a moment). Just those: every row's would cost as much again
+        // as the whole list of rows many times over, and most of them get skipped or reordered.
+        .task(id: prewarm) { ArtworkCache.shared.prewarm(prewarm.urls, bucket: prewarm.bucket) }
         .preference(key: TVShownSongKey.self, value: TVShownSong(item: current))
         #if DEBUG
         // `-autoStep`: 6 s after the party shows, presses right three times at once, then left
@@ -624,6 +632,21 @@ struct TVPartyView: View {
             move(.left)
         }
         #endif
+    }
+
+    /// The size bucket the Now Playing art decodes at (`ArtworkImage` works out the same from its frame).
+    private var artBucket: Int {
+        ArtworkSizing.bucket(points: Double(artSide), scale: Double(displayScale))
+    }
+
+    private struct Prewarm: Equatable {
+        let urls: [URL]
+        let bucket: Int
+    }
+
+    /// The first two Up next songs' big images, at the Now Playing size.
+    private var prewarm: Prewarm {
+        Prewarm(urls: model.session.state.upNext.prefix(2).compactMap { ArtworkURL.url(for: $0.track, large: true) }, bucket: artBucket)
     }
 
     /// The song's art, title, artist line and progress: one page of the slide.
@@ -688,12 +711,13 @@ struct TVPartyView: View {
             do { try await Task.sleep(until: slideEnds, clock: .continuous) } catch { return }
         }
         guard shown?.id != session.state.current?.id else { return }
-        // The new song's art is loaded before it slides in (Up next has usually loaded it
-        // already); after a moment it slides anyway, and the art shows when it's loaded.
-        if let url = TVArtwork.url(for: session.state.current?.track) {
+        // The new song's art is loaded before it slides in (the pre-warm of the next songs' has
+        // usually loaded it already); after a moment it slides anyway, and the art shows when
+        // it's loaded.
+        if let url = ArtworkURL.url(for: session.state.current?.track, large: true) {
             let start = ContinuousClock.now
-            let ready = await TVArtworkCache.shared.ready(url, within: .milliseconds(300))
-            model.debugLog("artwork \(ready ? "ready" : "not ready") after \(ContinuousClock.now - start)")
+            let ready = await ArtworkCache.shared.ready(url, bucket: artBucket, within: .milliseconds(300))
+            model.debugLog("artwork \(ready ? "ready" : "not ready") after \(ContinuousClock.now - start) (\(artBucket) px)")
             if Task.isCancelled { return }
         }
         let goingForward = slidesForward(from: shown)
@@ -748,7 +772,7 @@ struct TVQueueRow: View {
 
     var body: some View {
         HStack(spacing: 18) {
-            TVArtwork(track: item.track, cornerRadius: 8)
+            TVArtwork(track: item.track, large: false, cornerRadius: 8)
                 .frame(width: 54, height: 54)
             VStack(alignment: .leading, spacing: 2) {
                 Text(item.track.title)
@@ -887,13 +911,9 @@ struct TVProgress: View {
 
 struct TVArtwork: View {
     let track: QueueTrack?
+    /// Now Playing shows the big image; a row shows the thumbnail (`ArtworkURL`).
+    var large = true
     var cornerRadius: CGFloat = 8
-
-    /// The image a track shows.
-    static func url(for track: QueueTrack?) -> URL? {
-        // `-demoArtworkURLs` (debug builds): demo tracks get a remote image each.
-        track?.artworkURL ?? track?.thumbnailURL ?? DemoArtwork.url(for: track)
-    }
 
     var body: some View {
         ZStack {
@@ -904,110 +924,15 @@ struct TVArtwork: View {
                 ],
                 startPoint: .topLeading, endPoint: .bottomTrailing
             )
-            // In an overlay so a filled image can't grow the view past the size it's given.
+            // Decoded at the size it's drawn, from `ArtworkCache` (shared with the iPad app). In an
+            // overlay so a filled image can't grow the view past the size it's given.
             Color.clear.overlay {
-                if let url = Self.url(for: track) {
-                    TVArtworkImage(url: url).id(url)
+                if let url = ArtworkURL.url(for: track, large: large) {
+                    ArtworkImage(url: url).id(url)
                 }
             }
         }
         .clipShape(RoundedRectangle(cornerRadius: cornerRadius, style: .continuous))
-    }
-}
-
-/// Artwork from `TVArtworkCache`: an image already loaded shows from the first frame (so a page
-/// sliding in or out has its real art), and one that isn't loads and then shows.
-private struct TVArtworkImage: View {
-    let url: URL
-    @State private var loaded: UIImage?
-
-    var body: some View {
-        if let image = loaded ?? TVArtworkCache.shared.image(for: url) {
-            Image(uiImage: image).resizable().scaledToFill()
-        } else {
-            Color.clear.task { loaded = await TVArtworkCache.shared.load(url) }
-        }
-    }
-}
-
-/// Decoded artwork in memory, by URL, shared by every artwork on the TV (the party screen loads
-/// a song's before sliding to it, and Up next's rows load the songs coming up).
-@MainActor
-final class TVArtworkCache: BlurredArtworkSource {
-    static let shared = TVArtworkCache()
-    private let images = NSCache<NSURL, UIImage>()
-    private let blurredImages = NSCache<NSURL, UIImage>()
-    private var loading: [URL: Task<UIImage?, Never>] = [:]
-
-    private init() {
-        images.countLimit = 80
-        blurredImages.countLimit = 80
-    }
-
-    func image(for url: URL) -> UIImage? {
-        images.object(forKey: url as NSURL)
-    }
-
-    /// The background's blurred copy of the image at `url` (`BlurredArtwork`), once it's loaded.
-    func blurredImage(for url: URL) -> UIImage? {
-        blurredImages.object(forKey: url as NSURL)
-    }
-
-    /// Loads the image at `url`, which makes its blurred copy too.
-    func loadBlurred(_ url: URL) async -> UIImage? {
-        _ = await load(url)
-        return blurredImage(for: url)
-    }
-
-    /// The image at `url`, loaded and decoded (and its blurred copy made) once however many ask;
-    /// nil if it fails.
-    func load(_ url: URL) async -> UIImage? {
-        if let image = image(for: url) { return image }
-        if let task = loading[url] { return await task.value }
-        // The task caches what it made before anyone waiting on it carries on.
-        let task = Task<UIImage?, Never> {
-            defer { loading[url] = nil }
-            guard let (data, _) = try? await URLSession.shared.data(from: url),
-                  let image = await UIImage(data: data)?.byPreparingForDisplay() else { return nil }
-            let blurred = await Task.detached(priority: .userInitiated) { BlurredArtwork.make(from: image) }.value
-            images.setObject(image, forKey: url as NSURL)
-            if let blurred { blurredImages.setObject(blurred, forKey: url as NSURL) }
-            return image
-        }
-        loading[url] = task
-        return await task.value
-    }
-
-    /// Waits until the image at `url` is ready, or `limit` has passed (it keeps loading then).
-    /// Returns whether it's ready.
-    func ready(_ url: URL, within limit: Duration) async -> Bool {
-        if image(for: url) != nil { return true }
-        await withCheckedContinuation { continuation in
-            let once = Once(continuation)
-            Task { @MainActor in
-                _ = await self.load(url)
-                once.resume()
-            }
-            Task { @MainActor in
-                try? await Task.sleep(for: limit)
-                once.resume()
-            }
-        }
-        return image(for: url) != nil
-    }
-
-    /// Resumes a wait once, whichever finishes first.
-    @MainActor private final class Once {
-        private var continuation: CheckedContinuation<Void, Never>?
-
-        init(_ continuation: CheckedContinuation<Void, Never>) {
-            self.continuation = continuation
-        }
-
-        func resume() {
-            continuation?.resume()
-            continuation = nil
-        }
     }
 }
 

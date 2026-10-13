@@ -48,15 +48,17 @@ struct SonosSpeakersPanel: View {
 
     var body: some View {
         // As tall as the rooms need, so the popover fits them as rooms are ticked and readings
-        // arrive; it only scrolls when the popover has less room than that (from the top, so the
-        // header and All Speakers stay in view).
-        FitHeight {
+        // arrive. Only a household with more rooms than the popover has room for scrolls (from
+        // the top, so the header and All Speakers are in view).
+        ViewThatFits(in: .vertical) {
+            content
             ScrollView {
                 content
             }
             .scrollBounceBehavior(.basedOnSize)
         }
         .frame(width: 340)
+        .background(FollowPopoverSize())
         .preferredColorScheme(.dark)
         .tint(.white)
         .task {
@@ -92,19 +94,30 @@ struct SonosSpeakersPanel: View {
     }
 }
 
-/// Sizes its one subview (a ScrollView) to the subview's ideal height, or less when offered less,
-/// and pins it to the top. A popover sizes itself from this, so it always fits the content; and
-/// in the moment before the popover catches up with taller content, the ScrollView is cut short
-/// at the bottom instead of the overflow being centred, which hid the header and All Speakers.
-private struct FitHeight: Layout {
-    func sizeThatFits(proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) -> CGSize {
-        guard let view = subviews.first else { return .zero }
-        let ideal = view.sizeThatFits(ProposedViewSize(width: proposal.width, height: nil))
-        return CGSize(width: ideal.width, height: min(ideal.height, proposal.height ?? .infinity))
+/// Keeps the popover's content the size of the popover. On the iPadOS 27 betas (24A5355), when
+/// the content's size changes while the popover is open, the popover's glass grows or shrinks to
+/// fit, but the view SwiftUI presents the panel in stays the size the popover opened at (it has no
+/// autoresizing mask, and the beta's popover doesn't resize it itself, as 26 and the 27.0 release
+/// do). The panel, centred in that stale frame, sat half the difference too high: the header cut
+/// off above the glass and an empty band below. Giving that view a flexible autoresizing mask
+/// makes it follow the popover; elsewhere the popover already sizes it, so this changes nothing.
+private struct FollowPopoverSize: UIViewRepresentable {
+    func makeUIView(context: Context) -> Marker {
+        let view = Marker()
+        view.isUserInteractionEnabled = false
+        return view
     }
 
-    func placeSubviews(in bounds: CGRect, proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) {
-        subviews.first?.place(at: bounds.origin, anchor: .topLeading, proposal: ProposedViewSize(bounds.size))
+    func updateUIView(_ uiView: Marker, context: Context) {}
+
+    final class Marker: UIView {
+        override func didMoveToWindow() {
+            super.didMoveToWindow()
+            // The nearest view controller is the one presenting the panel in the popover.
+            var responder: UIResponder? = next
+            while let current = responder, !(current is UIViewController) { responder = current.next }
+            (responder as? UIViewController)?.view.autoresizingMask = [.flexibleWidth, .flexibleHeight]
+        }
     }
 }
 

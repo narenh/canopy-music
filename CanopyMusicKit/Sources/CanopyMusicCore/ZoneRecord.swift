@@ -87,23 +87,6 @@ public final class ZoneRecord {
         defaults.set(false, forKey: Keys.hosting)
     }
 
-    /// Apple TV, until it records its zone at the first song: a zone recorded at Create.
-    public func hosting(fresh: Bool) {
-        defaults.set(true, forKey: Keys.hasZone)
-        defaults.set(true, forKey: Keys.hosting)
-        if fresh {
-            defaults.set(false, forKey: Keys.locked)
-            defaults.set(false, forKey: Keys.hostJoined)
-            defaults.set(false, forKey: Keys.started)
-        }
-    }
-
-    /// Apple TV, until it records its zone at the first song.
-    public func started() {
-        guard hasZone else { return }
-        defaults.set(true, forKey: Keys.started)
-    }
-
     /// The zone was ended: nothing to resume.
     public func ended() {
         for key in [Keys.hasZone, Keys.hosting, Keys.locked, Keys.hostJoined, Keys.started] {

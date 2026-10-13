@@ -88,7 +88,7 @@ struct PartyView: View {
             keyboardHeight = 0
         }
         .onChange(of: session.state.upNext.map(\.id)) { old, new in flashPhoneRequests(old: old, new: new) }
-        .sheet(isPresented: $showUnlock) { UnlockView() }
+        .sheet(isPresented: $showUnlock) { UnlockView().environment(model) }
         .overlay { DisplayConnectionOverlay() }
         #if DEBUG
         .task { await runAutoSearch() }

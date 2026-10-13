@@ -68,10 +68,13 @@ struct HostView: View {
         .background { ThemedBackground(track: session.nowPlaying?.track, theme: theme) }
         .environment(\.artworkTheme, theme)
         .preferredColorScheme(.dark)
-        .sheet(isPresented: $showPicker) { PlaylistPickerView() }
+        // Presented views get the model explicitly: on a Mac, a sheet's view was seen without it
+        // ("No Observable object of type AppModel found" on End Zone).
+        .sheet(isPresented: $showPicker) { PlaylistPickerView().environment(model) }
         .modifier(AppleMusicOffer(enabled: model.provider == .appleMusic, isPresented: $showSubscriptionOffer))
         .sheet(isPresented: $showSettings) {
             SettingsSheet()
+                .environment(model)
                 .presentationBackground(.ultraThinMaterial)
                 .preferredColorScheme(.dark)
         }
@@ -91,6 +94,7 @@ struct HostView: View {
             .tint(AppModel.Provider.spotify.accent)
             .foregroundStyle(.white)
             .preferredColorScheme(.dark)
+            .environment(model)
         }
         #if DEBUG
         .onAppear {
@@ -750,7 +754,7 @@ private struct SettingsSheet: View {
             }
             .scrollContentBackground(.hidden)
             .endZoneConfirmation(isPresented: $confirmingEnd) { dismiss() }
-            .sheet(isPresented: $savingPlaylist) { PartyPlaylistSheet(purpose: .save) }
+            .sheet(isPresented: $savingPlaylist) { PartyPlaylistSheet(purpose: .save).environment(model) }
             #if DEBUG
             .onAppear { if ProcessInfo.processInfo.arguments.contains("-showSave") { savingPlaylist = true } }
             #endif
@@ -797,6 +801,7 @@ private struct EndZoneConfirmation: ViewModifier {
             }
             .sheet(isPresented: Binding(get: { showingSheet }, set: { showingSheet = $0; if !$0 { isPresented = false } })) {
                 PartyPlaylistSheet(purpose: .end, beforeEnding: before)
+                    .environment(model)
             }
             .alert("End \(model.zoneName)?", isPresented: Binding(get: { showingAlert }, set: { showingAlert = $0; if !$0 { isPresented = false } })) {
                 Button("End", role: .destructive, action: end)

@@ -5,6 +5,7 @@
 	<key>NSBonjourServices</key>
 	<array>
 		<string>_canopymusic._tcp</string>
+		<string>_spotify-connect._tcp</string>
 	</array>
 	<key>UIApplicationSceneManifest</key>
 	<dict>

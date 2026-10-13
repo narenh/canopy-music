@@ -156,10 +156,20 @@ struct SpotifyDevicePicker: View {
 
     private static let intro = "Open Spotify on this \(DeviceKind.noun) or another device in your home. That's where music will play from."
 
+    @State private var nearby = SpotifyNearbyBrowser()
+
+    /// Speakers on the network that Spotify doesn't list yet (matched by name).
+    private var unavailableNearby: [SpotifyNearbyBrowser.Speaker] {
+        let listed = Set(model.spotifyDevices.map { $0.name.lowercased() })
+        return nearby.speakers
+            .filter { !listed.contains($0.name.lowercased()) }
+            .sorted { $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending }
+    }
+
     var body: some View {
         NavigationStack {
             Group {
-                if model.spotifyDevices.isEmpty {
+                if model.spotifyDevices.isEmpty && unavailableNearby.isEmpty {
                     empty
                 } else {
                     list
@@ -177,6 +187,38 @@ struct SpotifyDevicePicker: View {
                 await model.refreshSpotifyDevices()
                 try? await Task.sleep(for: .seconds(3))
             }
+        }
+        .onAppear { nearby.start() }
+        .onDisappear { nearby.stop() }
+    }
+
+    /// Spotify Connect speakers on the network that Spotify's device list doesn't include yet.
+    @ViewBuilder private var nearbySection: some View {
+        if !unavailableNearby.isEmpty {
+            Section {
+                ForEach(unavailableNearby) { speaker in
+                    HStack(spacing: 12) {
+                        Image(systemName: SpotifyDeviceKind.icon(speaker.type))
+                            .font(.system(size: 17))
+                            .frame(width: 28)
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text(speaker.name)
+                            if let type = speaker.type {
+                                Text(SpotifyDeviceKind.label(type)).font(.footnote)
+                            }
+                        }
+                        Spacer()
+                    }
+                    .foregroundStyle(.secondary)
+                    .accessibilityElement(children: .combine)
+                    .accessibilityHint("Not available yet")
+                }
+            } header: {
+                Text("Nearby")
+            } footer: {
+                Text("To use one of these, play something to it once from the Spotify app. It appears above after that.")
+            }
+            .listRowBackground(Color.white.opacity(0.04))
         }
     }
 
@@ -219,6 +261,8 @@ struct SpotifyDevicePicker: View {
                 Searching(text: "Looking for more devices…")
             }
             .listRowBackground(Color.white.opacity(0.08))
+
+            nearbySection
 
             Section {
                 OpenSpotifyButton(prominent: false)

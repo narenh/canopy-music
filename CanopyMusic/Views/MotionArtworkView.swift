@@ -42,7 +42,7 @@ struct MotionArtworkView: View {
             }
             #endif
             guard let lookup = catalog.motionArtwork else { return }
-            let found = await lookup.videoURL(forSongID: track.id)
+            let found = await lookup.videoURL(for: track)
             guard !Task.isCancelled else { return }
             url = found
         }

@@ -201,3 +201,61 @@ import Testing
         #expect(report["albumError"] as? String == "status 400")
     }
 }
+
+#if DEBUG
+/// The third-party service motion artwork asks (debug builds), with a fake loader: no real requests.
+@Suite struct MotionArtworkServiceTests {
+    static let square = "https://mvod.itunes.apple.com/itunes-assets/HLSVideo/x/P1_default.m3u8"
+    static let found = Data(#"{"url": "\#(square)", "url_tall": "https://mvod.itunes.apple.com/y.m3u8", "artist": "ILLENIUM", "album": "ODYSSEY", "isCached": true}"#.utf8)
+    static let missing = Data(#"{"message": "No animated artwork found."}"#.utf8)
+
+    actor Requests {
+        var urls: [URL] = []
+        func note(_ url: URL) { urls.append(url) }
+    }
+
+    static func query(_ url: URL) -> [String: String] {
+        let items = URLComponents(url: url, resolvingAgainstBaseURL: false)?.queryItems ?? []
+        return Dictionary(uniqueKeysWithValues: items.map { ($0.name, $0.value ?? "") })
+    }
+
+    static func track(artist: String, album: String) -> QueueTrack {
+        QueueTrack(id: "1", title: "Forever", artist: artist, album: album, duration: 200, artworkURL: nil, thumbnailURL: nil, colors: nil, isExplicit: false)
+    }
+
+    @Test func answers() {
+        #expect(MotionArtworkService.answer(data: Self.found, status: 200) == .found(URL(string: Self.square)!))
+        #expect(MotionArtworkService.answer(data: Self.missing, status: 404) == .none)
+        #expect(MotionArtworkService.answer(data: Data(), status: 500) == .unexpected(status: 500))
+    }
+
+    @Test func requestNames() throws {
+        let url = try #require(MotionArtworkService.searchURL(artist: "Simon & Garfunkel", album: "Bookends + 1 - Single"))
+        #expect(url.absoluteString.hasPrefix("https://artwork.m8tec.top/api/v1/artwork/search?"))
+        #expect(Self.query(url) == ["artist": "Simon & Garfunkel", "album": "Bookends + 1"])
+        #expect(MotionArtworkService.albumTitle("ODYSSEY - EP") == "ODYSSEY")
+        #expect(MotionArtworkService.albumTitle("ODYSSEY") == "ODYSSEY")
+        #expect(MotionArtworkService.artistCandidates("ILLENIUM, Tom Grennan & Alna") == ["ILLENIUM, Tom Grennan & Alna", "ILLENIUM"])
+        #expect(MotionArtworkService.artistCandidates("ILLENIUM") == ["ILLENIUM"])
+    }
+
+    /// Only the service is asked (never the Apple Music API): the whole artist, then the first
+    /// artist; the answer is remembered.
+    @Test func asksOnlyTheServiceAndRemembers() async {
+        let requests = Requests()
+        let apple = Requests()
+        let lookup = MotionArtworkLookup(fetch: { path in
+            await apple.note(URL(string: "https://example.com/\(path)")!)
+            return Data()
+        }, serviceLoad: { url in
+            await requests.note(url)
+            return Self.query(url)["artist"] == "ILLENIUM" ? (Self.found, 200) : (Self.missing, 404)
+        })
+        let track = Self.track(artist: "ILLENIUM, Tom Grennan & Alna", album: "ODYSSEY")
+        #expect(await lookup.videoURL(for: track) == URL(string: Self.square))
+        #expect(await lookup.videoURL(for: track) == URL(string: Self.square))
+        #expect(await requests.urls.count == 2)
+        #expect(await apple.urls.isEmpty)
+    }
+}
+#endif

@@ -13,9 +13,19 @@ import Foundation
 /// art in the Music app; a public project that gets it adds `platform=web`. Try query variants
 /// with `GET /api/debug/motion?…&platform=<value>&extend=<value>` (debug builds), then set
 /// `albumQuery` to the one that works.
+///
+/// Debug builds only: when the Apple Music API finds nothing, a public third-party service
+/// (`MotionArtworkService`, artwork.m8tec.top) is asked by artist and album name. It doesn't
+/// exist in Release builds.
 public enum MotionArtwork {
     /// The feature switch. Off: no lookups and no video; Now Playing shows the still artwork.
     public static let isEnabled = true
+
+    #if DEBUG
+    /// Debug builds: whether to fall back to the third-party `MotionArtworkService` when the
+    /// Apple Music API finds no motion artwork. Still only with `isEnabled`.
+    public static let usesThirdPartyService = true
+    #endif
 
     /// The query on the album request. **The switch for request variants**: e.g. `platform: "web"`.
     public static let albumQuery = AlbumQuery(extend: "editorialVideo", platform: nil)
@@ -122,6 +132,12 @@ public actor MotionArtworkLookup {
     /// Album id → its square motion video; `.some(nil)` when it has none.
     private var videos: [String: URL?] = [:]
     private var inFlight: [String: Task<URL?, Never>] = [:]
+    #if DEBUG
+    /// Loads a `MotionArtworkService` URL (swapped out in tests).
+    private var serviceLoad: MotionArtworkService.Load = MotionArtworkService.load
+    /// `MotionArtworkService.cacheKey` → its square video; `.some(nil)` when it has none.
+    private var serviceVideos: [String: URL?] = [:]
+    #endif
 
     public init(fetch: @escaping Fetch) {
         self.fetchReportingURL = { path in (try await fetch(path), path) }
@@ -131,9 +147,88 @@ public actor MotionArtworkLookup {
         self.fetchReportingURL = fetchReportingURL
     }
 
+    #if DEBUG
+    init(fetch: @escaping Fetch, serviceLoad: @escaping MotionArtworkService.Load) {
+        self.fetchReportingURL = { path in (try await fetch(path), path) }
+        self.serviceLoad = serviceLoad
+    }
+    #endif
+
     private func fetch(_ path: String) async throws -> Data {
         try await fetchReportingURL(path).data
     }
+
+    /// The square motion video for a track, from `MotionArtworkService` by its artist and album
+    /// (debug builds, `usesThirdPartyService`). The Apple Music API isn't asked: it doesn't return
+    /// motion artwork to our token (checked on a real Apple TV, every variant). nil when the
+    /// service has none, the feature is off, the lookup failed, or this is a Release build.
+    public func videoURL(for track: QueueTrack) async -> URL? {
+        guard MotionArtwork.isEnabled else { return nil }
+        #if DEBUG
+        if MotionArtwork.usesThirdPartyService { return await serviceVideoURL(artist: track.artist, album: track.album) }
+        #endif
+        return nil
+    }
+
+    #if DEBUG
+    /// The service's square video for an album, remembered per artist and album (also when it has
+    /// none). Failures are silent and not remembered.
+    private func serviceVideoURL(artist: String, album: String) async -> URL? {
+        let key = MotionArtworkService.cacheKey(artist: artist, album: album)
+        guard !key.isEmpty else { return nil }
+        if let known = serviceVideos[key] { return known }
+        var found: URL?
+        for candidate in MotionArtworkService.artistCandidates(artist) {
+            guard let url = MotionArtworkService.searchURL(artist: candidate, album: album) else { continue }
+            let answer: MotionArtworkService.Answer
+            do {
+                let (data, status) = try await serviceLoad(url)
+                answer = MotionArtworkService.answer(data: data, status: status)
+            } catch {
+                print("[motion] service \"\(candidate)\" / \"\(album)\": failed: \(error)")
+                return nil
+            }
+            switch answer {
+            case .found(let url): found = url
+            case .none: continue
+            case .unexpected(let status):
+                print("[motion] service \"\(candidate)\" / \"\(album)\": unexpected response (status \(status))")
+                return nil
+            }
+            if found != nil { break }
+        }
+        serviceVideos[key] = .some(found)
+        print("[motion] service \"\(artist)\" / \"\(album)\": \(found?.absoluteString ?? "no animated artwork")")
+        return found
+    }
+
+    /// Debug: what `MotionArtworkService` answers for an artist and album, for each artist name
+    /// tried, without the cache.
+    public func probeService(artist: String, album: String) async throws -> Data {
+        var report: [String: Any] = [
+            "enabled": MotionArtwork.isEnabled, "usesThirdPartyService": MotionArtwork.usesThirdPartyService,
+            "artist": artist, "album": album,
+        ]
+        var attempts: [[String: Any]] = []
+        var picked: URL?
+        for candidate in MotionArtworkService.artistCandidates(artist) where picked == nil {
+            guard let url = MotionArtworkService.searchURL(artist: candidate, album: album) else { continue }
+            var attempt: [String: Any] = ["url": url.absoluteString]
+            do {
+                let (data, status) = try await serviceLoad(url)
+                attempt["status"] = status
+                attempt["response"] = Self.jsonValue(data)
+                if case .found(let video) = MotionArtworkService.answer(data: data, status: status) { picked = video }
+            } catch {
+                attempt["error"] = String(describing: error)
+            }
+            attempts.append(attempt)
+        }
+        report["requests"] = attempts
+        report["pickedSquareURL"] = picked?.absoluteString ?? NSNull()
+        return try JSONSerialization.data(withJSONObject: report, options: [.prettyPrinted, .sortedKeys, .withoutEscapingSlashes])
+    }
+    #endif
 
     /// The square motion video for a catalog song's album, or nil (feature off, not a catalog
     /// song, no motion artwork, or the lookup failed).
@@ -234,3 +329,81 @@ public actor MotionArtworkLookup {
         (try? JSONSerialization.jsonObject(with: data)) ?? String(decoding: data, as: UTF8.self)
     }
 }
+
+#if DEBUG
+/// Debug builds only: a public third-party service that finds an album's Apple Music motion
+/// artwork by artist and album name. `GET /api/v1/artwork/search?artist=…&album=…` answers 200
+/// `{"url": "…square….m3u8", "url_tall": "….m3u8", …}`, or 404 `{"message": "No animated
+/// artwork found."}`. Used only as `MotionArtworkLookup`'s fallback, for Apple Music zones.
+enum MotionArtworkService {
+    /// Loads a URL: the body and HTTP status.
+    typealias Load = @Sendable (URL) async throws -> (data: Data, status: Int)
+
+    enum Answer: Equatable {
+        case found(URL)
+        /// The service has no motion artwork for it.
+        case none
+        /// Anything else (not remembered).
+        case unexpected(status: Int)
+    }
+
+    static let searchEndpoint = "https://artwork.m8tec.top/api/v1/artwork/search"
+    static let timeout: TimeInterval = 8
+
+    static let load: Load = { url in
+        let (data, response) = try await URLSession.shared.data(for: URLRequest(url: url, timeoutInterval: timeout))
+        return (data, (response as? HTTPURLResponse)?.statusCode ?? 0)
+    }
+
+    static func searchURL(artist: String, album: String) -> URL? {
+        guard var components = URLComponents(string: searchEndpoint) else { return nil }
+        components.queryItems = [URLQueryItem(name: "artist", value: artist), URLQueryItem(name: "album", value: albumTitle(album))]
+        // `+` is left alone in query values; encode it so it isn't read as a space.
+        let query = components.percentEncodedQuery?.replacingOccurrences(of: "+", with: "%2B")
+        components.percentEncodedQuery = query
+        return components.url
+    }
+
+    /// The album's title without Apple Music's release-type suffix ("Forever - Single" → "Forever").
+    static func albumTitle(_ album: String) -> String {
+        for suffix in [" - Single", " - EP"] where album.hasSuffix(suffix) {
+            return String(album.dropLast(suffix.count))
+        }
+        return album
+    }
+
+    /// The artist names to try, in order: the whole artist string, then its first artist when it
+    /// lists several ("ILLENIUM, Tom Grennan & Alna" → "ILLENIUM").
+    static func artistCandidates(_ artist: String) -> [String] {
+        let whole = artist.trimmingCharacters(in: .whitespaces)
+        guard !whole.isEmpty else { return [] }
+        var first = whole
+        for separator in [",", " & ", " feat. ", " feat ", " ft. ", " featuring "] {
+            if let range = first.range(of: separator, options: .caseInsensitive) {
+                first = String(first[..<range.lowerBound])
+            }
+        }
+        first = first.trimmingCharacters(in: .whitespaces)
+        return first.isEmpty || first == whole ? [whole] : [whole, first]
+    }
+
+    /// Cache key for an artist and album; empty when either is missing.
+    static func cacheKey(artist: String, album: String) -> String {
+        let artist = artist.trimmingCharacters(in: .whitespaces).lowercased()
+        let album = album.trimmingCharacters(in: .whitespaces).lowercased()
+        return artist.isEmpty || album.isEmpty ? "" : artist + "\n" + album
+    }
+
+    static func answer(data: Data, status: Int) -> Answer {
+        switch status {
+        case 200:
+            let root = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any]
+            guard let string = root?["url"] as? String, let url = URL(string: string),
+                  url.scheme?.lowercased() == "https" else { return .none }
+            return .found(url)
+        case 404: return .none
+        default: return .unexpected(status: status)
+        }
+    }
+}
+#endif

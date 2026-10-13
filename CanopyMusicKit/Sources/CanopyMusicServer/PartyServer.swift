@@ -294,18 +294,33 @@ public final class PartyServer: Sendable {
         // and `&extend=<value>` replace those on the album request (empty: leave it out), to try
         // variants without a rebuild; the response shows each request's full URL.
         await server.appendRoute("GET /api/debug/motion") { request in
+            let current = request.query["current"] != nil ? await session.state.current?.track : nil
             var song = request.query["song"]
-            if request.query["current"] != nil { song = await session.state.current?.track.id }
+            if request.query["current"] != nil { song = current?.id }
             let album = request.query["album"]
             let albumQuery = MotionArtwork.albumQuery.overriding(extend: request.query["extend"], platform: request.query["platform"])
             func text(_ status: HTTPStatusCode, _ message: String) -> HTTPResponse {
                 HTTPResponse(statusCode: status, headers: [.contentType: "text/plain; charset=utf-8"], body: Data((message + "\n").utf8))
             }
-            guard song != nil || album != nil else {
-                return text(.badRequest, "Add ?album=<catalog album id>, ?song=<catalog song id> or ?current (nothing is playing).")
-            }
             guard let lookup = await session.catalog.motionArtwork else {
                 return text(.notImplemented, "This zone's music service has no motion artwork lookup (Apple Music only).")
+            }
+            // `&source=service`: what the third-party service (the one motion artwork uses) answers
+            // for the current song, or `&artist=<name>&albumName=<name>`.
+            if request.query["source"] == "service" {
+                guard let artist = request.query["artist"] ?? current?.artist,
+                      let albumName = request.query["albumName"] ?? current?.album else {
+                    return text(.badRequest, "Add ?current (nothing is playing) or ?artist=<name>&albumName=<name>.")
+                }
+                do {
+                    return HTTPResponse(statusCode: .ok, headers: [.contentType: "application/json", .cacheControl: "no-store"],
+                                        body: try await lookup.probeService(artist: artist, album: albumName))
+                } catch {
+                    return .serviceFailed(error)
+                }
+            }
+            guard song != nil || album != nil else {
+                return text(.badRequest, "Add ?album=<catalog album id>, ?song=<catalog song id> or ?current (nothing is playing).")
             }
             do {
                 return HTTPResponse(statusCode: .ok, headers: [.contentType: "application/json", .cacheControl: "no-store"],

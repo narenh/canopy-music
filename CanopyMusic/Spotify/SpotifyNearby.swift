@@ -17,25 +17,8 @@ final class SpotifyNearbyBrowser {
         var name: String
         /// Spotify's device type (e.g. "AVR", "Speaker"), when the speaker said.
         var type: String?
-        /// A Spotify account is signed in on it (it may still be another account's). Sonos reports
-        /// none even while playing.
+        /// A Spotify account is signed in on it (it may still be another account's).
         var hasActiveUser: Bool
-        /// The speaker's Spotify device id, when it said (expected to match the Web API's id).
-        var deviceID: String? = nil
-
-        /// Whether this is one of the devices Spotify's Web API lists: the same device id, or the
-        /// same name, or the room in its name ("Sonos Beam (Bedroom)" is listed as "Bedroom").
-        func isListed(id listedID: String, name listedName: String) -> Bool {
-            if let deviceID, deviceID.caseInsensitiveCompare(listedID) == .orderedSame { return true }
-            let listed = listedName.trimmingCharacters(in: .whitespaces).lowercased()
-            let own = name.lowercased()
-            if own == listed { return true }
-            if let open = own.lastIndex(of: "("), let close = own.lastIndex(of: ")"), open < close {
-                let room = own[own.index(after: open)..<close].trimmingCharacters(in: .whitespaces)
-                if room == listed { return true }
-            }
-            return false
-        }
     }
 
     private(set) var speakers: [Speaker] = []
@@ -85,10 +68,6 @@ final class SpotifyNearbyBrowser {
         if let name = info.remoteName, !name.isEmpty { speakers[index].name = name }
         speakers[index].type = info.deviceType
         speakers[index].hasActiveUser = !(info.activeUser ?? "").isEmpty
-        speakers[index].deviceID = info.deviceID
-        #if DEBUG
-        print("[nearby] \(info.remoteName ?? id) type=\(info.deviceType ?? "?") id=\(info.deviceID ?? "?") activeUser=\(info.activeUser?.isEmpty == false)")
-        #endif
     }
 
     /// The instance name minus the hex prefix some speakers put in front of it
@@ -104,7 +83,6 @@ final class SpotifyNearbyBrowser {
         var remoteName: String?
         var deviceType: String?
         var activeUser: String?
-        var deviceID: String?
     }
 
     /// `GET {path}?action=getInfo` over a plain connection to the announced service (3 s limit).

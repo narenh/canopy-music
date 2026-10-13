@@ -158,10 +158,11 @@ struct SpotifyDevicePicker: View {
 
     @State private var nearby = SpotifyNearbyBrowser()
 
-    /// Speakers on the network that Spotify doesn't list yet (by device id, else by name).
+    /// Speakers on the network that Spotify doesn't list yet (matched by name).
     private var unavailableNearby: [SpotifyNearbyBrowser.Speaker] {
-        nearby.speakers
-            .filter { speaker in !model.spotifyDevices.contains { speaker.isListed(id: $0.id ?? "", name: $0.name) } }
+        let listed = Set(model.spotifyDevices.map { $0.name.lowercased() })
+        return nearby.speakers
+            .filter { !listed.contains($0.name.lowercased()) }
             .sorted { $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending }
     }
 

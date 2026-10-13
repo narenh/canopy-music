@@ -28,7 +28,7 @@ struct ZoneListView: View {
                             Section("Active Zones") {
                                 if model.canResumeZone {
                                     ZoneRow(icon: DeviceKind.symbol, title: model.zoneName, subtitle: "Resume on this \(DeviceKind.noun)") {
-                                        model.resumeZone()
+                                        Task { await model.resumeZone() }
                                     }
                                 }
                                 zoneRows(zones)

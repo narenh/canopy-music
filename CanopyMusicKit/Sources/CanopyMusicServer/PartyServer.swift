@@ -92,6 +92,13 @@ public final class PartyServer: Sendable {
             try .json(await session.snapshot())
         }
 
+        // Another device checking this zone is really here, as its Bonjour announcement says,
+        // before that announcement's Spotify account blocks it (`ZoneProbe`). Only what the TXT
+        // record already makes public.
+        await server.appendRoute("GET /api/zone") { _ in
+            try .json(ZoneCheck(hub: await session.hubID, spotify: await session.announcedSpotifyAccount))
+        }
+
         // The `.local` address a zone name would get (as `address` in snapshots, before mDNS may
         // move it to `name-2`), shown under the zone name as a host types it. null if the name
         // has no letters or digits.
@@ -330,6 +337,11 @@ public final class PartyServer: Sendable {
             let ok = await handler.chooseSpotifyDevice(id: body.id ?? "")
             return HTTPResponse(statusCode: ok ? .noContent : .notFound)
         }
+        // Continue and Start the music ask first: is another zone really playing from this
+        // Spotify account now? (`{"zone": name}`, or `{}`.)
+        await hostSetup("POST /api/host/spotify/conflict") { _, _, handler in
+            try .json(SpotifyConflictReply(zone: await handler.checkSpotifyConflict()))
+        }
         // Another zone already plays from this Spotify account: the TV shows that zone as a
         // display instead, and the page goes on to it.
         await hostSetup("POST /api/host/spotify/join") { _, _, handler in
@@ -477,6 +489,11 @@ struct PlaybackBody: Decodable {
 
 struct LocalNameReply: Encodable {
     var address: String?
+}
+
+/// `zone` is left out when no zone is really using the account.
+struct SpotifyConflictReply: Encodable {
+    var zone: String?
 }
 
 struct PlaylistBody: Decodable {

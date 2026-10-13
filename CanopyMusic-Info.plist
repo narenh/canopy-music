@@ -5,7 +5,13 @@
 	<key>NSBonjourServices</key>
 	<array>
 		<string>_canopymusic._tcp</string>
+		<string>_sonos._tcp</string>
 	</array>
+	<key>NSAppTransportSecurity</key>
+	<dict>
+		<key>NSAllowsLocalNetworking</key>
+		<true/>
+	</dict>
 	<key>UIApplicationSceneManifest</key>
 	<dict>
 		<key>UIApplicationSupportsMultipleScenes</key>

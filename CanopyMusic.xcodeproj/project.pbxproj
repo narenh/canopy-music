@@ -279,7 +279,7 @@
 				INFOPLIST_KEY_CFBundleDisplayName = "Canopy Music d";
 				INFOPLIST_KEY_ITSAppUsesNonExemptEncryption = NO;
 				INFOPLIST_KEY_NSAppleMusicUsageDescription = "Canopy Music plays your Apple Music playlists and lets guests search Apple Music to queue songs.";
-				INFOPLIST_KEY_NSLocalNetworkUsageDescription = "Canopy Music runs a small local web server so guests on your Wi‑Fi can queue songs.";
+				INFOPLIST_KEY_NSLocalNetworkUsageDescription = "Canopy Music runs a small local web server so guests on your Wi‑Fi can queue songs, and finds Sonos speakers to play on.";
 				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
 				INFOPLIST_KEY_UIStatusBarHidden = YES;
 				INFOPLIST_KEY_UISupportedInterfaceOrientations_iPad = "UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight UIInterfaceOrientationPortrait UIInterfaceOrientationPortraitUpsideDown";
@@ -313,7 +313,7 @@
 				INFOPLIST_KEY_CFBundleDisplayName = "Canopy Music d";
 				INFOPLIST_KEY_ITSAppUsesNonExemptEncryption = NO;
 				INFOPLIST_KEY_NSAppleMusicUsageDescription = "Canopy Music plays your Apple Music playlists and lets guests search Apple Music to queue songs.";
-				INFOPLIST_KEY_NSLocalNetworkUsageDescription = "Canopy Music runs a small local web server so guests on your Wi‑Fi can queue songs.";
+				INFOPLIST_KEY_NSLocalNetworkUsageDescription = "Canopy Music runs a small local web server so guests on your Wi‑Fi can queue songs, and finds Sonos speakers to play on.";
 				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
 				INFOPLIST_KEY_UIStatusBarHidden = YES;
 				INFOPLIST_KEY_UISupportedInterfaceOrientations_iPad = "UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight UIInterfaceOrientationPortrait UIInterfaceOrientationPortraitUpsideDown";

@@ -516,7 +516,7 @@ private struct TransportControls: View {
                         .frame(width: 44, height: 44)
                         .glassEffect(.regular, in: Circle())
                         .accessibilityLabel("Speakers")
-                        .accessibilityValue("Not used: music plays on \(model.spotifyDeviceName ?? "another device")")
+                        .accessibilityValue("Not used: music plays on \(model.usesSonos ? model.sonosOutput?.target.name ?? "Sonos" : model.spotifyDeviceName ?? "another device")")
                 }
                 }
                 Group {
@@ -553,8 +553,9 @@ private struct TransportControls: View {
                 .opacity(model.spotifyDisconnected ? 0.35 : 1)
                 if model.isDisplay {
                     Color.clear.frame(width: 44, height: 44)
-                } else if model.provider == .spotify {
+                } else if model.provider == .spotify, !model.usesSonos {
                     // Spotify's crossfade lives in the Spotify app; this spot picks where music plays.
+                    // (On Sonos, it's Sonos's crossfade, as for Apple Music.)
                     SpotifyDeviceButton()
                 } else {
                 Button {
@@ -580,7 +581,7 @@ private struct TransportControls: View {
         }
     }
 
-    private var airPlayApplies: Bool { model.provider != .spotify || model.spotifyPlaysOnThisDevice }
+    private var airPlayApplies: Bool { !model.usesSonos && (model.provider != .spotify || model.spotifyPlaysOnThisDevice) }
 }
 
 /// Four bars bouncing at different rates; they settle low when paused.

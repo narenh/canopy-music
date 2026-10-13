@@ -50,6 +50,8 @@ struct SpotifyStatusRows: View {
                 }
             }
 
+            // Sonos rooms playing the zone's songs (Speakers section) don't use a Spotify device.
+            if !model.usesSonos {
             Button {
                 model.isPickingSpotifyDevice = true
             } label: {
@@ -77,6 +79,7 @@ struct SpotifyStatusRows: View {
                     await model.refreshSpotifyDevices()
                     try? await Task.sleep(for: .seconds(10))
                 }
+            }
             }
         }
     }

@@ -27,6 +27,8 @@ public final class SonosHousehold {
     @ObservationIgnored private var refreshTask: Task<Void, Never>?
     @ObservationIgnored public let transport: any SonosTransport
     @ObservationIgnored public var log: (@MainActor (String) -> Void)?
+    /// After each refresh (players, groups and accounts read again).
+    @ObservationIgnored public var onRefresh: (@MainActor () -> Void)?
 
     public static let bonjourType = "_sonos._tcp"
 
@@ -121,6 +123,7 @@ public final class SonosHousehold {
             break
         }
         accounts = await findAccounts()
+        onRefresh?()
     }
 
     /// Accounts read off favourites and every group's queue and current track. Current S2

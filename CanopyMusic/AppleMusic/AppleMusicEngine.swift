@@ -35,6 +35,10 @@ final class AppleMusicEngine: PlaybackEngine {
     /// Guards against reading the brief `.stopped` right after `play` as the end of the queue.
     private var sawPlaying = false
     private var isReplacingQueue = false
+    /// Set by a `play` that failed or was given up on (`PartySession.engineCallTimeout`): the
+    /// player's connection may have dropped, and reading it then blocks the main thread
+    /// (`AppleMusicCatalog`, tvOS). Polling waits for the next `play` that works.
+    private var pollingPaused = false
     private var lastStatus: MusicPlayer.PlaybackStatus?
     private var poller: Task<Void, Never>?
 
@@ -79,12 +83,20 @@ final class AppleMusicEngine: PlaybackEngine {
         // `poll` runs while we await below; it must not mistake our own queue swap for the
         // player landing on an unexpected entry (that fed back into another `play`, forever).
         isReplacingQueue = true
-        defer {
-            currentEntryID = player.queue.currentEntry?.id
-            isReplacingQueue = false
-        }
         player.queue = ApplicationMusicPlayer.Queue(for: [song])
-        try await player.play()
+        do {
+            try await player.play()
+        } catch {
+            // Don't read the player back after a failure (nor if the session gave up waiting and
+            // this lands later): its connection may have dropped, and a synchronous read then
+            // blocks the main thread. Polling stays off until a play works.
+            pollingPaused = true
+            isReplacingQueue = false
+            throw error
+        }
+        currentEntryID = player.queue.currentEntry?.id
+        isReplacingQueue = false
+        pollingPaused = false
         cache(playing: true, time: 0)
     }
 
@@ -138,7 +150,7 @@ final class AppleMusicEngine: PlaybackEngine {
     }
 
     private func poll() {
-        guard !isReplacingQueue else { return }
+        guard !isReplacingQueue, !pollingPaused else { return }
         let entry = player.queue.currentEntry
         let status = player.state.playbackStatus
         let time = player.playbackTime

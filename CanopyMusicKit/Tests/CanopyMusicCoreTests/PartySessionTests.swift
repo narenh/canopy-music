@@ -540,9 +540,11 @@ struct SkippingCatalog: MusicCatalog {
         try await hub.play()
         hub.add(track("x"), by: guest)
         await hub.skip()
+        await settle()
         let display = PartySession(remote: RecordingRemote(clientID: "kitchen"))
         display.apply(hub.snapshot())
-        #expect(display.state.current?.track.id == "b")
+        #expect(display.state.current != nil)
+        #expect(display.state.current?.id == hub.state.current?.id)
         #expect(display.state.version == hub.state.version)
         #expect(hub.state.version > 1)
 

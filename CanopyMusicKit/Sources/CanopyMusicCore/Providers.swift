@@ -37,6 +37,14 @@ public enum PlaybackEvent: Sendable, Equatable {
     case statusChanged
 }
 
+/// An engine call that didn't answer within `PartySession.engineCallTimeout`: the player (Apple's
+/// runs out of process) stopped responding. The session counts the call as failed and moves on.
+public enum PlaybackEngineError: Error, LocalizedError, Equatable {
+    case timedOut(operation: String)
+
+    public var errorDescription: String? { "The player didn't respond." }
+}
+
 /// Plays one current track plus at most one staged "next" track.
 /// `PartySession` owns the real queue and decides what gets staged.
 @MainActor

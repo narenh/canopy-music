@@ -157,8 +157,14 @@ public final class PartySession {
     @ObservationIgnored private var engineChain: Task<Void, Never>?
     /// The queue item the engine currently has loaded as its current track.
     @ObservationIgnored private var loadedItemID: UUID?
-    @ObservationIgnored private var isSyncing = false
+    /// `syncStaging` is running (one at a time; later calls fold into it).
+    @ObservationIgnored private(set) var isSyncing = false
     @ObservationIgnored private var needsSync = false
+    /// How long one engine call (play, stage, resume, skip to staged) may take before it counts
+    /// as failed and the chain moves on. Apple's out-of-process player can stop answering;
+    /// without a deadline every later command waited behind it for good.
+    public static let defaultEngineCallTimeout: TimeInterval = 12
+    @ObservationIgnored var engineCallTimeout = PartySession.defaultEngineCallTimeout
     /// Snapshot listeners, and whether each gets the Wi‑Fi details (displays do, phones don't).
     @ObservationIgnored private var listeners: [UUID: (continuation: AsyncStream<PartySnapshot>.Continuation, withWifi: Bool)] = [:]
     @ObservationIgnored private let storeURL: URL?
@@ -372,7 +378,7 @@ public final class PartySession {
             try await remote.send(.play)
             return
         }
-        let result: Result<Void, any Error> = await serially {
+        let result: Result<Void, any Error> = try await serially {
             do {
                 try await self.playNow()
                 return .success(())
@@ -387,7 +393,13 @@ public final class PartySession {
         if state.current == nil { mutate { $0.advance() } }
         guard let current = state.current else { return }
         if loadedItemID == current.id {
-            try await engine.resume()
+            do {
+                try await timed("resume") { try await self.engine.resume() }
+            } catch let error as PlaybackEngineError {
+                // The player didn't answer: the next play loads the song again rather than resume.
+                loadedItemID = nil
+                throw error
+            }
             isPlaying = engine.isPlaying
             broadcast()
         } else {
@@ -421,7 +433,7 @@ public final class PartySession {
             try? await remote.send(.previous)
             return
         }
-        await serially { await self.previousNow() }
+        try? await serially { await self.previousNow() }
     }
 
     private func previousNow() async {
@@ -457,12 +469,12 @@ public final class PartySession {
             try? await remote.send(.next)
             return
         }
-        await serially { await self.skipNow() }
+        try? await serially { await self.skipNow() }
     }
 
     private func skipNow() async {
         let wasPlaying = engine.isPlaying
-        if wasPlaying, stagedItemID != nil, (try? await engine.skipToStaged()) != nil { return }
+        if wasPlaying, stagedItemID != nil, (try? await timed("skipToStaged") { try await self.engine.skipToStaged() }) != nil { return }
         mutate { $0.advance() }
         if wasPlaying, let current = state.current { try? await play(current) }
     }
@@ -630,7 +642,7 @@ public final class PartySession {
         stagedItemID = nil
         loadedItemID = item.id
         do {
-            try await engine.play(item.track)
+            try await timed("play") { try await self.engine.play(item.track) }
         } catch {
             // Nothing is loaded, so nothing gets staged behind it. Staging onto a player whose
             // play just failed can hang (Apple Music on tvOS reconnects on the main thread).
@@ -647,14 +659,58 @@ public final class PartySession {
     /// Runs engine operations one at a time, in order. Overlapping operations (two quick backs,
     /// a skip while the next song is being staged) can wedge Apple's out-of-process player,
     /// which hangs the main thread. Never call this from inside an operation it's running.
-    private func serially<T: Sendable>(_ operation: @escaping @MainActor @Sendable () async -> T) async -> T {
+    ///
+    /// Throws only `CancellationError`, when the caller is cancelled while waiting (an HTTP
+    /// handler past its timeout): it stops waiting, the operation still runs in its turn.
+    private func serially<T: Sendable>(_ operation: @escaping @MainActor @Sendable () async -> T) async throws -> T {
         let previous = engineChain
-        let task = Task { @MainActor in
+        let task = Task<T, any Error> { @MainActor in
             await previous?.value
             return await operation()
         }
-        engineChain = Task { _ = await task.value }
-        return await task.value
+        engineChain = Task { _ = try? await task.value }
+        return try await Self.value(of: task)
+    }
+
+    /// One engine call with a deadline (`engineCallTimeout`). Past it the call counts as failed
+    /// (`PlaybackEngineError.timedOut`): nothing is taken as staged any more (and the callers
+    /// that play or resume forget the loaded song too), so the next command starts the player
+    /// afresh rather than build on a call that never answered. The call itself is cancelled and
+    /// left to finish on its own; its result no longer counts.
+    private func timed<T: Sendable>(_ name: String, _ call: @escaping @MainActor @Sendable () async throws -> T) async throws -> T {
+        let work = Task<T, any Error> { @MainActor in try await call() }
+        let timeout = engineCallTimeout
+        do {
+            return try await withThrowingTaskGroup(of: T.self) { group in
+                group.addTask { try await Self.value(of: work) }
+                group.addTask {
+                    try await Task.sleep(for: .seconds(timeout))
+                    throw PlaybackEngineError.timedOut(operation: name)
+                }
+                defer { group.cancelAll() }
+                return try await group.next()!
+            }
+        } catch let error as PlaybackEngineError {
+            work.cancel()
+            stagedItemID = nil
+            ErrorReport.log(error, context: "engine.\(name) gave no answer in \(Int(timeout)) s")
+            throw error
+        }
+    }
+
+    /// `task.value`, except that a cancelled waiter stops waiting (`CancellationError`) while
+    /// the task runs on. `Task.value` itself ignores cancellation, which kept HTTP handlers
+    /// waiting on a stuck engine past their timeout (and the server's stop behind them).
+    nonisolated static func value<T: Sendable>(of task: Task<T, any Error>) async throws -> T {
+        let waiter = Waiter<T>()
+        return try await withTaskCancellationHandler {
+            try await withCheckedThrowingContinuation { continuation in
+                waiter.begin(continuation)
+                Task { waiter.finish(await task.result) }
+            }
+        } onCancel: {
+            waiter.finish(.failure(CancellationError()))
+        }
     }
 
     private func handle(_ event: PlaybackEvent) {
@@ -671,7 +727,7 @@ public final class PartySession {
             loadedItemID = nil
             mutate { $0.advance() }
             if let current = state.current {
-                Task { await serially { try? await self.play(current) } }
+                Task { try? await serially { try? await self.play(current) } }
             }
         case .statusChanged:
             isPlaying = engine.isPlaying
@@ -687,7 +743,7 @@ public final class PartySession {
         defer { isSyncing = false }
         while needsSync {
             needsSync = false
-            await serially { await self.stageIfNeeded() }
+            try? await serially { await self.stageIfNeeded() }
         }
     }
 
@@ -706,10 +762,11 @@ public final class PartySession {
         }
         guard desired?.id != stagedItemID else { return }
         do {
-            try await engine.stage(desired?.track)
+            try await timed("stage") { try await self.engine.stage(desired?.track) }
             stagedItemID = desired?.id
         } catch {
-            // Leave stagedItemID alone; the next change retries, and `.reachedEnd` covers a miss.
+            // Leave stagedItemID alone (a timeout has cleared it); the next change retries, and
+            // `.reachedEnd` covers a miss.
         }
     }
 
@@ -761,5 +818,34 @@ public final class PartySession {
             guard !Task.isCancelled, let data = try? JSONEncoder().encode(state) else { return }
             try? data.write(to: storeURL, options: .atomic)
         }
+    }
+}
+
+/// A continuation resumed exactly once, by whichever comes first: the task's result or the
+/// waiter's cancellation (`PartySession.value(of:)`).
+private final class Waiter<T: Sendable>: @unchecked Sendable {
+    private let lock = NSLock()
+    private var continuation: CheckedContinuation<T, any Error>?
+    private var result: Result<T, any Error>?
+
+    func begin(_ continuation: CheckedContinuation<T, any Error>) {
+        lock.lock()
+        if let result {
+            lock.unlock()
+            continuation.resume(with: result)
+            return
+        }
+        self.continuation = continuation
+        lock.unlock()
+    }
+
+    func finish(_ result: Result<T, any Error>) {
+        lock.lock()
+        guard self.result == nil else { lock.unlock(); return }
+        self.result = result
+        let continuation = self.continuation
+        self.continuation = nil
+        lock.unlock()
+        continuation?.resume(with: result)
     }
 }

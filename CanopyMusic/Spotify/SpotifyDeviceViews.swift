@@ -50,49 +50,8 @@ struct SpotifyStatusRows: View {
                 }
             }
 
-            // Sonos rooms playing the zone's songs (Speakers section) don't use a Spotify device.
-            if !model.usesSonos {
-            Button {
-                model.isPickingSpotifyDevice = true
-            } label: {
-                HStack(spacing: 12) {
-                    Image(systemName: SpotifyDeviceKind.icon(model.spotifyDeviceType))
-                        .font(.system(size: 17))
-                        .foregroundStyle(.secondary)
-                        .frame(width: 28)
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text(model.spotifyDeviceName.map { "Plays on \($0)" } ?? "Choose where music plays")
-                        status
-                    }
-                    Spacer()
-                    Image(systemName: "chevron.right")
-                        .font(.footnote.weight(.semibold))
-                        .foregroundStyle(.tertiary)
-                }
-                .contentShape(Rectangle())
-            }
-            .buttonStyle(.plain)
-            // The picker itself is presented by host mode (`HostView`).
-            // Keep the status current while host mode is open (one request every 10 s).
-            .task {
-                while !Task.isCancelled {
-                    await model.refreshSpotifyDevices()
-                    try? await Task.sleep(for: .seconds(10))
-                }
-            }
-            }
-        }
-    }
-
-    @ViewBuilder private var status: some View {
-        if model.spotifyDeviceID == nil {
-            EmptyView()
-        } else if !model.spotifyDevicesLoaded {
-            Text("Checking…").font(.footnote).foregroundStyle(.secondary)
-        } else if model.spotifyDeviceAvailable {
-            StatusDot(color: .green, text: "Ready")
-        } else {
-            StatusDot(color: .orange, text: "Not available. Open Spotify on it.")
+            // Where music plays: a Spotify Connect device, or Sonos rooms (`OutputRow`).
+            OutputRow()
         }
     }
 }
@@ -122,7 +81,8 @@ struct SpotifyDeviceButton: View {
         .glassEffect(.regular.interactive(), in: Circle())
         .accessibilityLabel("Where music plays")
         .accessibilityValue(model.spotifyDeviceName.map { unavailable ? "\($0), not available" : $0 } ?? "Not chosen")
-        .spotifyDevicePicker()
+        // Spotify Connect devices only: the music moves to Sonos from the start screen.
+        .outputPicker(includesSonos: false)
         .task {
             while !Task.isCancelled {
                 await model.refreshSpotifyDevices()
@@ -133,18 +93,22 @@ struct SpotifyDeviceButton: View {
 }
 
 extension View {
-    func spotifyDevicePicker() -> some View {
-        modifier(SpotifyDevicePickerPresenter())
+    /// Presents "Where should music play?" (`AppModel.isPickingSpotifyDevice`). `includesSonos`:
+    /// with its Sonos section (the start screen); setup and the party screen list only what they
+    /// always did.
+    func outputPicker(includesSonos: Bool) -> some View {
+        modifier(OutputPickerPresenter(includesSonos: includesSonos))
     }
 }
 
-private struct SpotifyDevicePickerPresenter: ViewModifier {
+private struct OutputPickerPresenter: ViewModifier {
     @Environment(AppModel.self) private var model
+    let includesSonos: Bool
 
     func body(content: Content) -> some View {
         @Bindable var model = model
         content.sheet(isPresented: $model.isPickingSpotifyDevice) {
-            SpotifyDevicePicker()
+            OutputPicker(includesSonos: includesSonos)
                 .environment(model)
                 .presentationBackground(.ultraThinMaterial)
                 .preferredColorScheme(.dark)
@@ -152,18 +116,25 @@ private struct SpotifyDevicePickerPresenter: ViewModifier {
     }
 }
 
-
-/// "Where should music play?" Lists Spotify Connect devices and keeps looking while open.
-struct SpotifyDevicePicker: View {
+/// "Where should music play?" For Spotify: the Spotify Connect devices, kept current while open.
+/// For Apple Music: this device (and its AirPlay speakers). Then, on the start screen, the Sonos
+/// rooms (`SonosPickerSection`): choosing rooms leaves this device or the Connect device, and
+/// choosing this device or a Connect device leaves Sonos.
+struct OutputPicker: View {
     @Environment(AppModel.self) private var model
     @Environment(\.dismiss) private var dismiss
+    let includesSonos: Bool
 
     private static let intro = "Open Spotify on this \(DeviceKind.noun) or another device in your home. That's where music will play from."
+
+    private var showsSonos: Bool {
+        includesSonos && model.sonosService != nil && (!model.sonos.rooms.isEmpty || model.sonosOutput != nil)
+    }
 
     var body: some View {
         NavigationStack {
             Group {
-                if model.spotifyDevices.isEmpty {
+                if model.provider == .spotify, model.spotifyDevices.isEmpty, !showsSonos {
                     empty
                 } else {
                     list
@@ -175,8 +146,9 @@ struct SpotifyDevicePicker: View {
                 ToolbarItem(placement: .confirmationAction) { Button("Done") { dismiss() }.tint(.primary) }
             }
         }
-        .tint(AppModel.Provider.spotify.accent)
+        .tint(model.provider.accent)
         .task {
+            guard model.provider == .spotify else { return }
             while !Task.isCancelled {
                 await model.refreshSpotifyDevices()
                 try? await Task.sleep(for: .seconds(3))
@@ -186,8 +158,34 @@ struct SpotifyDevicePicker: View {
 
     private var list: some View {
         Form {
-            Section {
-                ForEach(model.spotifyDevices) { device in
+            if model.provider == .spotify {
+                spotifySection
+                if model.spotifyDevices.isEmpty || !showsSonos {
+                    Section {
+                        OpenSpotifyButton(prominent: false)
+                            .frame(maxWidth: .infinity)
+                            .listRowBackground(Color.clear)
+                    }
+                }
+            } else {
+                Section {
+                    ThisDeviceRow()
+                }
+                .listRowBackground(Color.white.opacity(0.08))
+            }
+            if showsSonos {
+                SonosPickerSection()
+            }
+        }
+        .scrollContentBackground(.hidden)
+    }
+
+    private var spotifySection: some View {
+        Section {
+            if model.spotifyDevices.isEmpty {
+                Searching(text: "Looking for devices…")
+            }
+            ForEach(model.spotifyDevices) { device in
                     Button {
                         model.selectSpotifyDevice(device)
                     } label: {
@@ -203,7 +201,8 @@ struct SpotifyDevicePicker: View {
                                     .foregroundStyle(.secondary)
                             }
                             Spacer()
-                            if device.id == model.spotifyDeviceID {
+                            // Not while Sonos rooms play the music.
+                            if device.id == model.spotifyDeviceID, model.sonosOutput == nil {
                                 Image(systemName: "checkmark")
                                     .font(.body.weight(.semibold))
                                     .foregroundStyle(.tint)
@@ -220,17 +219,11 @@ struct SpotifyDevicePicker: View {
                     .foregroundStyle(.secondary)
                 .padding(.bottom, 6)
             } footer: {
-                Searching(text: "Looking for more devices…")
+                if !model.spotifyDevices.isEmpty {
+                    Searching(text: "Looking for more devices…")
+                }
             }
             .listRowBackground(Color.white.opacity(0.08))
-
-            Section {
-                OpenSpotifyButton(prominent: false)
-                    .frame(maxWidth: .infinity)
-                    .listRowBackground(Color.clear)
-            }
-        }
-        .scrollContentBackground(.hidden)
     }
 
     private var empty: some View {
@@ -250,7 +243,7 @@ struct SpotifyDevicePicker: View {
     }
 }
 
-private struct Searching: View {
+struct Searching: View {
     let text: String
 
     var body: some View {
@@ -263,7 +256,7 @@ private struct Searching: View {
     }
 }
 
-private struct OpenSpotifyButton: View {
+struct OpenSpotifyButton: View {
     let prominent: Bool
 
     var body: some View {

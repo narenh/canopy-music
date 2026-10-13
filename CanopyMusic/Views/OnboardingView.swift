@@ -43,7 +43,7 @@ struct OnboardingView: View {
         .preferredColorScheme(.dark)
         .foregroundStyle(.white)
         // After signing in to Spotify: "Where should music play?"
-        .spotifyDevicePicker()
+        .outputPicker(includesSonos: false)
         #if DEBUG
         .onAppear {
             if ProcessInfo.processInfo.arguments.contains("-onboardingSpotify") { step = .spotify }

@@ -36,11 +36,6 @@ struct HostView: View {
         }
     }
 
-    /// Sonos rows: the zone has a service Sonos can stream, and rooms were found, or one is chosen.
-    private var showsSonos: Bool {
-        model.sonosService != nil && (!model.sonos.rooms.isEmpty || model.sonosOutput != nil)
-    }
-
     /// Start on the start screen; Back to party (just locking) in a live zone.
     private var canPressStart: Bool {
         model.isLive || model.canStartZone
@@ -78,8 +73,9 @@ struct HostView: View {
                 .presentationBackground(.ultraThinMaterial)
                 .preferredColorScheme(.dark)
         }
-        // "Where should music play?": the Spotify rows, Start finding no device, or switching.
-        .spotifyDevicePicker()
+        // "Where should music play?": the Music section's output row, Start finding no Spotify
+        // device, or switching to Spotify. With the Sonos rooms.
+        .outputPicker(includesSonos: true)
         .fullScreenCover(isPresented: $signingInToSpotify, onDismiss: {
             if signedInToSpotify { model.switchService(to: .spotify) }
         }) {
@@ -177,6 +173,8 @@ struct HostView: View {
                         }
                     } else {
                         AppleMusicStatusRow(showOffer: $showSubscriptionOffer, switchService: switchService)
+                        // This iPad (AirPlay) or Sonos rooms.
+                        OutputRow()
                     }
                 }
                 .listRowBackground(Color.white.opacity(0.08))
@@ -192,18 +190,6 @@ struct HostView: View {
                     Text("Other Canopy Music devices on the Wi\u{2011}Fi see this zone by name. The PIN is asked for when you press and hold the logo on the party screen.")
                 }
                 .listRowBackground(Color.white.opacity(0.08))
-
-                // This device's AirPlay row: with Spotify, only once a device is chosen and it's
-                // this one (not a TV or a speaker). Sonos rooms are listed for either service.
-                if model.showsSpeakerChoice || showsSonos {
-                    Section("Speakers") {
-                        if model.showsSpeakerChoice {
-                            SpeakersRow()
-                        }
-                        SonosSpeakerRows()
-                    }
-                    .listRowBackground(Color.white.opacity(0.08))
-                }
 
                 // The phone page runs only in a live zone.
                 if model.isLive {
@@ -546,62 +532,6 @@ private struct ZonePINRow: View {
             .keyboardType(.numberPad)
             .textContentType(.oneTimeCode)
         }
-    }
-}
-
-// MARK: - Speakers
-
-/// Current audio output (AirPlay speakers, or the iPad) with the system AirPlay picker. While
-/// Sonos rooms play the zone's songs, it's unticked, and choosing it plays here again.
-private struct SpeakersRow: View {
-    @Environment(AppModel.self) private var model
-    @State private var outputs: [AVAudioSessionPortDescription] = []
-    @State private var trigger = RoutePickerTrigger()
-
-    var body: some View {
-        Button {
-            if model.sonosOutput != nil {
-                model.useThisDevice()
-            } else {
-                trigger.present()
-            }
-        } label: {
-            HStack(spacing: 12) {
-            Image(systemName: "hifispeaker.2.fill")
-                .font(.system(size: 18))
-                .foregroundStyle(.secondary)
-                .frame(width: 28)
-            VStack(alignment: .leading, spacing: 2) {
-                Text(outputs.isEmpty ? "This \(DeviceKind.noun)" : outputs.map(\.portName).joined(separator: ", "))
-                    .lineLimit(2)
-                if outputs.contains(where: { $0.portType == .airPlay }) {
-                    Text("AirPlay").font(.footnote).foregroundStyle(.secondary)
-                }
-            }
-            Spacer()
-            // A tick shows which output plays once there's another (Sonos) to choose.
-            if model.sonosOutput == nil, !model.sonos.rooms.isEmpty, model.sonosService != nil {
-                Image(systemName: "checkmark")
-                    .font(.body.weight(.semibold))
-                    .foregroundStyle(.tint)
-            }
-            RoutePicker(tint: .white, trigger: trigger)
-                .frame(width: 44, height: 44)
-                .accessibilityHidden(true)
-            }
-            .contentShape(Rectangle())
-            .opacity(model.sonosOutput == nil ? 1 : 0.5)
-        }
-        .buttonStyle(.plain)
-        .accessibilityLabel(model.sonosOutput == nil ? "Choose speakers" : "Play on this \(DeviceKind.noun)")
-        .onAppear(perform: refresh)
-        .onReceive(NotificationCenter.default.publisher(for: AVAudioSession.routeChangeNotification).receive(on: RunLoop.main)) { _ in
-            refresh()
-        }
-    }
-
-    private func refresh() {
-        outputs = AVAudioSession.sharedInstance().currentRoute.outputs
     }
 }
 

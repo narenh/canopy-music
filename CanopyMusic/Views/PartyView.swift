@@ -499,6 +499,9 @@ private struct TransportControls: View {
                 if model.isDisplay {
                     // Speakers are chosen on the hub; keep the controls centered.
                     Color.clear.frame(width: 44, height: 44)
+                } else if model.usesSonos {
+                    // Sonos rooms play the music: their own panel, in AirPlay's place.
+                    SonosSpeakersButton()
                 } else {
                 // Open AirPlay picker: AirPlay sessions sometimes drop and need re-picking.
                 // Disabled (but kept for balance) when Spotify plays on another device.
@@ -516,7 +519,7 @@ private struct TransportControls: View {
                         .frame(width: 44, height: 44)
                         .glassEffect(.regular, in: Circle())
                         .accessibilityLabel("Speakers")
-                        .accessibilityValue("Not used: music plays on \(model.usesSonos ? model.sonosOutput?.target.name ?? "Sonos" : model.spotifyDeviceName ?? "another device")")
+                        .accessibilityValue("Not used: music plays on \(model.spotifyDeviceName ?? "another device")")
                 }
                 }
                 Group {

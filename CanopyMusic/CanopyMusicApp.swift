@@ -246,6 +246,27 @@ struct RootView: View {
                 model.installScreenshotSession(session)
                 ScreenshotHub.pose(model)
             }
+            // `-sonosFake -sonosFakeParty 1|2`: the party screen playing through the simulated
+            // Sonos household, in Bedroom (and Move).
+            if let i = args.firstIndex(of: "-sonosFakeParty"), i + 1 < args.count, AppModel.isSonosFake {
+                await model.startFakeSonosParty(rooms: Int(args[i + 1]) ?? 1)
+                // `-sonosToggle Move,Bedroom`: ticks or unticks those rooms in turn, 5 s apart, as
+                // tapping them in the Speakers panel would (the simulator can't be tapped from here).
+                if let t = args.firstIndex(of: "-sonosToggle"), t + 1 < args.count {
+                    for name in args[t + 1].split(separator: ",") {
+                        try? await Task.sleep(for: .seconds(5))
+                        if let room = model.sonos.rooms.first(where: { $0.roomName == name }) {
+                            print("[debug] toggling \(name)")
+                            model.toggleSonosRoom(room.id)
+                        }
+                    }
+                }
+            }
+            // `-showOutputPicker`: opens "Where should music play?" on the start screen.
+            if args.contains("-showOutputPicker") {
+                try? await Task.sleep(for: .seconds(2))
+                model.isPickingSpotifyDevice = true
+            }
             // `-autoLoad` loads the first demo playlist without playing, for host-screen screenshots.
             if ProcessInfo.processInfo.arguments.contains("-autoLoad"), model.isDemo,
                let first = try? await model.session.catalog.libraryPlaylists().first {

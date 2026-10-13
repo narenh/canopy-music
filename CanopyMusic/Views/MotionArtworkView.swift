@@ -9,16 +9,22 @@ import SwiftUI
 struct MotionArtworkView: View {
     let track: QueueTrack?
     let catalog: any MusicCatalog
+    /// The music's play/pause: the video eases to a stop with it, and back up (as Apple Music's,
+    /// and the TV's `TVMotionArtworkView`).
+    var isPlaying: Bool
     var cornerRadius: CGFloat
 
     @State private var url: URL?
     @State private var isShowing = false
-    @Environment(\.scenePhase) private var scenePhase
+    /// Whether the app is in the background (the video stops there). Not `scenePhase`: under this
+    /// app's UIKit scene delegate it reads `.background` even in the foreground, which kept the
+    /// video paused on its first frame.
+    @State private var inBackground = UIApplication.shared.applicationState == .background
 
     var body: some View {
         ZStack {
             if let url {
-                LoopingVideo(url: url, isActive: scenePhase != .background) {
+                LoopingVideo(url: url, isActive: !inBackground, isPlaying: isPlaying) {
                     withAnimation(.easeIn(duration: 0.8)) { isShowing = true }
                 }
                 .id(url)
@@ -28,6 +34,8 @@ struct MotionArtworkView: View {
         .clipShape(RoundedRectangle(cornerRadius: cornerRadius, style: .continuous))
         .allowsHitTesting(false)
         .accessibilityHidden(true)
+        .onReceive(NotificationCenter.default.publisher(for: UIScene.didEnterBackgroundNotification)) { _ in inBackground = true }
+        .onReceive(NotificationCenter.default.publisher(for: UIScene.willEnterForegroundNotification)) { _ in inBackground = false }
         .task(id: track?.id) {
             url = nil
             isShowing = false
@@ -50,22 +58,24 @@ struct MotionArtworkView: View {
 }
 
 /// A muted, looping `AVPlayerLayer`. It never publishes Now Playing info (no
-/// `AVPlayerViewController`), never plays to AirPlay, and pauses while `isActive` is false.
+/// `AVPlayerViewController`), never plays to AirPlay, pauses while `isActive` is false, and
+/// follows the music's play/pause (`isPlaying`).
 private struct LoopingVideo: UIViewRepresentable {
     let url: URL
     let isActive: Bool
+    let isPlaying: Bool
     /// Called once, when the first frame is ready to show.
     let onReady: @MainActor () -> Void
 
     func makeUIView(context: Context) -> LoopingVideoView {
         let view = LoopingVideoView()
         view.start(url: url, onReady: onReady)
-        view.setActive(isActive)
+        view.setActive(isActive, playing: isPlaying, animated: false)
         return view
     }
 
     func updateUIView(_ view: LoopingVideoView, context: Context) {
-        view.setActive(isActive)
+        view.setActive(isActive, playing: isPlaying, animated: true)
     }
 
     static func dismantleUIView(_ view: LoopingVideoView, coordinator: ()) {
@@ -80,7 +90,11 @@ private final class LoopingVideoView: UIView {
     private var player: AVQueuePlayer?
     private var looper: AVPlayerLooper?
     private var readyObservation: NSKeyValueObservation?
+    private var statusObservation: NSKeyValueObservation?
+    private var interruptionObserver: NSObjectProtocol?
     private var onReady: (@MainActor () -> Void)?
+    /// Whether we want it playing (`setActive`), for the debug log.
+    private var wantsToPlay = false
 
     func start(url: URL, onReady: @escaping @MainActor () -> Void) {
         self.onReady = onReady
@@ -102,14 +116,85 @@ private final class LoopingVideoView: UIView {
             guard layer.isReadyForDisplay else { return }
             Task { @MainActor [weak self] in self?.revealOnce() }
         }
+        // Debug log of what the player does, to check on a real iPad whether the music pauses it.
+        // Unlike the TV's (`.ambient`), the app's audio session is `.playback` with long-form
+        // audio, for multi-speaker AirPlay (`AppModel.init`), so it isn't mixable.
+        statusObservation = player.observe(\.timeControlStatus, options: [.new]) { [weak self] player, _ in
+            Task { @MainActor [weak self] in self?.statusChanged(player) }
+        }
+        interruptionObserver = NotificationCenter.default.addObserver(
+            forName: AVAudioSession.interruptionNotification, object: nil, queue: .main
+        ) { note in
+            let type = (note.userInfo?[AVAudioSessionInterruptionTypeKey] as? UInt).flatMap(AVAudioSession.InterruptionType.init)
+            motionLog("audio session interruption \(type == .began ? "began" : type == .ended ? "ended" : "?")")
+        }
     }
 
-    func setActive(_ active: Bool) {
+    /// `active` false (the app's in the background) stops it at once. Otherwise it follows the
+    /// music: `animated`, the rate eases down to a stop or back up to normal speed over
+    /// `rampDuration`, as Apple Music's motion artwork does; a stream that can't play slower than
+    /// normal just pauses and plays.
+    func setActive(_ active: Bool, playing: Bool, animated: Bool) {
         guard let player else { return }
-        if active { player.play() } else { player.pause() }
+        let wanted = active && playing
+        guard wanted != wantsToPlay || !animated else { return }
+        wantsToPlay = wanted
+        rampTimer?.invalidate()
+        rampTimer = nil
+        let canRamp = animated && active && (player.currentItem?.canPlaySlowForward ?? false)
+        motionLog("\(wanted ? "play" : "pause") (active: \(active), music playing: \(playing), \(canRamp ? "eased" : "at once"))")
+        guard canRamp else {
+            if wanted { player.play() } else { player.pause() }
+            return
+        }
+        ramp = (from: Double(player.rate), to: wanted ? 1 : 0, start: Date())
+        if wanted, player.rate == 0 { player.rate = 0.05 }
+        rampTimer = Timer.scheduledTimer(withTimeInterval: 1.0 / 60, repeats: true) { [weak self] _ in
+            MainActor.assumeIsolated { self?.rampStep() }
+        }
+    }
+
+    static let rampDuration: TimeInterval = 0.25
+    private var rampTimer: Timer?
+    private var ramp: (from: Double, to: Double, start: Date)?
+
+    private func rampStep() {
+        guard let player, let ramp else {
+            rampTimer?.invalidate()
+            rampTimer = nil
+            return
+        }
+        let progress = min(1, Date().timeIntervalSince(ramp.start) / Self.rampDuration)
+        // Ease out: quick at first, settling into the new speed.
+        let eased = 1 - pow(1 - progress, 2)
+        if progress >= 1 {
+            rampTimer?.invalidate()
+            rampTimer = nil
+            self.ramp = nil
+            if ramp.to == 0 { player.pause() } else { player.rate = 1 }
+        } else {
+            player.rate = Float(max(ramp.from + (ramp.to - ramp.from) * eased, 0.05))
+        }
+    }
+
+    private func statusChanged(_ player: AVPlayer) {
+        let status = switch player.timeControlStatus {
+        case .paused: "paused"
+        case .playing: "playing"
+        case .waitingToPlayAtSpecifiedRate: "waiting (\(player.reasonForWaitingToPlay?.rawValue ?? "?"))"
+        @unknown default: "unknown"
+        }
+        motionLog("video \(status), rate \(player.rate), wants to play: \(wantsToPlay)")
     }
 
     func stop() {
+        wantsToPlay = false
+        rampTimer?.invalidate()
+        rampTimer = nil
+        statusObservation?.invalidate()
+        statusObservation = nil
+        if let interruptionObserver { NotificationCenter.default.removeObserver(interruptionObserver) }
+        interruptionObserver = nil
         readyObservation?.invalidate()
         readyObservation = nil
         onReady = nil
@@ -126,4 +211,20 @@ private final class LoopingVideoView: UIView {
         self.onReady = nil
         onReady()
     }
+}
+
+/// Debug builds: a line in Library/Caches/motion.log (and the console).
+private func motionLog(_ line: String) {
+    #if DEBUG
+    let text = "\(Date()) [motion] \(line)\n"
+    print(text, terminator: "")
+    let url = URL.cachesDirectory.appending(path: "motion.log")
+    if let handle = try? FileHandle(forWritingTo: url) {
+        handle.seekToEndOfFile()
+        handle.write(Data(text.utf8))
+        try? handle.close()
+    } else {
+        try? Data(text.utf8).write(to: url)
+    }
+    #endif
 }

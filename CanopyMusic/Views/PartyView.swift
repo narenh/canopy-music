@@ -447,11 +447,13 @@ struct NowPlayingView: View {
                             }
                         }
                     // Displays: transport only while the hub allows it (no AirPlay or crossfade).
-                    if !model.isDisplay || session.displaysCanControl {
+                    if showsTransport {
                         TransportControls(session: session)
                     }
                 }
-                if centered { Spacer(minLength: 0) }
+                // Without the controls there's nothing to line up with Up next's bottom edge, so
+                // the artwork, title and bar sit in the middle in landscape too.
+                if centered || (item != nil && !showsTransport) { Spacer(minLength: 0) }
             }
             .frame(maxWidth: .infinity)
             .animation(.spring(duration: 0.6, bounce: 0.15), value: item?.id)
@@ -463,6 +465,9 @@ struct NowPlayingView: View {
     }
 
     static let bottomInset: CGFloat = 24
+
+    /// Displays get play/pause, skip and scrubbing only while the hub allows it.
+    private var showsTransport: Bool { !model.isDisplay || session.displaysCanControl }
 }
 
 private struct TransportControls: View {

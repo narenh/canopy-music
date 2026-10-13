@@ -184,7 +184,9 @@ public actor MotionArtworkLookup {
     /// artwork to our token (checked on a real Apple TV, every variant). nil when the service has
     /// none, the feature is off, the lookup failed, or this is a Release build.
     public func videoURL(for track: QueueTrack) async -> URL? {
-        guard MotionArtwork.isEnabled else { return nil }
+        // Apple Music catalog songs only (numeric ids): not Spotify's, on a display of a Spotify
+        // zone, and not library-only uploads.
+        guard MotionArtwork.isEnabled, MotionArtwork.isCatalogID(track.id) else { return nil }
         #if DEBUG
         if MotionArtwork.usesThirdPartyService { return await serviceVideoURL(for: track) }
         #endif

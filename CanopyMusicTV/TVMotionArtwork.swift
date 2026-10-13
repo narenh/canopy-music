@@ -47,7 +47,7 @@ struct TVMotionArtworkView: View {
                 return
             }
             #endif
-            // Nil on a display TV and for catalogs other than Apple Music.
+            // Nil for Spotify and demo hubs. A display TV has its own (service only, Apple Music songs).
             guard let lookup = catalog.motionArtwork else { return }
             let found = await lookup.videoURL(for: track)
             guard !Task.isCancelled else { return }

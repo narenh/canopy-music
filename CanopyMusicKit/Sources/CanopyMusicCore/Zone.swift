@@ -68,6 +68,12 @@ public struct UpcomingPage: Codable, Equatable, Sendable {
 /// Search for a display goes to the hub, so every result is playable there.
 struct RemoteCatalog: MusicCatalog {
     let search: @Sendable (String) async throws -> [QueueTrack]
+    /// Displays look motion artwork up themselves, from the track in the hub's snapshot. Only the
+    /// third-party service is asked (`videoURL(for:)`), so the Apple Music fetch is never used.
+    let motionArtwork: MotionArtworkLookup? = MotionArtworkLookup(
+        fetch: { _ in throw CancellationError() },
+        storefront: { Locale.current.region?.identifier.lowercased() }
+    )
 
     func searchSongs(_ term: String) async throws -> [QueueTrack] { try await search(term) }
     func libraryPlaylists() async throws -> [PlaylistSummary] { [] }

@@ -33,9 +33,9 @@ struct TVRootView: View {
         let takeover = model.role == .choosing || Self.capturing ? nil : easterEgg.takeover(for: current)
         ZStack {
             TVBackground(track: current?.track, theme: ArtworkTheme(current?.track.colors))
-                // Eases to the new song's over the whole of the party screen's out-then-in
-                // change (`TVPartyView.showCurrent`), starting with it.
-                .animation(.easeInOut(duration: TVPartyView.fadeOut + TVPartyView.fadeIn), value: current?.id)
+                // Changes to the new song's evenly over the party screen's slide to it
+                // (`TVPartyView.showCurrent`).
+                .animation(.linear(duration: TVPartyView.slide), value: current?.id)
             switch model.role {
             case .choosing:
                 TVZoneListView()
@@ -484,78 +484,67 @@ struct TVStartView: View {
 
 struct TVPartyView: View {
     @Environment(TVModel.self) private var model
-    /// Height of everything in the now-playing column under the artwork, which takes the rest.
-    @State private var footerHeight: CGFloat = 200
+    /// Heights of what's in the now-playing column under the artwork (the song's text and progress,
+    /// and a display's zone badge); the artwork takes the rest.
+    @State private var songTextHeight: CGFloat = 200
+    @State private var badgeHeight: CGFloat = 0
     /// The remote's left and right, one at a time.
     @State private var stepper = RemoteStepper()
     /// The song the now-playing column shows. When the song changes (remote, a phone, or the song
-    /// ending) its art and text fade out completely, then the newest song's fade in: never both
-    /// at once (`showCurrent`). The background eases between them over the whole change.
+    /// ending) the new song's art and text push the old one's out sideways, like turning a page
+    /// (`showCurrent`); the background changes evenly over the same time.
     @State private var shown: QueueItem?
     @State private var started = false
-    @State private var songOpacity: Double = 1
-    /// When the fade out under way finishes.
-    @State private var hiddenAt: ContinuousClock.Instant?
-    static let fadeOut = 0.35
-    static let fadeIn = 0.35
+    /// Which way the last slide went: forward brings the new song in from the right.
+    @State private var forward = true
+    /// When the slide under way finishes.
+    @State private var slideEnds: ContinuousClock.Instant?
+    /// Width of the now-playing column, edge to edge (the slide's clip).
+    @State private var columnWidth: CGFloat = 1000
+    static let slide = 0.28
     /// The logo's visible top and left margin from the screen edges, level with the capitals in
     /// "Up next". The image has 6.5pt of empty space above the arc and 1pt to its left.
     static let logoInset: CGFloat = 71
 
     var body: some View {
         let session = model.session
+        let live = session.state.current
         // The live item while it's the one shown, so its changes (a requester's name) show.
-        let current = !started || shown?.id == session.state.current?.id ? session.state.current : shown
+        let current = !started || shown?.id == live?.id ? live : shown
+        // The song shown leaves the way the change to the live one goes, so that's set while it's
+        // still shown; the song coming in arrives the way `showCurrent` set.
+        let goesForward = started && shown?.id != live?.id ? slidesForward(from: shown) : forward
+        let footerHeight = songTextHeight + (model.role == .display ? badgeHeight : 0)
         GeometryReader { geo in
             // As big as fits, up to a size that leaves room around the corner logo.
             let art = min(600, max(300, (geo.size.height - footerHeight).rounded(.down)))
             HStack(alignment: .top, spacing: 70) {
                 // Now playing.
                 VStack(alignment: .leading, spacing: 0) {
-                    TVArtwork(track: current?.track, cornerRadius: 22)
-                        // A new image view per song, so the last song's image can't linger.
-                        .id(current?.id)
-                        .frame(width: art, height: art)
-                        .shadow(color: .black.opacity(0.4), radius: 30, y: 16)
-                        .opacity(songOpacity)
-                    VStack(alignment: .leading, spacing: 0) {
-                        // Long titles shrink before they truncate, on the same baseline in a
-                        // full-size line, so the art's size and everything's position never change.
-                        Text(verbatim: " ")
-                            .font(.system(size: 56, weight: .bold))
-                            .frame(maxWidth: .infinity, alignment: .leading)
-                            .hidden()
-                            .overlay(alignment: Alignment(horizontal: .leading, vertical: .lastTextBaseline)) {
-                                Text(current?.track.title ?? "Nothing playing")
-                                    .font(.system(size: 56, weight: .bold))
-                                    .lineLimit(1)
-                                    .minimumScaleFactor(0.6)
-                            }
-                            .opacity(songOpacity)
-                        // Who requested it shares the artist line, as on the iPad.
-                        HStack(spacing: 16) {
-                            Text(current?.track.artist ?? " ")
-                                .font(.system(size: 36))
-                                .foregroundStyle(.white.opacity(0.65))
-                                .lineLimit(1)
-                            if let requester = current?.requester {
-                                TVRequesterPill(requester: requester).fixedSize()
-                            }
-                        }
-                        .opacity(songOpacity)
-                        .padding(.bottom, 26)
-                        TVProgress(session: session, itemID: current?.id, duration: current?.track.duration ?? 0)
-                            .opacity(songOpacity)
-                        if model.role == .display {
-                            TVZoneBadge().padding(.top, 24)
-                        }
+                    ZStack {
+                        nowPlaying(current, art: art)
+                            .id(current?.id)
+                            // Far enough that the song going out ends past the screen's left edge
+                            // (shadow and all), and the one coming in starts behind Up next.
+                            .transition(SongSlide(offset: (columnWidth + 160) * (goesForward ? 1 : -1)))
                     }
-                    .padding(.top, 34)
-                    .onGeometryChange(for: CGFloat.self, of: \.size.height) { footerHeight = $0 }
+                    if model.role == .display {
+                        TVZoneBadge()
+                            .padding(.top, 24)
+                            .onGeometryChange(for: CGFloat.self, of: \.size.height) { badgeHeight = $0 }
+                    }
                 }
                 .frame(width: art, alignment: .leading)
                 // Centered in whatever the sidebar leaves.
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
+                .onGeometryChange(for: CGFloat.self, of: \.size.width) { columnWidth = $0 }
+                // The slide shows from the screen's left edge to the edge of Up next.
+                .mask {
+                    Rectangle()
+                        .padding(.leading, -300)
+                        .padding(.trailing, -70)
+                        .padding(.vertical, -300)
+                }
 
                 // Up next + how to join.
                 VStack(alignment: .leading, spacing: 18) {
@@ -626,10 +615,55 @@ struct TVPartyView: View {
         #endif
     }
 
-    /// Fades the shown song out completely (or lets a fade out under way finish), switches to the
-    /// session's current song while nothing shows, then fades that in. Started again by each
-    /// change, part way through or not: it picks up from wherever the fade is, so a quick run of
-    /// skips never shows a song in between, and coming back to the shown song just fades it back in.
+    /// The song's art, title, artist line and progress: one page of the slide.
+    private func nowPlaying(_ item: QueueItem?, art: CGFloat) -> some View {
+        VStack(alignment: .leading, spacing: 0) {
+            TVArtwork(track: item?.track, cornerRadius: 22)
+                .frame(width: art, height: art)
+                .shadow(color: .black.opacity(0.4), radius: 30, y: 16)
+            VStack(alignment: .leading, spacing: 0) {
+                // Long titles shrink before they truncate, on the same baseline in a
+                // full-size line, so the art's size and everything's position never change.
+                Text(verbatim: " ")
+                    .font(.system(size: 56, weight: .bold))
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .hidden()
+                    .overlay(alignment: Alignment(horizontal: .leading, vertical: .lastTextBaseline)) {
+                        Text(item?.track.title ?? "Nothing playing")
+                            .font(.system(size: 56, weight: .bold))
+                            .lineLimit(1)
+                            .minimumScaleFactor(0.6)
+                    }
+                // Who requested it shares the artist line, as on the iPad.
+                HStack(spacing: 16) {
+                    Text(item?.track.artist ?? " ")
+                        .font(.system(size: 36))
+                        .foregroundStyle(.white.opacity(0.65))
+                        .lineLimit(1)
+                    if let requester = item?.requester {
+                        TVRequesterPill(requester: requester).fixedSize()
+                    }
+                }
+                .padding(.bottom, 26)
+                TVProgress(session: model.session, itemID: item?.id, duration: item?.track.duration ?? 0)
+            }
+            .padding(.top, 34)
+            .onGeometryChange(for: CGFloat.self, of: \.size.height) { songTextHeight = $0 }
+        }
+        .frame(width: art, alignment: .leading)
+    }
+
+    /// Whether going from `item` to the session's current song is a step forward. Going back puts
+    /// the song that was playing at the top of Up next; anything else (a skip, the song ending, a
+    /// jump in the queue) counts as forward.
+    private func slidesForward(from item: QueueItem?) -> Bool {
+        guard let item else { return true }
+        return model.session.state.upNext.first?.id != item.id
+    }
+
+    /// Slides from the shown song to the session's current one. A change during a slide waits for
+    /// it to finish (a moment), then slides once straight to the newest song: never two slides at
+    /// once, and songs skipped past in between never show.
     private func showCurrent() async {
         let session = model.session
         guard started else {
@@ -637,19 +671,16 @@ struct TVPartyView: View {
             started = true
             return
         }
-        if shown?.id != session.state.current?.id {
-            if songOpacity > 0 {
-                withAnimation(.easeInOut(duration: Self.fadeOut)) { songOpacity = 0 }
-                hiddenAt = .now + .seconds(Self.fadeOut)
-            }
-            if let hiddenAt {
-                do { try await Task.sleep(until: hiddenAt, clock: .continuous) } catch { return }
-            }
-            var instant = Transaction()
-            instant.disablesAnimations = true
-            withTransaction(instant) { shown = session.state.current }
+        if let slideEnds {
+            do { try await Task.sleep(until: slideEnds, clock: .continuous) } catch { return }
         }
-        withAnimation(.easeInOut(duration: Self.fadeIn)) { songOpacity = 1 }
+        guard shown?.id != session.state.current?.id else { return }
+        let goingForward = slidesForward(from: shown)
+        slideEnds = .now + .seconds(Self.slide)
+        withAnimation(.easeInOut(duration: Self.slide)) {
+            forward = goingForward
+            shown = session.state.current
+        }
     }
 
     /// Previous or skip, as the back and skip buttons elsewhere; ignored while one is still going,
@@ -662,6 +693,16 @@ struct TVPartyView: View {
             let went = await stepper.step(session, forward: forward)
             model.debugLog("remote \(forward ? "right" : "left"): \(went ? "now \(session.state.current?.track.title ?? "-")" : "ignored")")
         }
+    }
+}
+
+/// The now-playing page turn: the new song comes in from `offset` (right when it's positive)
+/// while the old one goes out the other way, the same distance.
+private struct SongSlide: Transition {
+    let offset: CGFloat
+
+    func body(content: Content, phase: TransitionPhase) -> some View {
+        content.offset(x: phase == .willAppear ? offset : phase == .didDisappear ? -offset : 0)
     }
 }
 
@@ -761,7 +802,7 @@ struct TVJoinCard: View {
 
 struct TVProgress: View {
     let session: PartySession
-    /// The song shown, which can still be the last one while it fades out (the engine has moved
+    /// The song shown, which can still be the last one while it slides out (the engine has moved
     /// on): its bar holds where it was, and the next song's starts from its own time.
     let itemID: QueueItem.ID?
     let duration: TimeInterval

@@ -89,6 +89,16 @@ public final class PartyServer: Sendable {
             try .json(await session.snapshot())
         }
 
+        // The `.local` address a zone name would get (as `address` in snapshots, before mDNS may
+        // move it to `name-2`), shown under the zone name as a host types it. null if the name
+        // has no letters or digits.
+        let port = port
+        await server.appendRoute("GET /api/local-name") { request in
+            let zone = String((request.query["zone"] ?? "").trimmingCharacters(in: .whitespacesAndNewlines).prefix(40))
+            let address = FriendlyHostname.typedLocalName(forZone: zone).map { "\($0).local" + (port == 80 ? "" : ":\(port)") }
+            return try .json(LocalNameReply(address: address))
+        }
+
         // The base playlist past the live Up Next, shown read-only below it (not in snapshots).
         await server.appendRoute("GET /api/upcoming") { request in
             let offset = max(0, Int(request.query["offset"] ?? "") ?? 0)
@@ -327,6 +337,10 @@ struct DisplayHello: Decodable {
 struct PlaybackBody: Decodable {
     var action: String
     var time: TimeInterval?
+}
+
+struct LocalNameReply: Encodable {
+    var address: String?
 }
 
 struct PlaylistBody: Decodable {

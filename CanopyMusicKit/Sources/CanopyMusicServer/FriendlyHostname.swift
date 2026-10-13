@@ -52,8 +52,20 @@ public final class FriendlyHostname: @unchecked Sendable {
         #endif
     }
 
+    /// `localName(forZone:)`, or nil when the zone name has no letters or digits to make one from
+    /// (the zone gets `music`): the page's preview of the address as a host types a name.
+    public static func typedLocalName(forZone zoneName: String) -> String? {
+        letters(zoneName).isEmpty ? nil : localName(forZone: zoneName)
+    }
+
     /// "Naren's Living Room" → "narens-living-room"; "Café" → "cafe"; "" → "music".
     static func slug(_ raw: String) -> String {
+        let name = letters(raw)
+        return name.isEmpty ? "music" : name
+    }
+
+    /// `slug` without the `music` fallback: "" when nothing's left.
+    private static func letters(_ raw: String) -> String {
         let allowed = Set("abcdefghijklmnopqrstuvwxyz0123456789")
         var name = ""
         for character in raw.folding(options: [.caseInsensitive, .diacriticInsensitive], locale: nil).lowercased() {
@@ -67,7 +79,7 @@ public final class FriendlyHostname: @unchecked Sendable {
         }
         name = String(name.prefix(63))
         while name.hasSuffix("-") { name.removeLast() }
-        return name.isEmpty ? "music" : name
+        return name
     }
 
     /// Moves to a new name (the zone was renamed): drops the old one and, if it was announced,

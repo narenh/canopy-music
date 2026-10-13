@@ -268,7 +268,7 @@
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_FILE = "CanopyMusic-Info.plist";
-				INFOPLIST_KEY_CFBundleDisplayName = "Canopy Music";
+				INFOPLIST_KEY_CFBundleDisplayName = "Canopy Music d";
 				INFOPLIST_KEY_ITSAppUsesNonExemptEncryption = NO;
 				INFOPLIST_KEY_NSAppleMusicUsageDescription = "Canopy Music plays your Apple Music playlists and lets guests search Apple Music to queue songs.";
 				INFOPLIST_KEY_NSLocalNetworkUsageDescription = "Canopy Music runs a small local web server so guests on your Wi‑Fi can queue songs.";
@@ -280,7 +280,7 @@
 					"@executable_path/Frameworks",
 				);
 				MARKETING_VERSION = 1.0;
-				PRODUCT_BUNDLE_IDENTIFIER = com.canopysf.CanopyMusic;
+				PRODUCT_BUNDLE_IDENTIFIER = com.canopysf.CanopyMusic.dev;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator";
 				SUPPORTS_MACCATALYST = NO;
@@ -328,13 +328,14 @@
 		CB0000000000000000000042 /* Debug */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = "Brand Assets";
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 1;
 				DEVELOPMENT_TEAM = UC3Y84QJ83;
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_FILE = "CanopyMusicTV-Info.plist";
-				INFOPLIST_KEY_CFBundleDisplayName = "Canopy Music";
+				INFOPLIST_KEY_CFBundleDisplayName = "Canopy Music d";
 				INFOPLIST_KEY_ITSAppUsesNonExemptEncryption = NO;
 				INFOPLIST_KEY_NSAppleMusicUsageDescription = "Canopy Music plays your Apple Music playlists and lets guests search Apple Music to queue songs.";
 				INFOPLIST_KEY_NSLocalNetworkUsageDescription = "Canopy Music finds other Canopy Music devices and runs a small local web server so guests on your Wi‑Fi can queue songs.";
@@ -345,7 +346,7 @@
 					"@executable_path/Frameworks",
 				);
 				MARKETING_VERSION = 1.0;
-				PRODUCT_BUNDLE_IDENTIFIER = com.canopysf.CanopyMusic;
+				PRODUCT_BUNDLE_IDENTIFIER = com.canopysf.CanopyMusic.dev;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SDKROOT = appletvos;
 				SUPPORTED_PLATFORMS = "appletvos appletvsimulator";
@@ -359,6 +360,7 @@
 		CB0000000000000000000043 /* Release */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = "Brand Assets";
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 1;
 				DEVELOPMENT_TEAM = UC3Y84QJ83;

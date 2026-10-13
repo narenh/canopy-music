@@ -1,5 +1,6 @@
 import AVFoundation
 import CanopyMusicCore
+import CanopyMusicServer
 import MusicKit
 import SwiftUI
 
@@ -371,6 +372,14 @@ private struct SettingsSheet: View {
     @State private var confirmingEnd = false
     @State private var savingPlaylist = false
 
+    /// Under the zone name: the zone's address for the saved name, else the `.local` address the
+    /// typed one gives. nil when the name is empty or has no letters or digits.
+    private var zoneNameAddress: String? {
+        let name = zoneNameDraft.trimmingCharacters(in: .whitespacesAndNewlines)
+        if name == model.zoneName { return model.localAddress }
+        return FriendlyHostname.typedLocalName(forZone: name).map { "\($0).local" }
+    }
+
     private func commitZoneName() {
         let name = zoneNameDraft.trimmingCharacters(in: .whitespacesAndNewlines)
         if name.isEmpty { zoneNameDraft = model.zoneName } else if name != model.zoneName { model.zoneName = String(name.prefix(40)) }
@@ -423,13 +432,20 @@ private struct SettingsSheet: View {
                 }
                 .listRowBackground(Color.white.opacity(0.08))
                 Section {
-                    HStack {
-                        Text("Zone name")
-                        Spacer(minLength: 16)
-                        TextField(UIDevice.current.name, text: $zoneNameDraft)
-                            .multilineTextAlignment(.trailing)
-                            .submitLabel(.done)
-                            .onSubmit { commitZoneName() }
+                    VStack(alignment: .trailing, spacing: 4) {
+                        HStack {
+                            Text("Zone name")
+                            Spacer(minLength: 16)
+                            TextField(UIDevice.current.name, text: $zoneNameDraft)
+                                .multilineTextAlignment(.trailing)
+                                .submitLabel(.done)
+                                .onSubmit { commitZoneName() }
+                        }
+                        if let address = zoneNameAddress {
+                            Text(address)
+                                .font(.footnote)
+                                .foregroundStyle(.secondary)
+                        }
                     }
                     SecureField("Unlock PIN (optional)", text: $model.hostPIN)
                         .keyboardType(.numberPad)

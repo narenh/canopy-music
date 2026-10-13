@@ -72,9 +72,17 @@
   if (initial && initial.zoneName) $("splash-text").textContent = `Connecting to ${initial.zoneName}`;
   // Which hub this is (older hubs don't say), for keeping host keys per hub.
   const hubID = (initial && initial.hubID) || null;
+  // A new Apple TV zone's host sets it up here on the IP address, since renaming the zone in the
+  // setup sheet moves its `.local` name. The page continues there once the zone is set up.
+  let moveWhenSetUp = false;
   await (async () => {
     const address = initial && initial.address, lan = initial && initial.lanAddress;
     if (!address || !lan || address === location.host) return;
+    if (waitingForSetup(initial) && !location.hostname.endsWith(".local")) {
+      debugLog("waiting for setup: staying");
+      moveWhenSetUp = true;
+      return;
+    }
     // Only if that name reaches this same hub: another zone can answer at music.local too.
     if (!(await reachable(address, lan))) { debugLog(`${address} not reachable: staying`); return; }
     debugLog(`moving to ${address}`);
@@ -108,6 +116,11 @@
     if (store.get("canopymusic.nameAsked") && !next.has("name")) next.set("name", store.get("canopymusic.name") || "");
     if (key && !next.get("host")) next.set("host", key);
     location.replace(`http://${address}/${next.toString() ? `?${next}` : ""}${hash}`);
+  }
+
+  /** An Apple TV zone whose host hasn't picked the music yet (as the hub's `isWaitingForSetup`). */
+  function waitingForSetup(s) {
+    return s.hubKind === "tv" && !s.playlistName && !s.current && !(s.upNext && s.upNext.length);
   }
 
   // An image loads across addresses where fetch can't; the hub only serves this one if it's the
@@ -204,6 +217,8 @@
     document.documentElement.style.setProperty("--base", base);
     document.documentElement.style.setProperty("--accent", accent);
     document.querySelector('meta[name="theme-color"]').setAttribute("content", base);
+    // Safari 26 ignores theme-color. The splash keeps its purple bars until it fades.
+    if ($("splash").classList.contains("gone")) tintBars();
 
     const img = $("backdrop-img");
     img.classList.remove("shown");
@@ -212,6 +227,18 @@
     const loader = new Image();
     loader.onload = () => { if (themedTrackId === id) { img.src = url; img.classList.add("shown"); } };
     loader.src = url;
+  }
+
+  /** Sets Safari's status bar and toolbar to the page's colour: Safari 26 takes it from a fixed
+   * element appearing at the screen's edges, and keeps it after (see .bar-tint). */
+  function tintBars() {
+    const tints = ["top", "bottom"].map((edge) => {
+      const tint = document.createElement("div");
+      tint.className = "bar-tint";
+      tint.style[edge] = "0";
+      return document.body.appendChild(tint);
+    });
+    requestAnimationFrame(() => requestAnimationFrame(() => tints.forEach((tint) => tint.remove())));
   }
 
   function setArt(el, track, large) {
@@ -251,6 +278,23 @@
     openSettingsFromLink();
     hideSplash();
     followRename();
+    moveIfSetUp();
+  }
+
+  // The page that set up a new Apple TV zone (on the IP address) continues at the zone's `.local`
+  // name once it's set up, behind the splash, as a page opened from the QR code does.
+  let setupToastUntil = 0;
+  async function moveIfSetUp() {
+    const address = snap.address;
+    if (!moveWhenSetUp || waitingForSetup(snap) || setupStarting || !address || address === location.host) return;
+    moveWhenSetUp = false;
+    // The setup's note about songs that couldn't load stays up for its time first.
+    const wait = setupToastUntil - Date.now();
+    if (wait > 0) await new Promise((resolve) => setTimeout(resolve, wait));
+    showSplash(`Connecting to ${snap.zoneName || "Canopy Music"}`);
+    if (!(await reachableWhenShown(address))) { debugLog(`set up; ${address} not reachable: staying`); hideSplash(); return; }
+    debugLog(`set up; moving to ${address}`);
+    moveTo(address, new URLSearchParams(location.search), savedHostKey(), settingsOpen() ? "#settings" : "");
   }
 
   // A renamed zone moves to a new `.local` name; a page on the old one follows it there (if this
@@ -261,8 +305,33 @@
     if (!address || address === location.host || address === followedAddress) return;
     if (!location.hostname.endsWith(".local")) return; // on the IP address, which still works
     followedAddress = address;
-    if (!(await reachable(address, snap.lanAddress))) return;
+    const ok = await reachableWhenShown(address, () => followedAddress === address);
+    if (followedAddress !== address) return; // renamed again meanwhile: that name is followed
+    if (!ok) { debugLog(`rename: ${address} not reachable: staying`); return; }
+    debugLog(`rename: moving to ${address}`);
     moveTo(address, new URLSearchParams(location.search), hostPaired ? hostKey : null, settingsOpen() ? "#settings" : "");
+  }
+
+  /** `reachable`, checked while the page is showing: Safari fails a background tab's loads from
+   * another address at once, so a hidden page waits until it's shown (again, if it was hidden
+   * during the check). Gives up (false) once `wanted()` is false. */
+  async function reachableWhenShown(address, wanted = () => true) {
+    for (;;) {
+      if (document.visibilityState !== "visible") {
+        debugLog(`${address}: waiting until shown`);
+        await new Promise((resolve) => {
+          const shown = () => {
+            if (document.visibilityState !== "visible") return;
+            document.removeEventListener("visibilitychange", shown);
+            resolve();
+          };
+          document.addEventListener("visibilitychange", shown);
+        });
+      }
+      if (!wanted()) return false;
+      if (await reachable(address, snap.lanAddress)) return true;
+      if (document.visibilityState === "visible") return false;
+    }
   }
 
   // A link to …/#settings opens the zone settings once this phone is a host and the state has loaded.
@@ -287,6 +356,7 @@
     // A sheet that opened as the first screen is already in place under the splash; it doesn't
     // also slide in while the splash fades.
     for (const sheet of document.querySelectorAll(".sheet")) if (!sheet.hidden) sheet.classList.add("instant");
+    tintBars(); // from the splash's purple to the page's colour
     splash.classList.add("gone");
     debugScreen("splash fading");
     setTimeout(() => {
@@ -294,6 +364,15 @@
       debugScreen("splash hidden");
       setTimeout(() => debugScreen("2s later"), 2000);
     }, 400);
+  }
+
+  /** The splash again, over the page (it sets Safari's bars to its purple as it appears). */
+  function showSplash(text) {
+    const splash = $("splash");
+    $("splash-text").textContent = text;
+    splash.hidden = false;
+    splash.classList.remove("gone");
+    debugScreen("splash shown again");
   }
 
   function render() {
@@ -308,6 +387,9 @@
     $("queue-off").hidden = !queueOff;
     renderHost();
     if (settingsOpen()) fillSettings();
+    // The hub's address can arrive (or change) while a zone name is being edited.
+    if (!$("setup").hidden) setupAddress();
+    if (!$("edit-modal").hidden) editAddress();
     const playing = !!(current && snap.playback.isPlaying);
     $("t-play").innerHTML = playing ? icons.pause : icons.play;
     $("t-play").setAttribute("aria-label", playing ? "Pause" : "Play");
@@ -1114,11 +1196,14 @@
     return n > titles.length ? `${head}, including ${list}.` : `${head}: ${list}.`;
   }
 
-  /** An Apple TV has no screen for it, so its hosts hear once, when they choose the playlist. */
+  /** An Apple TV has no screen for it, so its hosts hear once, when they choose the playlist.
+   * Returns whether it showed the note. */
   function toastSkipped(reply) {
     if (snap && snap.hubKind === "tv" && reply && reply.skippedOnLoad) {
       toast(skippedNote({ ...reply, service: snap.service }), 6000);
+      return true;
     }
+    return false;
   }
 
   /** A picker's footer button: a spinner and `busyLabel` while the hub works, the list and Shuffle dimmed. */
@@ -1172,10 +1257,32 @@
     debugScreen("setup opened");
     $("setup-you").value = myName || "";
     $("setup-name").value = snap.zoneName || "";
-    $("setup-sub").textContent = `You're hosting ${snap.hubKind === "tv" ? "the Apple TV" : "this zone"}. Guests can join once music is playing.`;
+    setupAddress();
+    $("setup-sub").textContent = snap.hubKind === "tv"
+      ? "Music will play from your Apple TV. Use Control Center to change audio output."
+      : "You're hosting this zone. Guests can join once music is playing.";
     await setupPicker.open();
     if (setupPick) setupPicker.select(setupPick.id);
   }
+  /** Keeps `line` showing the `.local` address that the zone name typed in `input` gives (the
+   * hub works it out, as it names itself), or for the saved name, the hub's actual address.
+   * Hidden when the name is empty or has no letters or digits. Returns the update function. */
+  function addressPreview(input, line, active = () => true) {
+    let asked = 0;
+    const show = (address) => { line.textContent = address || ""; line.hidden = !address; };
+    async function update() {
+      const name = input.value.trim(), asking = ++asked;
+      if (!name || !active()) { show(null); return; }
+      if (snap && name === snap.zoneName && snap.address) { show(snap.address); return; }
+      let address = null;
+      try { address = (await (await fetch(`/api/local-name?zone=${encodeURIComponent(name)}`)).json()).address; } catch {}
+      if (asking === asked) show(address);
+    }
+    input.addEventListener("input", update);
+    return update;
+  }
+  const setupAddress = addressPreview($("setup-name"), $("setup-address"));
+
   const setupPicker = playlistPicker("setup", "setup-playlists", "setup-empty", (p) => {
     setupPick = p;
     $("setup-start").disabled = false;
@@ -1198,7 +1305,8 @@
       setupDismissed = true;
       setupBusy(false);
       $("setup").hidden = true;
-      toastSkipped(reply);
+      if (toastSkipped(reply)) setupToastUntil = Date.now() + 6000;
+      if (snap) moveIfSetUp();
     } catch {
       setupBusy(false);
       toast("Couldn't start. Try again.");
@@ -1334,12 +1442,14 @@
     },
   };
   let editing = null;
+  const editAddress = addressPreview($("edit-input"), $("edit-address"), () => editing === editors.name);
   document.querySelectorAll("[data-edit]").forEach((button) => button.addEventListener("click", () => {
     editing = editors[button.dataset.edit];
     const input = $("edit-input");
     $("edit-title").textContent = editing.title;
     input.maxLength = editing.max;
     input.value = editing.value();
+    editAddress();
     $("edit-modal").hidden = false;
     setTimeout(() => input.focus(), 50);
   }));

@@ -46,8 +46,11 @@ struct PartyView: View {
             GeometryReader { geo in
                 // Within the Mac cap (ContentCap), windows wider than 16:10 (short Mac windows) keep
                 // the columns together in the middle, and Up next stops growing past its width on a
-                // 13" iPad; Now Playing takes the rest.
-                let width = min(geo.size.width, geo.size.height * 1.6)
+                // 13" iPad; Now Playing takes the rest. Measured against the height without the
+                // on-screen keyboard: it shortens this view, and would squeeze everything into a
+                // narrow column while searching.
+                let fullHeight = geo.size.height + (softwareKeyboardShown ? keyboardHeight : 0)
+                let width = min(geo.size.width, fullHeight * 1.6)
                 let right = min(width * 0.46, 640)
                 HStack(spacing: 0) {
                     leftPane

@@ -701,7 +701,7 @@ struct GuestQRCard: View {
     }
 
     @ViewBuilder private func wifiQR(_ wifi: String) -> some View {
-        if model.wifiSimpleQR {
+        if model.shownWifi.simpleQR {
             VStack(spacing: 4) {
                 QRCodeView(payload: wifi, inverted: true)
                     .frame(width: 64, height: 64)

@@ -292,6 +292,8 @@ public final class ZoneConnection: ZoneRemote {
         guard var components = URLComponents(url: base, resolvingAgainstBaseURL: false) else { return nil }
         components.scheme = "ws"
         components.path = "/ws"
+        // Display snapshots: with the hub's guest Wi‑Fi (older hubs ignore it).
+        components.queryItems = [URLQueryItem(name: "display", value: "1")]
         return components.url
     }
 }

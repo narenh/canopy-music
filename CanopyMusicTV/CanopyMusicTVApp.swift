@@ -332,14 +332,14 @@ final class TVModel {
     }
 
     /// The "Join Wi‑Fi" code next to the guest QR: this hub's Wi‑Fi, set by a host on the web page.
-    /// A display doesn't know its hub's (as on the iPad).
+    /// A display shows its hub's, from snapshots.
     var wifiPayload: String? {
         #if DEBUG
         if ProcessInfo.processInfo.arguments.contains("-fakeWifi") {
             return LocalNetwork.wifiJoinPayload(ssid: "Canopy Guest", password: "summer-party-2026")
         }
         #endif
-        guard role == .hub, !session.wifi.ssid.isEmpty else { return nil }
+        guard role != .choosing, !session.wifi.ssid.isEmpty else { return nil }
         return LocalNetwork.wifiJoinPayload(ssid: session.wifi.ssid, password: session.wifi.password)
     }
 

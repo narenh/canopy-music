@@ -84,6 +84,34 @@ struct ZoneTests {
         #expect(hub.state.upNext.map(\.id) == order)
     }
 
+    /// Displays show the hub's "Join Wi‑Fi" code, kept up to date; guests' phones never get it.
+    @Test func displayShowsTheHubsWifi() async throws {
+        let (hub, server, task) = try await makeHub(port: 18773)
+        defer { task.cancel(); Task { await server.stop() } }
+        hub.wifi = WifiDetails(ssid: "Party", password: "hunter22", simpleQR: true)
+        let connection = ZoneConnection(baseURL: URL(string: "http://127.0.0.1:18773")!, clientID: "kitchen", name: "Kitchen iPad", kind: .ipad)
+        let display = PartySession(remote: connection)
+        connection.start(session: display)
+        defer { connection.stop() }
+
+        #expect(await waitFor { display.wifi == WifiDetails(ssid: "Party", password: "hunter22", simpleQR: true) })
+        // A host changes it on the web page: the display follows, and clearing it clears it.
+        hub.applyHostSettings(zoneName: nil, phonesCanReorder: nil, displaysCanControl: nil,
+                              wifi: WifiDetails(ssid: "Guests", password: "letmein1"))
+        #expect(await waitFor { display.wifi == WifiDetails(ssid: "Guests", password: "letmein1") })
+        hub.applyHostSettings(zoneName: nil, phonesCanReorder: nil, displaysCanControl: nil, wifi: WifiDetails())
+        #expect(await waitFor { display.wifi == WifiDetails() })
+
+        // A phone's socket doesn't carry it.
+        hub.wifi = WifiDetails(ssid: "Party", password: "hunter22")
+        let socket = URLSession.shared.webSocketTask(with: URL(string: "ws://127.0.0.1:18773/ws")!)
+        socket.resume()
+        defer { socket.cancel() }
+        guard case .string(let text) = try await socket.receive() else { Issue.record("no snapshot"); return }
+        #expect(text.contains("Living Room"))
+        #expect(!text.contains("hunter22"))
+    }
+
     @Test func txtRecordFormat() {
         let data = ZoneAdvertiser.txtRecord(["name": "Up", "kind": "tv"])
         // Sorted: kind=tv, name=Up — each prefixed by its length.

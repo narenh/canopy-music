@@ -7,8 +7,8 @@ public struct PlaybackSnapshot: Codable, Equatable, Sendable {
     public var capturedAt: Date
 }
 
-/// The hub's guest Wi‑Fi, shown as a "Join Wi‑Fi" QR code. Hosts edit it from the web page; it's
-/// never part of a snapshot, so guests' phones don't receive the password.
+/// The hub's guest Wi‑Fi, shown as a "Join Wi‑Fi" QR code. Hosts edit it from the web page. Only
+/// displays' snapshots carry it (so they can show the code too); guests' phones never receive it.
 public struct WifiDetails: Codable, Equatable, Sendable {
     public var ssid: String
     public var password: String
@@ -60,6 +60,9 @@ public struct PartySnapshot: Codable, Equatable, Sendable {
     /// Apple TV hubs: whether the screensaver may come on while music plays too (it always may
     /// while it's paused), for the hub and TV displays. nil from iPads.
     public var screensaverWhilePlaying: Bool?
+    /// The hub's guest Wi‑Fi, in snapshots for displays only (never for guests' phones), so a
+    /// display shows the same "Join Wi‑Fi" code. nil from older hubs.
+    public var wifi: WifiDetails?
 }
 
 /// Owns the queue and keeps the player in step with it. Both the iPad UI and the phone server
@@ -112,8 +115,10 @@ public final class PartySession {
     public var hostPhoneCount = 0 {
         didSet { if hostPhoneCount != oldValue, remote == nil { broadcast() } }
     }
-    /// The hub's guest Wi‑Fi (hub only; not in snapshots).
-    public var wifi = WifiDetails()
+    /// The hub's guest Wi‑Fi: this hub's own, or (display) its hub's. In displays' snapshots only.
+    public var wifi = WifiDetails() {
+        didSet { if wifi != oldValue, remote == nil { broadcast() } }
+    }
     /// A host revoked every other phone's Host Control; returns the new key for that host.
     @ObservationIgnored public var onForgetHostPhones: (@MainActor () -> String?)?
     /// The hub's guest address by IP, from the hub (display) or set by the app (hub).
@@ -139,7 +144,8 @@ public final class PartySession {
     @ObservationIgnored private var loadedItemID: UUID?
     @ObservationIgnored private var isSyncing = false
     @ObservationIgnored private var needsSync = false
-    @ObservationIgnored private var listeners: [UUID: AsyncStream<PartySnapshot>.Continuation] = [:]
+    /// Snapshot listeners, and whether each gets the Wi‑Fi details (displays do, phones don't).
+    @ObservationIgnored private var listeners: [UUID: (continuation: AsyncStream<PartySnapshot>.Continuation, withWifi: Bool)] = [:]
     @ObservationIgnored private let storeURL: URL?
     @ObservationIgnored private var saveTask: Task<Void, Never>?
     @ObservationIgnored private var tickTask: Task<Void, Never>?
@@ -200,6 +206,8 @@ public final class PartySession {
         screensaverWhilePlaying = snapshot.screensaverWhilePlaying ?? false
         guestAddress = snapshot.address
         lanAddress = snapshot.lanAddress
+        // Only displays' snapshots carry it (not `/api/state`, read after a refused edit).
+        if let hubWifi = snapshot.wifi { wifi = hubWifi }
     }
 
     /// This device's own zone (hub).
@@ -528,7 +536,8 @@ public final class PartySession {
 
     // MARK: Snapshots
 
-    public func snapshot() -> PartySnapshot {
+    /// What phones see; `includingWifi` adds the guest Wi‑Fi, for displays.
+    public func snapshot(includingWifi: Bool = false) -> PartySnapshot {
         PartySnapshot(
             version: state.version,
             playlistName: state.playlistName,
@@ -549,16 +558,18 @@ public final class PartySession {
             hubID: hubID,
             skippedOnLoad: skippedOnLoad.isEmpty ? nil : skippedOnLoad.count,
             skippedTitles: skippedOnLoad.isEmpty ? nil : skippedOnLoad.prefix(Self.skippedTitlesInSnapshots).map(\.title),
-            screensaverWhilePlaying: hubKind == .tv ? screensaverWhilePlaying : nil
+            screensaverWhilePlaying: hubKind == .tv ? screensaverWhilePlaying : nil,
+            wifi: includingWifi ? wifi : nil
         )
     }
 
-    /// Emits the current snapshot immediately, then again after every change.
-    public func snapshots() -> AsyncStream<PartySnapshot> {
+    /// Emits the current snapshot immediately, then again after every change. `includingWifi`
+    /// adds the guest Wi‑Fi, for displays.
+    public func snapshots(includingWifi: Bool = false) -> AsyncStream<PartySnapshot> {
         let (stream, continuation) = AsyncStream.makeStream(of: PartySnapshot.self, bufferingPolicy: .bufferingNewest(1))
         let id = UUID()
-        listeners[id] = continuation
-        let snap = snapshot()
+        listeners[id] = (continuation, includingWifi)
+        let snap = snapshot(includingWifi: includingWifi)
         lastSentPlayback = snap.playback
         continuation.yield(snap)
         if remote == nil { startDriftCheck() }
@@ -681,7 +692,9 @@ public final class PartySession {
         guard !listeners.isEmpty else { return }
         let snap = snapshot()
         lastSentPlayback = snap.playback
-        for continuation in listeners.values { continuation.yield(snap) }
+        var withWifi = snap
+        withWifi.wifi = wifi
+        for listener in listeners.values { listener.continuation.yield(listener.withWifi ? withWifi : snap) }
     }
 
     /// Listeners work out the playback time from the last snapshot, but the player's time also

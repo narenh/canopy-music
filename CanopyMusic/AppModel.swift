@@ -856,9 +856,14 @@ final class AppModel {
     }
     #endif
 
+    /// The guest Wi‑Fi for the "Join Wi‑Fi" code: this hub's own, or (display) its hub's, from snapshots.
+    var shownWifi: WifiDetails {
+        isDisplay ? session.wifi : WifiDetails(ssid: wifiSSID, password: wifiPassword, simpleQR: wifiSimpleQR)
+    }
+
     var wifiJoinPayload: String? {
-        // Wi‑Fi details are this hub's; a display doesn't know its hub's.
-        isDisplay || wifiSSID.isEmpty ? nil : LocalNetwork.wifiJoinPayload(ssid: wifiSSID, password: wifiPassword)
+        let wifi = shownWifi
+        return wifi.ssid.isEmpty ? nil : LocalNetwork.wifiJoinPayload(ssid: wifi.ssid, password: wifi.password)
     }
 }
 

@@ -272,6 +272,8 @@ public final class PartyServer: Sendable {
             return await Self.playback(PlaybackBody(action: body.action ?? "", time: body.time), session: session)
         }
 
+        // Displays (`/ws?display=1`) also get the guest Wi‑Fi, to show its QR code; phones don't.
+        await server.appendRoute("GET /ws?display=1", to: .webSocket(SnapshotSocket(session: session, includesWifi: true)))
         await server.appendRoute("GET /ws", to: .webSocket(SnapshotSocket(session: session)))
 
         #if DEBUG
@@ -456,9 +458,10 @@ extension PartyServer {
 
 struct SnapshotSocket: WSMessageHandler {
     let session: PartySession
+    var includesWifi = false
 
     func makeMessages(for client: AsyncStream<WSMessage>) async throws -> AsyncStream<WSMessage> {
-        let snapshots = await session.snapshots()
+        let snapshots = await session.snapshots(includingWifi: includesWifi)
         return AsyncStream { continuation in
             let pump = Task {
                 for await snapshot in snapshots {

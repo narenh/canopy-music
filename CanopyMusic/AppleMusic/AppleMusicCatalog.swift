@@ -498,8 +498,13 @@ struct AppleMusicCatalog: MusicCatalog {
 
     private func fetch<T: Decodable>(_ path: String) async throws -> T {
         guard let url = URL(string: "https://api.music.apple.com" + path) else { throw AppleMusicError.badResponse }
-        let response = try await MusicDataRequest(urlRequest: URLRequest(url: url)).response()
-        return try JSONDecoder().decode(T.self, from: response.data)
+        do {
+            let response = try await MusicDataRequest(urlRequest: URLRequest(url: url)).response()
+            return try JSONDecoder().decode(T.self, from: response.data)
+        } catch {
+            ErrorReport.log(error, context: "Apple Music API \(path)")
+            throw error
+        }
     }
 }
 

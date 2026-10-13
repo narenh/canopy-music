@@ -520,7 +520,7 @@ extension HTTPResponse {
     /// hard to reach on an Apple TV.
     static func serviceFailed(_ error: Error) -> HTTPResponse {
         #if DEBUG
-        HTTPResponse(statusCode: .badGateway, body: Data(String(reflecting: error).utf8))
+        HTTPResponse(statusCode: .badGateway, body: Data(ErrorReport.describe(error).utf8))
         #else
         HTTPResponse(statusCode: .badGateway)
         #endif

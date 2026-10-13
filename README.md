@@ -55,14 +55,22 @@ Spotify only lets each developer app have **5 user accounts** in Development Mod
 1. Go to the [Spotify developer dashboard](https://developer.spotify.com/dashboard) and log in with the Spotify account you'll use at parties.
 2. **Create app**:
    - **App name / description:** anything (e.g. Canopy Music).
-   - **Redirect URI:** `canopy-music://spotify-callback` (exactly this; click **Add**).
+   - **Redirect URI:** `https://music.canopysf.com/spotify` (exactly this; click **Add**). It's the only one you need, for iPads, Macs and Apple TVs alike.
    - **Which API/SDKs:** check **Web API**.
    - Accept the terms and save.
 3. Open the app's **Settings** and copy the **Client ID**. No client secret is needed.
 4. Under **User Management**, add the email of each Spotify account that will sign in (yours, plus up to 4 others).
-5. In Canopy Music: **Settings → Music service → Spotify**, paste the **Client ID**, tap Done.
+5. In Canopy Music, choose **Spotify** (setup's first step, or the start screen's Music row; on an Apple TV, the Music bar on your phone's setup page), paste the **Client ID** and tap **Sign in to Spotify**.
 6. Open the **Spotify app** on the iPad or another device in your home (TV, game console, speaker, computer). Spotify only lists devices with the app open.
-7. In host mode: **Sign in to Spotify**, then tap the device row and choose **where music should play**. Start stays disabled until that device is available.
+7. Choose **where music should play**. Start stays disabled until that device is available.
+
+**Upgrading from a build that used `canopy-music://spotify-callback`:** you stay signed in, but the next sign-in needs `https://music.canopysf.com/spotify` added to your Spotify app's Redirect URIs (you can then remove the old one). Without it, Spotify's page says "Invalid redirect URI".
+
+**Why a web page?** Since 2025 Spotify only accepts `https` redirect URIs. Spotify sends you to `music.canopysf.com/spotify` after you sign in, and that page sends your browser straight back to Canopy Music: to the app on an iPad or Mac, or to the Apple TV on your Wi‑Fi. It's a static page that stores nothing; the sign-in code it passes on is useless without a secret that never leaves your device (PKCE). Its source is the [canopy-music-relay](https://github.com/narenh/canopy-music-relay) repository.
+
+**Hosting your own sign-in page:** fork canopy-music-relay and publish it (GitHub Pages or Cloudflare Pages; its README has the steps), then enter its address under **Advanced → Spotify sign-in page** in the Spotify step (on an iPad also **Settings → Spotify → Sign-in page**; on an Apple TV, under Advanced on the setup page). Canopy Music checks that it's `https` and is a Canopy Music sign-in page before saving it, and the Redirect URI it tells you to register follows the setting. Changing it doesn't sign you out.
+
+**On an Apple TV:** the TV has no browser, so you sign in from the phone that's setting up the zone. The TV prepares the sign-in, your phone's browser opens Spotify, and the sign-in page sends the phone back to the TV, which finishes signing in and keeps the tokens. Music plays on a Spotify Connect device you choose on the same page (a speaker, phone or computer with Spotify open): Spotify's own Apple TV app only works as a speaker while it's on screen, and Canopy Music is.
 
 How it works and what to expect:
 
@@ -84,7 +92,7 @@ CanopyMusicKit/                   Swift package (no MusicKit or Spotify code)
   Tests/CanopyMusicServerTests/   zone and server tests
 CanopyMusic/                      iPad app (SwiftUI, iPadOS 26)
   AppleMusic/                     MusicKit catalog + ApplicationMusicPlayer engine
-  Spotify/                        Spotify sign-in, Web API client, catalog and Connect engine
+  Spotify/                        Spotify tokens, Web API client, catalog and Connect engine (also in the Apple TV target)
   Views/                          host, party (locked), Up Next, search, fly-in animation
 CanopyMusicTV/                    Apple TV app (tvOS 26); shares some iPad files by symlink
 ```
@@ -93,4 +101,4 @@ CanopyMusicTV/                    Apple TV app (tvOS 26); shares some iPad files
 cd CanopyMusicKit && swift test
 ```
 
-Debug launch arguments: `-autoParty` starts a demo party and locks; `-autoSearch <term>` searches and adds the first result; `-autoLoad`, `-autoResume`, `-autoPrevious`, `-autoStress`, `-showSettings`, `-showPicker`, `-appleMusicState ready|unsynced|nosub|denied`, `-benchAppleMusic`, `-qrGallery` and `-diagnoseMusicKit` exist for testing specific paths.
+Debug launch arguments: `-autoParty` starts a demo party and locks; `-autoSearch <term>` searches and adds the first result; `-autoLoad`, `-autoResume`, `-autoPrevious`, `-autoStress`, `-showSettings`, `-showPicker`, `-appleMusicState ready|unsynced|nosub|denied`, `-benchAppleMusic`, `-qrGallery` and `-diagnoseMusicKit` exist for testing specific paths. `-onboardingSpotify -spotifyAdvanced` shows setup's Spotify step with Advanced open, and `-showSettings -showSignInPage` the sign-in page setting. On the Apple TV, `-spotifyFake notSetUp|signedOut|signedIn|noDevice|asleep|conflict` fakes Spotify's state for the phone's setup page.

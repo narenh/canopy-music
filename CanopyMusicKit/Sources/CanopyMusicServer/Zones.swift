@@ -26,8 +26,8 @@ public struct ZoneListing: Identifiable, Hashable, Sendable {
     /// Identifies the hub device, so a device can tell its own zone apart.
     public var hubID: String?
     public var nowPlaying: String?
-    /// The Spotify account the hub plays from (`SpotifyAccount.fingerprint`); nil for Apple Music
-    /// zones, TVs, hubs not signed in yet and older hubs.
+    /// The Spotify account the hub plays from (`SpotifyAccount.fingerprint`), iPad or Apple TV;
+    /// nil for Apple Music zones, hubs not signed in yet and older hubs.
     public var spotifyAccount: String?
 
     public init(id: String, name: String, kind: HubKind, device: String? = nil, address: String,

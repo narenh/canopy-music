@@ -76,6 +76,28 @@ enum WindowSize {
     }
 }
 
+/// On a Mac the window can grow past any iPad: each screen's content stops at 1800×1200 pt
+/// (1200×1800 in a portrait window) and stays in the middle, while the screen's background, drawn
+/// outside this, still fills the window. No iPad reaches it in either orientation (a 13" is
+/// 1376×1032 pt), so iPads are unaffected.
+struct ContentCap: Layout {
+    static let long: CGFloat = 1800
+    static let short: CGFloat = 1200
+
+    func sizeThatFits(proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) -> CGSize {
+        proposal.replacingUnspecifiedDimensions()
+    }
+
+    func placeSubviews(in bounds: CGRect, proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) {
+        let landscape = bounds.width >= bounds.height
+        let size = CGSize(width: min(bounds.width, landscape ? Self.long : Self.short),
+                          height: min(bounds.height, landscape ? Self.short : Self.long))
+        for subview in subviews {
+            subview.place(at: CGPoint(x: bounds.midX, y: bounds.midY), anchor: .center, proposal: ProposedViewSize(size))
+        }
+    }
+}
+
 /// Lays `content` out at `size`, scaled down if it doesn't fit (see `WindowSize.canvas`).
 struct CanvasScaled<Content: View>: View {
     let size: CGSize

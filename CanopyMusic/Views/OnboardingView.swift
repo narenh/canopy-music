@@ -14,29 +14,31 @@ struct OnboardingView: View {
         ZStack {
             LinearGradient(colors: [Color(white: 0.11), Color(white: 0.04)], startPoint: .top, endPoint: .bottom)
                 .ignoresSafeArea()
-            switch step {
-            case .chooser:
-                chooser
-                    .transition(.move(edge: .leading).combined(with: .opacity))
-            case .spotify:
-                SpotifySetupStep(
-                    back: { go(.chooser) },
-                    done: {
-                        model.chooseProvider(.spotify)
-                        if model.isChangingService {
-                            model.finishOnboarding()
-                        } else {
-                            networkBack = .spotify
-                            go(.network)
+            ContentCap {
+                switch step {
+                case .chooser:
+                    chooser
+                        .transition(.move(edge: .leading).combined(with: .opacity))
+                case .spotify:
+                    SpotifySetupStep(
+                        back: { go(.chooser) },
+                        done: {
+                            model.chooseProvider(.spotify)
+                            if model.isChangingService {
+                                model.finishOnboarding()
+                            } else {
+                                networkBack = .spotify
+                                go(.network)
+                            }
                         }
-                    }
-                )
-                // Spotify green regardless of the current service (a fresh install defaults to Apple Music).
-                .tint(AppModel.Provider.spotify.accent)
-                .transition(.move(edge: .trailing).combined(with: .opacity))
-            case .network:
-                NetworkStep(back: { go(networkBack) })
+                    )
+                    // Spotify green regardless of the current service (a fresh install defaults to Apple Music).
+                    .tint(AppModel.Provider.spotify.accent)
                     .transition(.move(edge: .trailing).combined(with: .opacity))
+                case .network:
+                    NetworkStep(back: { go(networkBack) })
+                        .transition(.move(edge: .trailing).combined(with: .opacity))
+                }
             }
         }
         .preferredColorScheme(.dark)

@@ -16,45 +16,47 @@ struct ZoneListView: View {
         ZStack {
             LinearGradient(colors: [Color(white: 0.13), Color(white: 0.06)], startPoint: .top, endPoint: .bottom)
                 .ignoresSafeArea()
-            VStack(spacing: 0) {
-                Spacer(minLength: 24)
-                LogoView(height: 44)
-                    .padding(.bottom, 28)
-                List {
-                    // Hidden until there's a zone to show. This iPad's own zone from last time
-                    // comes first.
-                    if !zones.isEmpty || model.canResumeZone {
-                        Section("Active Zones") {
-                            if model.canResumeZone {
-                                ZoneRow(icon: "ipad.landscape", title: model.zoneName, subtitle: "Resume on this iPad") {
-                                    model.resumeZone()
+            ContentCap {
+                VStack(spacing: 0) {
+                    Spacer(minLength: 24)
+                    LogoView(height: 44)
+                        .padding(.bottom, 28)
+                    List {
+                        // Hidden until there's a zone to show. This iPad's own zone from last time
+                        // comes first.
+                        if !zones.isEmpty || model.canResumeZone {
+                            Section("Active Zones") {
+                                if model.canResumeZone {
+                                    ZoneRow(icon: "ipad.landscape", title: model.zoneName, subtitle: "Resume on this iPad") {
+                                        model.resumeZone()
+                                    }
                                 }
+                                zoneRows(zones)
                             }
-                            zoneRows(zones)
+                        }
+                        Section {
+                            ZoneRow(icon: "plus", title: "Create a new zone", subtitle: "Music plays from this iPad") {
+                                if model.canResumeZone { confirmingCreate = true } else { model.beginCreatingZone() }
+                            }
                         }
                     }
-                    Section {
-                        ZoneRow(icon: "plus", title: "Create a new zone", subtitle: "Music plays from this iPad") {
-                            if model.canResumeZone { confirmingCreate = true } else { model.beginCreatingZone() }
-                        }
+                    .listStyle(.insetGrouped)
+                    .scrollContentBackground(.hidden)
+                    // Only the rows' height: the insets aren't fixed. When the list is on its way out
+                    // (e.g. to "Create a new zone") it gets a bottom inset as big as its empty space, so
+                    // counting insets measured the list's own frame and the height chased itself
+                    // forever, freezing the app.
+                    .onScrollGeometryChange(for: CGFloat.self) { geometry in
+                        geometry.contentSize.height
+                    } action: { _, height in
+                        // Before the rows are laid out it reports nothing; collapsing then would stick.
+                        if height > 1 { listHeight = height }
                     }
+                    .frame(maxWidth: 560, maxHeight: listHeight)
+                    Spacer(minLength: 24)
+                    // A little more room below than above, so it looks centered rather than sitting low.
+                    Color.clear.frame(height: 64)
                 }
-                .listStyle(.insetGrouped)
-                .scrollContentBackground(.hidden)
-                // Only the rows' height: the insets aren't fixed. When the list is on its way out
-                // (e.g. to "Create a new zone") it gets a bottom inset as big as its empty space, so
-                // counting insets measured the list's own frame and the height chased itself
-                // forever, freezing the app.
-                .onScrollGeometryChange(for: CGFloat.self) { geometry in
-                    geometry.contentSize.height
-                } action: { _, height in
-                    // Before the rows are laid out it reports nothing; collapsing then would stick.
-                    if height > 1 { listHeight = height }
-                }
-                .frame(maxWidth: 560, maxHeight: listHeight)
-                Spacer(minLength: 24)
-                // A little more room below than above, so it looks centered rather than sitting low.
-                Color.clear.frame(height: 64)
             }
         }
         .environment(\.colorScheme, .dark)
@@ -149,25 +151,28 @@ struct CreateZoneView: View {
         ZStack {
             LinearGradient(colors: [Color(white: 0.13), Color(white: 0.06)], startPoint: .top, endPoint: .bottom)
                 .ignoresSafeArea()
-            VStack(spacing: 22) {
-                LogoView(height: 40)
-                if step == 0 {
-                    nameStep
-                } else {
-                    pinStep
+            ContentCap {
+                VStack(spacing: 22) {
+                    LogoView(height: 40)
+                    if step == 0 {
+                        nameStep
+                    } else {
+                        pinStep
+                    }
+                }
+                .padding(40)
+                .foregroundStyle(.white)
+                .frame(maxWidth: 560)
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                .overlay(alignment: .topLeading) {
+                    Button(step == 0 ? "Cancel" : "Back") {
+                        if step == 0 { model.cancelCreatingZone() } else { withAnimation { step = 0 } }
+                    }
+                    .buttonStyle(.glass)
+                    .tint(.primary)
+                    .padding(24)
                 }
             }
-            .padding(40)
-            .foregroundStyle(.white)
-            .frame(maxWidth: 560)
-        }
-        .overlay(alignment: .topLeading) {
-            Button(step == 0 ? "Cancel" : "Back") {
-                if step == 0 { model.cancelCreatingZone() } else { withAnimation { step = 0 } }
-            }
-            .buttonStyle(.glass)
-            .tint(.primary)
-            .padding(24)
         }
     }
 

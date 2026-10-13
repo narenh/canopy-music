@@ -42,21 +42,24 @@ struct PartyView: View {
 
     var body: some View {
         let theme = ArtworkTheme(current?.track.colors)
-        GeometryReader { geo in
-            // Windows wider than 16:10 (a Mac) keep the columns together in the middle, and Up next
-            // stops growing past its width on a 13" iPad; Now Playing takes the rest.
-            let width = min(geo.size.width, geo.size.height * 1.6)
-            let right = min(width * 0.46, 640)
-            HStack(spacing: 0) {
-                leftPane(centered: geo.size.height > geo.size.width)
-                    .frame(width: width - right)
-                // Narrower than on an 11" iPad in landscape, the QR card stacks its codes.
-                rightPane(compactQR: right < 540)
-                    .padding(.vertical, 24)
-                    .padding(.trailing, 24)
+        ContentCap {
+            GeometryReader { geo in
+                // Within the Mac cap (ContentCap), windows wider than 16:10 (short Mac windows) keep
+                // the columns together in the middle, and Up next stops growing past its width on a
+                // 13" iPad; Now Playing takes the rest.
+                let width = min(geo.size.width, geo.size.height * 1.6)
+                let right = min(width * 0.46, 640)
+                HStack(spacing: 0) {
+                    leftPane(centered: geo.size.height > geo.size.width)
+                        .frame(width: width - right)
+                    // Narrower than on an 11" iPad in landscape, the QR card stacks its codes.
+                    rightPane(compactQR: right < 540)
+                        .padding(.vertical, 24)
+                        .padding(.trailing, 24)
+                }
+                .frame(width: width)
+                .frame(maxWidth: .infinity)
             }
-            .frame(width: width)
-            .frame(maxWidth: .infinity)
         }
         .background { ThemedBackground(track: current?.track, theme: theme) }
         .overlay { FlightLayer(flights: flights, destinations: rowFrames, fallback: fallbackDestination) }

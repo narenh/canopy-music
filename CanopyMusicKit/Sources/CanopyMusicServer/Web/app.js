@@ -72,9 +72,17 @@
   if (initial && initial.zoneName) $("splash-text").textContent = `Connecting to ${initial.zoneName}`;
   // Which hub this is (older hubs don't say), for keeping host keys per hub.
   const hubID = (initial && initial.hubID) || null;
+  // A new Apple TV zone's host sets it up here on the IP address, since renaming the zone in the
+  // setup sheet moves its `.local` name. The page continues there once the zone is set up.
+  let moveWhenSetUp = false;
   await (async () => {
     const address = initial && initial.address, lan = initial && initial.lanAddress;
     if (!address || !lan || address === location.host) return;
+    if (waitingForSetup(initial) && !location.hostname.endsWith(".local")) {
+      debugLog("waiting for setup: staying");
+      moveWhenSetUp = true;
+      return;
+    }
     // Only if that name reaches this same hub: another zone can answer at music.local too.
     if (!(await reachable(address, lan))) { debugLog(`${address} not reachable: staying`); return; }
     debugLog(`moving to ${address}`);
@@ -108,6 +116,11 @@
     if (store.get("canopymusic.nameAsked") && !next.has("name")) next.set("name", store.get("canopymusic.name") || "");
     if (key && !next.get("host")) next.set("host", key);
     location.replace(`http://${address}/${next.toString() ? `?${next}` : ""}${hash}`);
+  }
+
+  /** An Apple TV zone whose host hasn't picked the music yet (as the hub's `isWaitingForSetup`). */
+  function waitingForSetup(s) {
+    return s.hubKind === "tv" && !s.playlistName && !s.current && !(s.upNext && s.upNext.length);
   }
 
   // An image loads across addresses where fetch can't; the hub only serves this one if it's the
@@ -265,6 +278,23 @@
     openSettingsFromLink();
     hideSplash();
     followRename();
+    moveIfSetUp();
+  }
+
+  // The page that set up a new Apple TV zone (on the IP address) continues at the zone's `.local`
+  // name once it's set up, behind the splash, as a page opened from the QR code does.
+  let setupToastUntil = 0;
+  async function moveIfSetUp() {
+    const address = snap.address;
+    if (!moveWhenSetUp || waitingForSetup(snap) || setupStarting || !address || address === location.host) return;
+    moveWhenSetUp = false;
+    // The setup's note about songs that couldn't load stays up for its time first.
+    const wait = setupToastUntil - Date.now();
+    if (wait > 0) await new Promise((resolve) => setTimeout(resolve, wait));
+    showSplash(`Connecting to ${snap.zoneName || "Canopy Music"}`);
+    if (!(await reachable(address, snap.lanAddress))) { debugLog(`set up; ${address} not reachable: staying`); hideSplash(); return; }
+    debugLog(`set up; moving to ${address}`);
+    moveTo(address, new URLSearchParams(location.search), savedHostKey(), settingsOpen() ? "#settings" : "");
   }
 
   // A renamed zone moves to a new `.local` name; a page on the old one follows it there (if this
@@ -309,6 +339,15 @@
       debugScreen("splash hidden");
       setTimeout(() => debugScreen("2s later"), 2000);
     }, 400);
+  }
+
+  /** The splash again, over the page (it sets Safari's bars to its purple as it appears). */
+  function showSplash(text) {
+    const splash = $("splash");
+    $("splash-text").textContent = text;
+    splash.hidden = false;
+    splash.classList.remove("gone");
+    debugScreen("splash shown again");
   }
 
   function render() {
@@ -1129,11 +1168,14 @@
     return n > titles.length ? `${head}, including ${list}.` : `${head}: ${list}.`;
   }
 
-  /** An Apple TV has no screen for it, so its hosts hear once, when they choose the playlist. */
+  /** An Apple TV has no screen for it, so its hosts hear once, when they choose the playlist.
+   * Returns whether it showed the note. */
   function toastSkipped(reply) {
     if (snap && snap.hubKind === "tv" && reply && reply.skippedOnLoad) {
       toast(skippedNote({ ...reply, service: snap.service }), 6000);
+      return true;
     }
+    return false;
   }
 
   /** A picker's footer button: a spinner and `busyLabel` while the hub works, the list and Shuffle dimmed. */
@@ -1213,7 +1255,8 @@
       setupDismissed = true;
       setupBusy(false);
       $("setup").hidden = true;
-      toastSkipped(reply);
+      if (toastSkipped(reply)) setupToastUntil = Date.now() + 6000;
+      if (snap) moveIfSetUp();
     } catch {
       setupBusy(false);
       toast("Couldn't start. Try again.");

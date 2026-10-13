@@ -430,8 +430,8 @@ struct TVConnectionOverlay: View {
 // MARK: - Start: take host control
 
 /// TV-led parties start here: the first phone to scan becomes the host (and can add more hosts
-/// later from its own page). Once it has, the code gives way to a spinner while they set the zone
-/// up on the phone.
+/// later from its own page). Once it has, the code goes (its space stays, so the text doesn't
+/// move) while they set the zone up on the phone.
 struct TVStartView: View {
     @Environment(TVModel.self) private var model
 
@@ -452,9 +452,12 @@ struct TVStartView: View {
             }
             // Big enough to carry a symbol through it (the iPad's Wi‑Fi code does the same).
             Group {
-                if !model.hostJoined, let host = model.hostURL?.absoluteString {
+                if model.hostJoined {
+                    Color.clear
+                } else if let host = model.hostURL?.absoluteString {
                     HalftoneQRCode(payload: host, image: Image("MusicNote"), symbolScale: 0.5, dotScale: 0.7)
                 } else {
+                    // The server is still starting.
                     ProgressView()
                         .scaleEffect(2)
                 }

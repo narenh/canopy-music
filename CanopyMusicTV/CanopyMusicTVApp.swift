@@ -122,6 +122,11 @@ final class TVModel {
         debugLog("resumeZone")
         guard await authorize() else { return }
         openZone(fresh: false)
+        // Never set up: back to "Scan to host", with its code, rather than "Continue on your phone".
+        if session.isWaitingForSetup {
+            zoneRecord.hostJoined = false
+            hostJoined = false
+        }
         await Task { await self.startServer() }.value
     }
 
@@ -139,6 +144,13 @@ final class TVModel {
         TVZoneListView.didAutoCreate = true // `-createZone` is for a launch that starts at the list
         #endif
         openZone(fresh: false)
+        // A zone that was never set up (no playlist picked, even if a phone had scanned) isn't
+        // worth coming back to: its QR has gone, so nothing could control it. End it, as End does.
+        if session.isWaitingForSetup {
+            debugLog("restored zone was never set up; ending it")
+            stopZone()
+            return
+        }
         Task {
             await startServer()
             if role == .hub, server == nil || guestURL == nil {

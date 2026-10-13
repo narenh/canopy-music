@@ -50,7 +50,7 @@ struct PartyView: View {
                 let width = min(geo.size.width, geo.size.height * 1.6)
                 let right = min(width * 0.46, 640)
                 HStack(spacing: 0) {
-                    leftPane(centered: geo.size.height > geo.size.width)
+                    leftPane
                         .frame(width: width - right)
                     // Narrower than on an 11" iPad in landscape, the QR card stacks its codes.
                     rightPane(compactQR: right < 540)
@@ -92,9 +92,7 @@ struct PartyView: View {
 
     // MARK: Left pane
 
-    /// `centered`: in portrait the artwork is held back by the column's width, so Now Playing sits
-    /// in the middle of the spare height rather than at the bottom.
-    private func leftPane(centered: Bool) -> some View {
+    private var leftPane: some View {
         VStack(spacing: 0) {
             HStack(spacing: 18) {
                 LogoView(height: 34)
@@ -112,7 +110,7 @@ struct PartyView: View {
             .padding(.bottom, 12)
 
             ZStack {
-                NowPlayingView(item: current, session: session, centered: centered)
+                NowPlayingView(item: current, session: session)
                     .opacity(searchActive ? 0 : 1)
                     .scaleEffect(searchActive ? 0.96 : 1)
                 if searchActive {
@@ -397,17 +395,21 @@ struct PartyView: View {
 struct NowPlayingView: View {
     let item: QueueItem?
     let session: PartySession
-    /// Centered in the spare height instead of resting at the bottom.
-    var centered = false
     @Environment(AppModel.self) private var model
 
     var body: some View {
         GeometryReader { geo in
             // Artwork takes whatever height is left after the title, progress and controls.
             let reserved: CGFloat = item == nil ? 110 : 284
-            let side = max(200, min(geo.size.width * 0.85, geo.size.height - reserved))
+            let widthSide = geo.size.width * 0.85
+            let side = max(200, min(widthSide, geo.size.height - reserved))
+            // When the column's width holds the artwork back (portrait, squarish windows, a 13"
+            // in landscape) there's spare height, and the group sits in the middle of it. Only
+            // when the artwork fills the height does it rest on the bottom, so the controls line
+            // up with Up next's bottom edge. Without the controls there's nothing to line up
+            // with, so it's always centred.
+            let centered = widthSide < geo.size.height - reserved || (item != nil && !showsTransport)
             VStack(spacing: 20) {
-                Spacer(minLength: 0)
                 ArtworkView(track: item?.track, large: true, cornerRadius: 18)
                     .frame(width: side, height: side)
                     .shadow(color: .black.opacity(0.5), radius: 40, y: 20)
@@ -455,16 +457,13 @@ struct NowPlayingView: View {
                         TransportControls(session: session)
                     }
                 }
-                // Without the controls there's nothing to line up with Up next's bottom edge, so
-                // the artwork, title and bar sit in the middle in landscape too.
-                if centered || (item != nil && !showsTransport) { Spacer(minLength: 0) }
             }
-            .frame(maxWidth: .infinity)
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: centered ? .center : .bottom)
             .animation(.spring(duration: 0.6, bounce: 0.15), value: item?.id)
         }
         .padding(.horizontal, 32)
-        // Bottom-aligned so the controls line up with the Up next panel's bottom edge
-        // (the right pane's 24 pt vertical padding).
+        // When bottom-aligned, the controls line up with the Up next panel's bottom edge (the
+        // right pane's 24 pt vertical padding).
         .padding(.bottom, Self.bottomInset)
     }
 

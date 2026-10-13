@@ -80,7 +80,7 @@ struct SonosSpeakersPanel: View {
             .padding(.bottom, 6)
             if ticked.count > 1 {
                 GroupVolume(rooms: ticked)
-                    .padding(.horizontal, 14)
+                    .padding(.horizontal, 10)
                     .padding(.bottom, 6)
             }
             ForEach(household.rooms) { room in
@@ -140,28 +140,15 @@ private struct SonosPanelRow: View {
                 guard !onlyTicked, status.canTick else { return }
                 model.toggleSonosRoom(room.id)
             } label: {
-                HStack(spacing: 10) {
-                    Image(systemName: SonosRoomIcon.symbol(room.displayName))
-                        .font(.system(size: 15))
-                        .foregroundStyle(ticked ? Color.black : Color.white)
-                        .frame(width: 30, height: 30)
-                        .background(ticked ? Color.white : Color.white.opacity(0.1), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+                HStack(spacing: 12) {
+                    SonosRoomIcon(model: room.displayName, ticked: ticked)
                     VStack(alignment: .leading, spacing: 1) {
                         Text(room.roomName).font(.subheadline.weight(.semibold))
                         SonosStatusText(status: status)
-                            .font(.caption)
                     }
                     Spacer(minLength: 8)
-                    if joining {
-                        ProgressView().controlSize(.small).frame(width: 26, height: 26)
-                    } else {
-                        Image(systemName: ticked ? "checkmark.circle.fill" : "circle")
-                            .font(.system(size: 22))
-                            .symbolRenderingMode(.palette)
-                            .foregroundStyle(ticked ? Color.white : Color.white.opacity(0.35), ticked ? Color.green : Color.clear)
-                            .opacity(onlyTicked ? 0.55 : 1)
-                            .frame(width: 26, height: 26)
-                    }
+                    SonosCheck(ticked: ticked, joining: joining)
+                        .opacity(onlyTicked ? 0.55 : 1)
                 }
                 .contentShape(Rectangle())
             }
@@ -213,7 +200,8 @@ private struct GroupVolume: View {
                 .accessibilityLabel("All speakers volume")
             }
         }
-        .padding(.horizontal, 12)
+        // With the panel's 10 outside, its label and slider line up with the rooms' (18 in).
+        .padding(.horizontal, 8)
         .padding(.vertical, 10)
         .background(Color.white.opacity(0.07), in: RoundedRectangle(cornerRadius: 13, style: .continuous))
     }
@@ -230,29 +218,31 @@ private struct VolumeSlider: View {
     @State private var dragging: Double?
     @State private var throttle = Throttle(interval: .milliseconds(150))
 
+    /// The system's own slider, drawn as it draws volume (Control Center, AirPlay, Now Playing):
+    /// thumbless, the track itself dragged, with the quiet and loud speakers at its ends.
     var body: some View {
-        HStack(spacing: 8) {
-            Image(systemName: "speaker.fill")
-                .font(.system(size: 11))
-                .foregroundStyle(.secondary)
-            Slider(value: Binding(get: { dragging ?? Double(value) }, set: { new in
-                dragging = new
-                let volume = Int(new.rounded())
-                onChanging(volume)
-                throttle.submit(volume, send: send)
-            }), in: 0...100) { editing in
-                if editing {
-                    dragging = Double(value)
-                    onBegin()
-                } else {
-                    if let dragging { throttle.finish(Int(dragging.rounded()), send: send) }
-                    dragging = nil
-                }
+        Slider(value: Binding(get: { dragging ?? Double(value) }, set: { new in
+            dragging = new
+            let volume = Int(new.rounded())
+            onChanging(volume)
+            throttle.submit(volume, send: send)
+        }), in: 0...100) {
+            Text("Volume")
+        } minimumValueLabel: {
+            Image(systemName: "speaker.fill").foregroundStyle(.secondary)
+        } maximumValueLabel: {
+            Image(systemName: "speaker.wave.3.fill").foregroundStyle(.secondary)
+        } onEditingChanged: { editing in
+            if editing {
+                dragging = Double(value)
+                onBegin()
+            } else {
+                if let dragging { throttle.finish(Int(dragging.rounded()), send: send) }
+                dragging = nil
             }
-            Image(systemName: "speaker.wave.3.fill")
-                .font(.system(size: 11))
-                .foregroundStyle(.secondary)
         }
+        .sliderThumbVisibility(.hidden)
+        .font(.footnote)
     }
 }
 

@@ -73,6 +73,7 @@ struct SonosPickerSection: View {
             model.toggleSonosRoom(room.id)
         } label: {
             HStack(spacing: 12) {
+                // Secondary, ticked or not, as This iPad's and the Music section's icons are.
                 SonosRoomIcon(model: room.displayName)
                 VStack(alignment: .leading, spacing: 2) {
                     Text(room.roomName).lineLimit(2)
@@ -126,43 +127,64 @@ struct SonosStatusText: View {
     }
 }
 
-/// The tick at the end of a room's row: a filled check when ticked, an empty ring when not,
-/// a spinner while it joins.
+/// The tick at the end of a room's row, as the system's selection checks: a white check on
+/// green when ticked, a quiet ring when not, a spinner while it joins.
 struct SonosCheck: View {
     let ticked: Bool
     let joining: Bool
+
+    /// The system green as Increase Contrast draws it in light mode (#248A3D): dark enough for
+    /// the white check to read, on dark glass and the start screen's dark list alike. The
+    /// usual dark-mode green is too light for a white check.
+    static let green = Color(UIColor.systemGreen.resolvedColor(with: UITraitCollection { traits in
+        traits.userInterfaceStyle = .light
+        traits.accessibilityContrast = .high
+    }))
 
     var body: some View {
         Group {
             if joining {
                 ProgressView().controlSize(.small)
+            } else if ticked {
+                Image(systemName: "checkmark.circle.fill")
+                    .symbolRenderingMode(.palette)
+                    .foregroundStyle(.white, Self.green)
             } else {
-                Image(systemName: ticked ? "checkmark.circle.fill" : "circle")
-                    .font(.system(size: 22))
-                    .foregroundStyle(ticked ? AnyShapeStyle(.tint) : AnyShapeStyle(.tertiary))
+                Image(systemName: "circle")
+                    .foregroundStyle(.secondary)
             }
         }
+        .font(.system(size: 22))
         .frame(width: 26, height: 26)
     }
 }
 
-/// A room's symbol, by the kind of speaker it is.
+/// A room's symbol, by the kind of speaker it is: the glyph on its own, secondary (primary for
+/// a ticked room in the Speakers panel); the row dims it further when the room doesn't answer.
 struct SonosRoomIcon: View {
     /// The model's short name ("Beam"); nil for a room not found.
     let model: String?
-    var size: CGFloat = 18
+    var ticked = false
 
     var body: some View {
         Image(systemName: Self.symbol(model))
-            .font(.system(size: size))
-            .foregroundStyle(.secondary)
+            .font(.system(size: 18))
+            .foregroundStyle(ticked ? AnyShapeStyle(.primary) : AnyShapeStyle(.secondary))
             .frame(width: 28)
     }
 
+    /// By the model's first word, as Sonos names them ("Arc Ultra", "Era 100", "Connect:Amp",
+    /// "Play:5"). SF Symbols has no soundbar, subwoofer, or portable speaker, and the HomePod
+    /// and Apple TV symbols may only stand for those, so the rest are all speakers.
     static func symbol(_ model: String?) -> String {
-        let name = model?.lowercased() ?? ""
-        // Soundbars sit under a TV; everything else is a speaker.
-        if ["beam", "arc", "ray", "playbar", "playbase"].contains(where: name.contains) { return "tv.and.hifispeaker.fill" }
-        return "hifispeaker.fill"
+        let first = model?.lowercased().split(whereSeparator: { !$0.isLetter && !$0.isNumber }).first.map(String.init) ?? ""
+        switch first {
+        // Soundbars sit under a TV.
+        case "arc", "beam", "ray", "playbar", "playbase": return "tv.and.hifispeaker.fill"
+        // Amps drive other speakers, as a receiver does.
+        case "amp", "port", "connect": return "hifireceiver.fill"
+        // One, Era 100 and 300, Five, Play:1, 3, and 5, Move, Roam, Sub, and anything new.
+        default: return "hifispeaker.fill"
+        }
     }
 }

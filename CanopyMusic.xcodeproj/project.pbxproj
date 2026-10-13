@@ -268,7 +268,7 @@
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_FILE = "CanopyMusic-Info.plist";
-				INFOPLIST_KEY_CFBundleDisplayName = "Canopy Music";
+				INFOPLIST_KEY_CFBundleDisplayName = "Canopy Music d";
 				INFOPLIST_KEY_ITSAppUsesNonExemptEncryption = NO;
 				INFOPLIST_KEY_NSAppleMusicUsageDescription = "Canopy Music plays your Apple Music playlists and lets guests search Apple Music to queue songs.";
 				INFOPLIST_KEY_NSLocalNetworkUsageDescription = "Canopy Music runs a small local web server so guests on your Wi‑Fi can queue songs.";
@@ -337,7 +337,7 @@
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_FILE = "CanopyMusicTV-Info.plist";
-				INFOPLIST_KEY_CFBundleDisplayName = "Canopy Music";
+				INFOPLIST_KEY_CFBundleDisplayName = "Canopy Music d";
 				INFOPLIST_KEY_ITSAppUsesNonExemptEncryption = NO;
 				INFOPLIST_KEY_NSAppleMusicUsageDescription = "Canopy Music plays your Apple Music playlists and lets guests search Apple Music to queue songs.";
 				INFOPLIST_KEY_NSLocalNetworkUsageDescription = "Canopy Music finds other Canopy Music devices and runs a small local web server so guests on your Wi‑Fi can queue songs.";

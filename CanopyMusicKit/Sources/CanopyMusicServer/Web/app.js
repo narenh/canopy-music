@@ -1428,7 +1428,7 @@
       return { state: "problem", what: `${s.deviceName || "The chosen device"} isn't available.`, todo: "Open Spotify on it, or choose another device below." };
     }
     if (!s.devices.length) {
-      return { state: "problem", what: "No devices found.", todo: "Open Spotify on a speaker, phone or computer on this Wi‑Fi." };
+      return { state: "problem", what: "No devices found.", todo: "Open Spotify on a speaker, phone, or computer on this Wi‑Fi." };
     }
     return { state: "problem", what: `${who}.`, todo: "Choose where music plays below." };
   }
@@ -1494,7 +1494,7 @@
     // Spotify can't play on the TV itself (its tvOS app is only a Connect device while it's on
     // screen, and Canopy Music is), so the music plays wherever the host chooses.
     $("setup-sub").textContent = spotifyZone
-      ? "Music plays from a speaker, phone or computer with Spotify open, chosen below."
+      ? "Music plays from a speaker, phone, or computer with Spotify open, chosen below."
       : "Music will play from your Apple TV. Use Control Center to change audio output.";
     renderSpotifySetup();
     const ready = setupReady();

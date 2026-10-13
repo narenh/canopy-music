@@ -938,30 +938,70 @@ private struct TVArtworkImage: View {
 final class TVArtworkCache {
     static let shared = TVArtworkCache()
     private let images = NSCache<NSURL, UIImage>()
+    private let blurredImages = NSCache<NSURL, UIImage>()
     private var loading: [URL: Task<UIImage?, Never>] = [:]
 
     private init() {
         images.countLimit = 80
+        blurredImages.countLimit = 80
     }
 
     func image(for url: URL) -> UIImage? {
         images.object(forKey: url as NSURL)
     }
 
-    /// The image at `url`, loaded and decoded once however many ask; nil if it fails.
+    /// The background's blurred copy of the image at `url` (`blurred(_:)`), once it's loaded.
+    func blurredImage(for url: URL) -> UIImage? {
+        blurredImages.object(forKey: url as NSURL)
+    }
+
+    /// The image at `url`, loaded and decoded (and its blurred copy made) once however many ask;
+    /// nil if it fails.
     func load(_ url: URL) async -> UIImage? {
         if let image = image(for: url) { return image }
         if let task = loading[url] { return await task.value }
+        // The task caches what it made before anyone waiting on it carries on.
         let task = Task<UIImage?, Never> {
+            defer { loading[url] = nil }
             guard let (data, _) = try? await URLSession.shared.data(from: url),
                   let image = await UIImage(data: data)?.byPreparingForDisplay() else { return nil }
+            let blurred = await Task.detached(priority: .userInitiated) { Self.blurred(image) }.value
+            images.setObject(image, forKey: url as NSURL)
+            if let blurred { blurredImages.setObject(blurred, forKey: url as NSURL) }
             return image
         }
         loading[url] = task
-        let image = await task.value
-        loading[url] = nil
-        if let image { images.setObject(image, forKey: url as NSURL) }
-        return image
+        return await task.value
+    }
+
+    /// Side of the background's blurred copy: blurred this much, it looks the same drawn
+    /// screen-size as the full image blurred there, and the background never blurs per frame.
+    nonisolated static let blurSide: CGFloat = 64
+    nonisolated private static let context = CIContext()
+    /// The background's art: `image` shrunk to `blurSide` square, blurred to look like the full
+    /// image under SwiftUI's `blur(radius: 120)` across a 1920-point screen (Core Image's radius
+    /// needs about 1.5× that to match, side by side), and saturated 1.4×.
+    nonisolated static func blurred(_ image: UIImage) -> UIImage? {
+        let format = UIGraphicsImageRendererFormat()
+        format.scale = 1
+        format.opaque = true
+        let size = CGSize(width: blurSide, height: blurSide)
+        let small = UIGraphicsImageRenderer(size: size, format: format).image { _ in
+            image.draw(in: CGRect(origin: .zero, size: size))
+        }
+        guard let input = CIImage(image: small) else { return nil }
+        let blur = CIFilter.gaussianBlur()
+        // Clamped so the edges don't fade: they're off screen in the original too.
+        blur.inputImage = input.clampedToExtent()
+        blur.radius = Float(180 * blurSide / 1920)
+        let color = CIFilter.colorControls()
+        color.inputImage = blur.outputImage?.cropped(to: input.extent)
+        color.saturation = 1.4
+        color.brightness = 0
+        color.contrast = 1
+        guard let output = color.outputImage,
+              let cgImage = context.createCGImage(output, from: input.extent) else { return nil }
+        return UIImage(cgImage: cgImage)
     }
 
     /// Waits until the image at `url` is ready, or `limit` has passed (it keeps loading then).
@@ -1003,21 +1043,112 @@ struct TVBackground: View {
 
     var body: some View {
         ZStack {
-            // The base colour animates from song to song; the art and its shade cross-fade over
-            // it (as one layer per song, so the old art can't show under the new song's shade).
+            // The base colour animates from song to song; the blurred art cross-fades over it
+            // while it drifts (one drift for every song, so a change doesn't jolt it), and the
+            // shade cross-fades over that, still.
             Rectangle().fill(theme.base)
-            ZStack {
-                TVArtwork(track: track, cornerRadius: 0)
-                    .blur(radius: 120)
-                    .saturation(1.4)
+            TVDrift {
+                TVBlurredArt(track: track)
                     .opacity(0.5)
-                    .scaleEffect(1.3)
-                LinearGradient(colors: [theme.base.opacity(0.1), theme.base.opacity(0.85)], startPoint: .top, endPoint: .bottom)
+                    .id(track?.id)
+                    .transition(.opacity)
             }
-            .id(track?.id)
-            .transition(.opacity)
+            LinearGradient(colors: [theme.base.opacity(0.1), theme.base.opacity(0.85)], startPoint: .top, endPoint: .bottom)
+                .id(track?.id)
+                .transition(.opacity)
         }
         .ignoresSafeArea()
+    }
+}
+
+/// A song's art for the background, blurred once (`TVArtworkCache.blurred`), then drawn as big
+/// as the screen's width. Before it's loaded, or with no art, its colours' gradient.
+private struct TVBlurredArt: View {
+    let track: QueueTrack?
+    @State private var loaded: UIImage?
+
+    var body: some View {
+        let url = TVArtwork.url(for: track)
+        if let image = loaded ?? url.flatMap({ TVArtworkCache.shared.blurredImage(for: $0) }) {
+            // Square art, as wide as the screen: taller than it, so drifting never shows an edge.
+            Image(uiImage: image)
+                .resizable()
+                .interpolation(.high)
+                .scaledToFill()
+        } else {
+            LinearGradient(
+                colors: [
+                    track?.colors.flatMap { Color(hex: $0.background) } ?? .white.opacity(0.1),
+                    track?.colors.flatMap { Color(hex: $0.secondary) } ?? .white.opacity(0.18),
+                ],
+                startPoint: .topLeading, endPoint: .bottomTrailing
+            )
+            .saturation(1.4)
+            .task(id: url) {
+                guard let url else { return }
+                _ = await TVArtworkCache.shared.load(url)
+                loaded = TVArtworkCache.shared.blurredImage(for: url)
+            }
+        }
+    }
+}
+
+/// The background art's slow drift: scale, offset and rotation each follow two or three sines
+/// with periods of 40–90 s that never line up, so it doesn't visibly repeat. It keeps going
+/// while paused and through song changes; Reduce Motion stops it.
+private struct TVDrift<Content: View>: View {
+    @ViewBuilder let content: Content
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
+    /// How far it drifts: 1 normally. Debug builds: `-driftStrength <multiplier>` (0 is off).
+    private static var strength: Double {
+        #if DEBUG
+        let args = ProcessInfo.processInfo.arguments
+        if let i = args.firstIndex(of: "-driftStrength"), i + 1 < args.count, let value = Double(args[i + 1]) {
+            return max(0, value)
+        }
+        #endif
+        return 1
+    }
+
+    var body: some View {
+        let strength = reduceMotion ? 0 : Self.strength
+        GeometryReader { geo in
+            // 30 frames a second is smooth at these speeds (a few points a second).
+            TimelineView(.animation(minimumInterval: 1.0 / 30, paused: strength == 0)) { timeline in
+                let pose = Self.pose(at: timeline.date.timeIntervalSinceReferenceDate, strength: strength, size: geo.size)
+                content
+                    .frame(width: geo.size.width, height: geo.size.height)
+                    .scaleEffect(pose.scale)
+                    .rotationEffect(.degrees(pose.degrees))
+                    .offset(pose.offset)
+            }
+        }
+    }
+
+    private struct Pose {
+        var scale: CGFloat
+        var degrees: Double
+        var offset: CGSize
+    }
+
+    private static func wave(_ t: Double, _ terms: [(amplitude: Double, period: Double, phase: Double)]) -> Double {
+        terms.reduce(0) { $0 + $1.amplitude * sin(2 * .pi * t / $1.period + $1.phase) }
+    }
+
+    /// At strength 1: scale 1.23–1.38 around the 1.3 it sits at without drift, up to about 3% of
+    /// the screen off centre, and up to 2° turned.
+    private static func pose(at t: Double, strength s: Double, size: CGSize) -> Pose {
+        let dx = s * size.width * wave(t, [(0.018, 47, 0.3), (0.012, 79, 2.1), (0.006, 61, 4.0)])
+        let dy = s * size.height * wave(t, [(0.018, 59, 1.2), (0.012, 89, 3.4), (0.006, 43, 5.1)])
+        let degrees = s * wave(t, [(1.2, 67, 0.7), (0.8, 41, 2.9)])
+        var scale = 1.3 + s * wave(t, [(0.045, 53, 1.9), (0.03, 83, 0.4)])
+        // Never so small that the art's left or right edge shows (it's square, as wide as the
+        // screen, so top and bottom have room to spare).
+        let turn = abs(sin(degrees * .pi / 180))
+        let needed = 1 + 2 * (abs(dx) + turn * size.width / 2) / size.width
+        scale = max(scale, needed)
+        return Pose(scale: scale, degrees: degrees, offset: CGSize(width: dx, height: dy))
     }
 }
 

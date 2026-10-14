@@ -31,21 +31,17 @@ struct RedirectURIRow: View {
     }
 }
 
-/// Said plainly when a sign-in is likely to hit Spotify's "Invalid redirect URI" page, which the
-/// app can't see: this device last signed in through the old `canopy-music://` address, or the
-/// last sign-in's sheet was closed without an answer.
+/// Said plainly when the last sign-in's sheet was closed without an answer: maybe Spotify showed
+/// its "Invalid redirect URI" page, which the app can't see.
 struct SpotifyRedirectNotice: View {
     @Environment(AppModel.self) private var model
 
     var body: some View {
-        let uri = model.spotifyRedirectURI
-        if model.spotifySignInClosed || model.spotifyAuth.registeredOldRedirect {
+        if model.spotifySignInClosed {
             HStack(alignment: .firstTextBaseline, spacing: 10) {
                 Image(systemName: "exclamationmark.triangle.fill")
                     .foregroundStyle(.orange)
-                Text(model.spotifySignInClosed
-                     ? "Did Spotify say “Invalid redirect URI”? Add \(uri) to your Spotify app's Redirect URIs."
-                     : "Canopy Music now signs in to Spotify through a web page. Add \(uri) to your Spotify app's Redirect URIs.")
+                Text("Did Spotify say “Invalid redirect URI”? Add \(model.spotifyRedirectURI) to your Spotify app's Redirect URIs.")
                     .font(.system(size: 16, weight: .medium))
                     .fixedSize(horizontal: false, vertical: true)
             }

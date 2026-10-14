@@ -137,36 +137,39 @@ struct HostView: View {
     private var settings: some View {
         @Bindable var model = model
         return VStack(spacing: 0) {
-            HStack(spacing: 14) {
-                // The start screen (nothing live) goes back to the zone list; a live zone ends
-                // with End Zone instead.
-                if !model.isLive {
+            // The logo is centred in the column, whatever buttons are either side of it.
+            ZStack {
+                LogoView(height: 36)
+                HStack {
+                    // The start screen (nothing live) goes back to the zone list; a live zone
+                    // ends with End Zone instead.
+                    if !model.isLive {
+                        Button {
+                            model.leaveStartScreen()
+                        } label: {
+                            Image(systemName: "chevron.left")
+                                .font(.system(size: 18, weight: .semibold))
+                                .frame(width: 32, height: 32)
+                        }
+                        .buttonStyle(.glass)
+                        .tint(.primary)
+                        .buttonBorderShape(.circle)
+                        .disabled(model.isStartingZone)
+                        .accessibilityLabel("Back to zones")
+                    }
+                    Spacer()
                     Button {
-                        model.leaveStartScreen()
+                        showSettings = true
                     } label: {
-                        Image(systemName: "chevron.left")
-                            .font(.system(size: 18, weight: .semibold))
+                        Image(systemName: "gearshape")
+                            .font(.system(size: 20, weight: .semibold))
                             .frame(width: 32, height: 32)
                     }
                     .buttonStyle(.glass)
                     .tint(.primary)
                     .buttonBorderShape(.circle)
-                    .disabled(model.isStartingZone)
-                    .accessibilityLabel("Back to zones")
+                    .accessibilityLabel("Settings")
                 }
-                LogoView(height: 36)
-                Spacer()
-                Button {
-                    showSettings = true
-                } label: {
-                    Image(systemName: "gearshape")
-                        .font(.system(size: 20, weight: .semibold))
-                        .frame(width: 32, height: 32)
-                }
-                .buttonStyle(.glass)
-                .tint(.primary)
-                .buttonBorderShape(.circle)
-                .accessibilityLabel("Settings")
             }
             .padding(.horizontal, 24)
             .padding(.top, 20)
@@ -189,23 +192,14 @@ struct HostView: View {
                         }
                     } else {
                         AppleMusicStatusRow(showOffer: $showSubscriptionOffer, switchService: switchService)
-                        // This iPad (AirPlay) or Sonos rooms.
+                        // This iPad, with its AirPlay row, or Sonos rooms.
                         OutputRow()
                     }
                 }
                 .listRowBackground(Color.white.opacity(0.08))
 
-                // Prefilled from setup or the last zone; editable here and in a live zone (the
-                // `.local` address follows the name). The PIN only guards a live zone's host mode.
-                Section {
-                    ZoneNameRow()
-                    ZonePINRow()
-                } header: {
-                    Text("Zone")
-                } footer: {
-                    Text("Other Canopy Music devices on the Wi\u{2011}Fi see this zone by name. The PIN is asked for when you press and hold the logo on the party screen.")
-                }
-                .listRowBackground(Color.white.opacity(0.08))
+                ZoneSection()
+                    .listRowBackground(Color.white.opacity(0.08))
 
                 // The phone page runs only in a live zone.
                 if model.isLive {
@@ -269,7 +263,7 @@ struct HostView: View {
                     .allowsHitTesting(canPressStart && !model.isStartingZone)
                     .accessibilityHint(canPressStart ? "" : "Choose a playlist first")
                 } footer: {
-                    Text("To unlock later, press and hold the logo. Turn on Guided Access (triple-click the top button) so guests can't leave the app.")
+                    Text("Press and hold the Canopy logo to return to this screen. PIN required if set. Turn on Guided Access (triple-click the top button) so guests can’t leave the app.")
                 }
 
                 if model.isLive {
@@ -534,10 +528,12 @@ struct ServiceChevron: View {
 
 // MARK: - Zone
 
-/// The zone's name, applied on return or when the field loses focus, so the zone (and its
-/// `.local` address) isn't re-announced on every keystroke. The address the name gives shows
-/// under it.
-private struct ZoneNameRow: View {
+/// The Zone section: its name and PIN, prefilled from setup or the last zone and editable here
+/// and in a live zone. The `.local` address the name gives sits on the header's right, following
+/// the name as it's typed. The name is applied on return or when the field loses focus, so the
+/// zone (and its address) isn't re-announced on every keystroke. The PIN only guards a live
+/// zone's host mode.
+private struct ZoneSection: View {
     @Environment(AppModel.self) private var model
     @State private var draft = ""
     @FocusState private var focused: Bool
@@ -556,7 +552,7 @@ private struct ZoneNameRow: View {
     }
 
     var body: some View {
-        VStack(alignment: .trailing, spacing: 4) {
+        Section {
             HStack {
                 Text("Name")
                 Spacer(minLength: 16)
@@ -566,34 +562,96 @@ private struct ZoneNameRow: View {
                     .focused($focused)
                     .onSubmit(commit)
             }
-            if let address {
-                Text(address)
-                    .font(.footnote)
-                    .foregroundStyle(.secondary)
+            .onAppear { draft = model.zoneName }
+            .onChange(of: focused) { _, isFocused in if !isFocused { commit() } }
+            // Renamed elsewhere (a host on the web page).
+            .onChange(of: model.zoneName) { _, name in if !focused { draft = name } }
+            ZonePINRow()
+        } header: {
+            HStack {
+                Text("Zone")
+                Spacer(minLength: 16)
+                if let address {
+                    Text(address)
+                        .textCase(nil)
+                        .lineLimit(1)
+                }
             }
+        } footer: {
+            Text("Other Canopy Music devices on the Wi\u{2011}Fi see this zone by name. The PIN is asked for when you press and hold the logo on the party screen.")
         }
-        .onAppear { draft = model.zoneName }
-        .onChange(of: focused) { _, isFocused in if !isFocused { commit() } }
-        // Renamed elsewhere (a host on the web page).
-        .onChange(of: model.zoneName) { _, name in if !focused { draft = name } }
     }
 }
 
-/// The host PIN: digits only, since the unlock pad has nothing else. Empty unlocks without asking.
+/// The host PIN: Set (or, once there is one, Change) opens the keypad (`PINSheet`). Empty
+/// unlocks without asking.
 private struct ZonePINRow: View {
     @Environment(AppModel.self) private var model
+    @State private var editing = false
 
     var body: some View {
         HStack {
             Text("PIN")
             Spacer(minLength: 16)
-            SecureField("Optional", text: Binding(get: { model.hostPIN }, set: { typed in
-                model.hostPIN = String(typed.filter { $0.isASCII && $0.isNumber }.prefix(8))
-            }))
-            .multilineTextAlignment(.trailing)
-            .keyboardType(.numberPad)
-            .textContentType(.oneTimeCode)
+            if !model.hostPIN.isEmpty {
+                Text("On").foregroundStyle(.secondary)
+            }
+            Button(model.hostPIN.isEmpty ? "Set" : "Change") { editing = true }
+                .buttonStyle(.glass)
+                .tint(.primary)
         }
+        .sheet(isPresented: $editing) { PINSheet().environment(model) }
+        #if DEBUG
+        // `-showPINSheet`: opens the keypad at launch, for screenshots.
+        .onAppear { if ProcessInfo.processInfo.arguments.contains("-showPINSheet") { editing = true } }
+        #endif
+    }
+}
+
+/// Setting or changing the host PIN on a keypad like the party screen's unlock: digits only
+/// (the unlock pad has nothing else), up to 8. Done saves it, Cancel leaves it as it was, and
+/// Turn Off PIN (once one is set) removes it.
+private struct PINSheet: View {
+    @Environment(AppModel.self) private var model
+    @Environment(\.dismiss) private var dismiss
+    @State private var pin = ""
+
+    var body: some View {
+        VStack(spacing: 24) {
+            Text(model.hostPIN.isEmpty ? "Set host PIN" : "Change host PIN")
+                .font(.title2.bold())
+            HStack(spacing: 14) {
+                ForEach(0..<max(pin.count, 4), id: \.self) { i in
+                    Circle()
+                        .fill(i < pin.count ? Color.white : Color.white.opacity(0.2))
+                        .frame(width: 14, height: 14)
+                }
+            }
+            PINPad(pin: $pin, length: 8, keySize: 84, spacing: 18)
+            HStack(spacing: 16) {
+                Button("Cancel") { dismiss() }
+                    .buttonStyle(.glass)
+                    .tint(.primary)
+                Button("Done") {
+                    model.hostPIN = pin
+                    dismiss()
+                }
+                .buttonStyle(.glassProminent)
+                .disabled(pin.isEmpty)
+            }
+            .controlSize(.large)
+            .padding(.top, 8)
+            if !model.hostPIN.isEmpty {
+                Button("Turn Off PIN", role: .destructive) {
+                    model.hostPIN = ""
+                    dismiss()
+                }
+                .foregroundStyle(.red)
+            }
+        }
+        .padding(40)
+        .foregroundStyle(.white)
+        .preferredColorScheme(.dark)
     }
 }
 

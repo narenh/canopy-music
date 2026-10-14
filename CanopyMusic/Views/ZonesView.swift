@@ -266,25 +266,27 @@ struct CreateZoneView: View {
     }
 }
 
-/// Number pad that calls `onComplete` once `length` digits are in.
+/// Number pad that takes up to `length` digits, calling `onComplete` (if given) once they're in.
 struct PINPad: View {
     @Binding var pin: String
     let length: Int
-    let onComplete: (String) -> Void
+    var keySize: CGFloat = 78
+    var spacing: CGFloat = 16
+    var onComplete: ((String) -> Void)?
 
     var body: some View {
         GlassEffectContainer {
-            LazyVGrid(columns: Array(repeating: GridItem(.fixed(78), spacing: 16), count: 3), spacing: 16) {
+            LazyVGrid(columns: Array(repeating: GridItem(.fixed(keySize), spacing: spacing), count: 3), spacing: spacing) {
                 ForEach(["1", "2", "3", "4", "5", "6", "7", "8", "9", "", "0", "⌫"], id: \.self) { key in
                     if key.isEmpty {
-                        Color.clear.frame(height: 78)
+                        Color.clear.frame(height: keySize)
                     } else {
                         Button {
                             press(key)
                         } label: {
                             Text(key)
-                                .font(.system(size: 28, weight: .medium))
-                                .frame(width: 78, height: 78)
+                                .font(.system(size: keySize * 0.36, weight: .medium))
+                                .frame(width: keySize, height: keySize)
                                 .glassEffect(.regular.interactive(), in: Circle())
                         }
                         .buttonStyle(.plain)
@@ -301,6 +303,6 @@ struct PINPad: View {
         }
         guard pin.count < length else { return }
         pin.append(key)
-        if pin.count == length { onComplete(pin) }
+        if pin.count == length { onComplete?(pin) }
     }
 }

@@ -595,8 +595,10 @@ private struct TransportControls: View {
                     model.crossfade.toggle()
                 } label: {
                     VStack(spacing: 3) {
-                        Image(systemName: "arrow.left.arrow.right")
-                            .font(.system(size: 15, weight: .semibold))
+                        // At 20, its strokes (1.8) are as thick as the 15-point semibold
+                        // symbol it replaced, and it's as big to the eye.
+                        CrossfadeGlyph()
+                            .frame(width: 20, height: 20)
                         Circle()
                             .frame(width: 4, height: 4)
                             .opacity(model.crossfade ? 1 : 0)

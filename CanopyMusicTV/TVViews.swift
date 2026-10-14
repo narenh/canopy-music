@@ -228,8 +228,6 @@ struct TVEndZoneSheet: View {
         }
         .frame(width: 1100, alignment: .leading)
         .padding(70)
-        // The card is Dusk, as the screens with no song; the party shows around it.
-        .presentationBackground { DuskBackground() }
         // Starts on Save and End, so a quick press saves under the date and zone; the name field
         // is one swipe up.
         .defaultFocus($focus, .save)
@@ -456,13 +454,7 @@ struct TVConnectionOverlay: View {
         if let connection = model.connection, model.isWaitingForHub {
             let name = model.shownZone?.name ?? "the zone"
             ZStack {
-                if connection.hasSnapshot {
-                    // The party shows through, blurred.
-                    Rectangle().fill(.black.opacity(0.45)).ignoresSafeArea()
-                } else {
-                    // Nothing from the hub yet: Dusk, as on the zone list.
-                    DuskBackground()
-                }
+                Rectangle().fill(.black.opacity(connection.hasSnapshot ? 0.45 : 0.9)).ignoresSafeArea()
                 VStack(spacing: 22) {
                     ProgressView()
                     Text(connection.hasSnapshot ? "Lost connection to \(name)" : "Connecting to \(name)…")

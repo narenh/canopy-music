@@ -97,6 +97,14 @@ svg { width: 18px; height: 18px; fill: none; stroke: currentColor; stroke-width:
 .t-btn.big { width: 54px; height: 54px; background: var(--text); color: var(--base); }
 .t-btn svg { fill: currentColor; stroke: none; width: 20px; height: 20px; }
 .t-btn:active { transform: scale(0.94); }
+/* Under the transport, on Sonos: Devices, the group's volume, Crossfade. */
+.volume-bar { flex-basis: 100%; display: flex; align-items: center; gap: 14px; padding: 2px 2px 0; }
+.volume-bar[hidden] { display: none; }
+.v-btn { flex: none; width: 40px; height: 40px; border-radius: 50%; background: var(--surface-2); color: var(--text); display: grid; place-items: center; transition: background-color .2s, color .2s; }
+.v-btn svg { width: 21px; height: 21px; stroke-width: 1.8; }
+.v-btn:active { transform: scale(0.94); }
+.v-btn[aria-pressed="true"] { background: var(--accent); color: var(--base); }
+.v-btn[aria-pressed="true"] svg { stroke-width: 2.2; }
 .progress { height: 3px; border-radius: 2px; background: var(--surface-2); margin-top: 10px; overflow: hidden; }
 .progress-fill { height: 100%; width: 0; background: var(--text); border-radius: 2px; }
 
@@ -347,11 +355,11 @@ html.sheet-open, html.sheet-open body { overflow: hidden; }
 .device-bar svg { flex: none; width: 18px; height: 18px; stroke-width: 2.2; color: var(--text-2); }
 /* The native picker, invisible over the bar: tapping the bar opens it. */
 .device-bar select { position: absolute; inset: 0; width: 100%; height: 100%; opacity: 0; font-size: 16px; }
-/* Where music plays (a TV zone's setup) and Speakers (settings): rows as the iPad's lists, with
+/* Where music plays (a TV zone's setup) and Devices (the party page): rows as the iPad's lists, with
    a check for the one output chosen (a Connect device, This Apple TV) and a ring for each Sonos
    room, several at once. */
-#setup-output[hidden], #output-sonos[hidden], #output-account[hidden], .output-note[hidden], #settings-speakers[hidden],
-.speakers-all[hidden], .volume-row[hidden], .output-sub[hidden] { display: none; }
+#setup-output[hidden], #output-sonos[hidden], #output-account[hidden], .output-note[hidden],
+.volume-row[hidden], .output-sub[hidden] { display: none; }
 .output-list { list-style: none; margin: 0; padding: 0; background: var(--surface-2); border-radius: 12px; overflow: hidden; }
 .output-list > li { position: relative; }
 .output-list > li + li::before { content: ""; position: absolute; top: 0; left: 52px; right: 0; height: 1px; background: var(--line); }
@@ -381,26 +389,41 @@ html.sheet-open, html.sheet-open body { overflow: hidden; }
 .output-note .field-note { margin-top: 3px; }
 .dot.warn { flex: none; width: 8px; height: 8px; border-radius: 50%; background: #ff9f0a; }
 #spotify-device-note[hidden] { display: none; }
-/* Settings › Speakers, inside the settings card. */
+/* Devices (the party page's Speakers panel), a card like the settings'. */
+.devices-card { max-height: 86vh; overflow-y: auto; overscroll-behavior: contain; }
+.devices-card .card-head { margin-bottom: 14px; }
 .modal-card .output-list { background: var(--surface); }
 .speaker-head { list-style: none; margin: 0; padding: 0; }
-.volume-row { display: flex; align-items: center; gap: 8px; padding: 0 14px 12px 52px; }
-.speakers-all { background: var(--surface); border-radius: 12px; padding: 10px 0 0; margin-bottom: 8px; }
-.speakers-all .volume-row { padding-left: 14px; }
-.modal-card .speakers-all-label { font-size: 12px; font-weight: 600; color: var(--text-2); margin: 0 14px 6px; }
+.volume-row { display: flex; align-items: center; gap: 8px; padding: 0 14px 10px 52px; }
 .volume-icon { flex: none; display: grid; place-items: center; color: var(--text-2); }
 .volume-icon svg { width: 17px; height: 17px; stroke-width: 1.8; }
-/* Thumbless, the track itself dragged, as the system draws volume. */
+/* Volume sliders: a native range input with a thumb to grab, dragged by app.js's pointer
+   handling from the thumb or anywhere on the track (`touch-action: none`, so the page or the
+   card doesn't scroll instead). The input is as tall as the thumb, so the whole height is a
+   grab area. --thumb is read by app.js to map the finger to a value as the browser does. */
 .modal-card input.volume, input.volume {
-  flex: 1; min-width: 0; width: auto; appearance: none; -webkit-appearance: none; height: 28px; padding: 0; margin: 0; background: transparent; border-radius: 0;
+  --thumb: 26px;
+  flex: 1; min-width: 0; width: auto; appearance: none; -webkit-appearance: none; height: 36px; padding: 0; margin: 0;
+  background: transparent; border-radius: 0; touch-action: none; cursor: pointer;
 }
+input.volume:disabled { opacity: .45; cursor: default; }
+input.volume:focus { outline: none; }
 input.volume::-webkit-slider-runnable-track {
-  height: 8px; border-radius: 4px; background: linear-gradient(to right, #fff var(--fill, 0%), rgba(255, 255, 255, .18) var(--fill, 0%));
+  height: 6px; border-radius: 3px;
+  /* Filled up to the thumb's centre (--t is the value from 0 to 1, set by app.js). */
+  background: linear-gradient(to right, #fff calc(var(--thumb) / 2 + (100% - var(--thumb)) * var(--t, 0)),
+    rgba(255, 255, 255, .2) calc(var(--thumb) / 2 + (100% - var(--thumb)) * var(--t, 0)));
 }
-input.volume::-webkit-slider-thumb { -webkit-appearance: none; width: 8px; height: 8px; border-radius: 50%; background: transparent; border: 0; }
-input.volume::-moz-range-track { height: 8px; border-radius: 4px; background: rgba(255, 255, 255, .18); }
-input.volume::-moz-range-progress { height: 8px; border-radius: 4px; background: #fff; }
-input.volume::-moz-range-thumb { width: 8px; height: 8px; border: 0; background: transparent; }
+input.volume::-webkit-slider-thumb {
+  -webkit-appearance: none; width: var(--thumb); height: var(--thumb); margin-top: calc((6px - var(--thumb)) / 2);
+  border-radius: 50%; background: #fff; border: 0; box-shadow: 0 1px 2px rgba(0, 0, 0, .25), 0 3px 10px rgba(0, 0, 0, .3);
+  transition: transform .15s var(--ease);
+}
+input.volume.dragging::-webkit-slider-thumb { transform: scale(1.12); }
+input.volume:focus-visible::-webkit-slider-thumb { box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 60%, transparent), 0 3px 10px rgba(0, 0, 0, .3); }
+input.volume::-moz-range-track { height: 6px; border-radius: 3px; background: rgba(255, 255, 255, .2); }
+input.volume::-moz-range-progress { height: 6px; border-radius: 3px; background: #fff; }
+input.volume::-moz-range-thumb { width: var(--thumb); height: var(--thumb); border: 0; border-radius: 50%; background: #fff; box-shadow: 0 3px 10px rgba(0, 0, 0, .3); }
 /* A dead end on the hub (the Spotify sign-in link after it finished or expired). */
 .message-page { display: flex; flex-direction: column; align-items: flex-start; gap: 18px; padding-top: calc(env(safe-area-inset-top) + 40px); }
 .message-page p { color: var(--text-2); font-size: 16px; }

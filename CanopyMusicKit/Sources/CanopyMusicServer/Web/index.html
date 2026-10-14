@@ -58,6 +58,13 @@
       <button class="t-btn big" id="t-play" type="button" data-action="toggle" aria-label="Play"></button>
       <button class="t-btn" type="button" data-action="next" aria-label="Skip"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 6.5v11l9-5.5zM12 6.5v11l9-5.5z" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"/></svg></button>
     </div>
+    <!-- Hosts, while the zone plays through Sonos: Devices (the rooms), the group's volume (each
+         room keeps its balance), and Crossfade (Sonos's own). -->
+    <div class="volume-bar" id="volume-bar" hidden>
+      <button class="v-btn" id="devices-btn" type="button" aria-label="Devices"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="9.5" y="3" width="11" height="18" rx="2.6"/><circle cx="15" cy="14.2" r="2.8"/><path d="M15 7.6h.01" stroke-width="2.6"/><path d="M6.5 5.5h-.8a2.2 2.2 0 0 0-2.2 2.2v8.6a2.2 2.2 0 0 0 2.2 2.2h.8"/></svg></button>
+      <input type="range" class="volume" id="master-volume" min="0" max="100" step="1" aria-label="Volume">
+      <button class="v-btn" id="crossfade-btn" type="button" aria-label="Crossfade" aria-pressed="false"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 6.5c7.5 0 10.5 11 18 11M3 17.5c7.5 0 10.5-11 18-11"/></svg></button>
+    </div>
   </section>
 
   <div class="list-head">
@@ -255,21 +262,6 @@
     <div class="setting-row"><span class="setting-label">Base playlist</span><span class="setting-value" id="settings-playlist">None yet</span><button type="button" class="pill-btn" id="settings-playlist-change">Change</button></div>
     <p class="small skipped-note" id="settings-playlist-skipped" hidden></p>
     <p class="small player-issue" id="settings-player-issue" hidden></p>
-    <!-- The zone plays through Sonos: its rooms, ticked to play there (they join and leave
-         without the song restarting; the last one stays), each with its volume, and All
-         Speakers with two or more. The iPad party screen's Speakers panel, for hosts. -->
-    <div id="settings-speakers" hidden>
-      <p class="settings-head">Speakers</p>
-      <div class="speakers-all" id="speakers-all" hidden>
-        <p class="speakers-all-label">All Speakers</p>
-        <div class="volume-row">
-          <span class="volume-icon"><svg viewBox="0 0 24 24" aria-hidden="true" stroke-linejoin="round"><path d="M4 9.5h3.5L12 6v12l-4.5-3.5H4z" fill="currentColor"/></svg></span>
-          <input type="range" class="volume" id="speakers-all-volume" min="0" max="100" step="1" aria-label="All speakers volume">
-          <span class="volume-icon"><svg viewBox="0 0 24 24" aria-hidden="true" stroke-linejoin="round"><path d="M3 9.5h3.5L11 6v12l-4.5-3.5H3z" fill="currentColor"/><path d="M14.5 9.2a4 4 0 0 1 0 5.6M17.3 6.8a7.5 7.5 0 0 1 0 10.4"/></svg></span>
-        </div>
-      </div>
-      <ul class="output-list speakers" id="speakers-rooms"></ul>
-    </div>
     <div class="setting-row" id="settings-party-row" hidden><span class="setting-label">Save as playlist</span><span class="setting-value" id="settings-party"></span><button type="button" class="pill-btn" id="settings-party-save">Save</button></div>
     <p class="settings-head">Phones</p>
     <label class="setting-row"><span>Queue from phones</span><input type="checkbox" class="switch" id="settings-queue"></label>
@@ -291,6 +283,17 @@
     <button type="button" class="danger-btn" id="settings-forget">Forget other hosts</button>
     <button type="button" class="danger-btn" id="settings-stop"></button>
     <div class="modal-actions"><button type="button" class="primary-btn" id="settings-done">Done</button></div>
+  </div>
+</div>
+
+<!-- Host, from the party page's Devices button while the zone plays through Sonos: its rooms,
+     ticked to play there (they join and leave without the song restarting; the last one stays),
+     each with its status line and, while ticked, its volume. The iPad party screen's Speakers
+     panel. -->
+<div id="devices-modal" class="modal" hidden>
+  <div class="modal-card devices-card">
+    <div class="card-head"><h2>Devices</h2><button type="button" class="close-btn" id="devices-close" aria-label="Close"><span><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6l12 12M18 6 6 18"/></svg></span></button></div>
+    <ul class="output-list speakers" id="speakers-rooms"></ul>
   </div>
 </div>
 

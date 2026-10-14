@@ -179,7 +179,7 @@
   let musicAccess;
   /** An Apple TV hub's Spotify setup (sign-in, devices, sign-in page), also from hosts' snapshots. */
   let spotify;
-  /** The hub's Sonos rooms (where a TV zone plays, and the Speakers section), hosts' snapshots too. */
+  /** The hub's Sonos rooms (where a TV zone plays, the volume row and Devices), hosts' snapshots too. */
   let sonosSetup;
   let firstRender = true;
   let dragging = null;
@@ -293,6 +293,8 @@
     }
     if (next.spotify !== undefined) spotify = next.spotify;
     if (next.sonos !== undefined) sonosSetup = next.sonos;
+    // The Crossfade button showed what was asked; the hub says so now.
+    if (crossfadeWanted !== null && next.crossfade === crossfadeWanted) crossfadeWanted = null;
     render();
     openSettingsFromLink();
     hideSplash();
@@ -412,6 +414,7 @@
     // The host can turn off reordering from phones (host control can always reorder).
     document.querySelector(".list-head .hint").hidden = snap.canReorder === false && !hosting();
     $("transport").hidden = !hosting();
+    renderVolumeBar();
     const queueOff = snap.canQueue === false && !hosting();
     $("search-trigger").hidden = queueOff;
     $("queue-off").hidden = !queueOff;
@@ -1146,7 +1149,7 @@
     const on = hosting();
     $("settings-btn").hidden = !on;
     if (!on) {
-      for (const id of ["setup", "settings-modal", "edit-modal", "wifi-modal", "invite-modal", "playlists", "conflict-modal"]) $(id).hidden = true;
+      for (const id of ["setup", "settings-modal", "edit-modal", "wifi-modal", "invite-modal", "playlists", "conflict-modal", "devices-modal"]) $(id).hidden = true;
       if (hostChecked) askNameIfNeeded();
       return;
     }
@@ -1671,7 +1674,7 @@
     return labels[(type || "").toLowerCase()] || type || "Device";
   }
 
-  // MARK: Where music plays (setup), and the Speakers section (settings)
+  // MARK: Where music plays (setup), and the rooms in Devices
 
   /** The Sonos section has something to show: rooms found, or rooms chosen before. */
   const sonosShown = () => !!(sonosSetup && ((sonosSetup.rooms || []).length || sonosChosen()));
@@ -1746,7 +1749,7 @@
   /** Rooms whose tick was just tapped: a spinner until the hub has answered. */
   const roomsChanging = new Set();
 
-  /** A Sonos room's row. `live`: in the Speakers section (rooms join and leave as the music plays). */
+  /** A Sonos room's row, in setup's Plays on and in Devices (where rooms join and leave as the music plays). */
   function roomRow(room, s) {
     const changing = roomsChanging.has(room.id) || room.state === "joining";
     return {
@@ -1868,7 +1871,7 @@
     if (room && !roomsChanging.has(room.id)) tickRoom(room.id, !room.ticked);
   });
 
-  // MARK: Settings › Speakers
+  // MARK: The volume row (Sonos) and Devices
 
   /** Sends the latest value at most every 150 ms while a slider moves, and the last one on release. */
   function throttle(send, interval = 150) {
@@ -1884,23 +1887,156 @@
     };
   }
 
-  /** Sets a volume slider (if `value` is given) and its filled part, drawn as the system's
-   * volume sliders are. */
+  /** Sets a volume slider (if `value` is given) and its filled part, which ends under the thumb. */
   function showVolume(slider, value) {
     if (value != null) slider.value = value;
-    slider.style.setProperty("--fill", `${slider.value}%`);
+    const min = Number(slider.min) || 0, max = Number(slider.max) || 100;
+    slider.style.setProperty("--t", String((Number(slider.value) - min) / (max - min)));
   }
 
-  /** A slider being dragged ("all", or a room's id): snapshots don't move sliders meanwhile. */
-  let volumeDrag = null;
+  /** Snapshots don't move a slider while it's dragged, nor for a moment after: the hub's next
+   * reading of the speakers may not have the new volume yet. */
+  const sliderHeld = (slider) => Date.now() < (slider.holdUntil || 0);
+  const holdSlider = (slider, ms = 1500) => { slider.holdUntil = Math.max(slider.holdUntil || 0, Date.now() + ms); };
+
+  /** A volume slider (a native range input, styled): `begin()` as a drag or a key press starts,
+   * `move(value)` as it moves, and `send(value)` at most every 150 ms, then once more on release.
+   * The pointer is followed here rather than left to the browser: iOS Safari only drags a range
+   * input whose touch began on its thumb (anywhere else on the track it jumps there and stops),
+   * so a drag from the track, or a thumb missed by a few pixels, did nothing. With
+   * `touch-action: none` (app.css) the page doesn't scroll instead. Keyboards and VoiceOver
+   * still use the input itself. */
+  function volumeSlider(slider, { begin, move, send }) {
+    const sends = throttle(send);
+    let active = false, pointer = null;
+    function start() {
+      if (active) return;
+      active = true;
+      slider.holdUntil = Infinity;
+      slider.classList.add("dragging");
+      if (begin) begin();
+    }
+    function finish() {
+      if (!active) return;
+      active = false;
+      slider.holdUntil = 0;
+      holdSlider(slider);
+      slider.classList.remove("dragging");
+      sends.finish(Number(slider.value));
+    }
+    /** The value under the finger, as the browser maps it: the thumb's centre follows it. */
+    function valueAt(x) {
+      const r = slider.getBoundingClientRect();
+      const thumb = parseFloat(getComputedStyle(slider).getPropertyValue("--thumb")) || 0;
+      const t = Math.min(1, Math.max(0, (x - r.left - thumb / 2) / Math.max(1, r.width - thumb)));
+      const min = Number(slider.min) || 0, max = Number(slider.max) || 100, step = Number(slider.step) || 1;
+      return min + Math.round((t * (max - min)) / step) * step;
+    }
+    function follow(event) {
+      const value = valueAt(event.clientX);
+      if (Number(slider.value) === value) return;
+      slider.value = value;
+      slider.dispatchEvent(new Event("input", { bubbles: true }));
+    }
+    slider.addEventListener("input", () => {
+      start();
+      showVolume(slider);
+      if (move) move(Number(slider.value));
+      sends.submit(Number(slider.value));
+    });
+    // A key press, or VoiceOver's swipe, ends with `change`; a drag ends on release.
+    slider.addEventListener("change", () => { if (pointer === null) finish(); });
+    slider.addEventListener("pointerdown", (event) => {
+      if (slider.disabled || (event.pointerType === "mouse" && event.button !== 0)) return;
+      event.preventDefault(); // the browser's own drag would fight this one
+      pointer = event.pointerId;
+      try { slider.setPointerCapture(pointer); } catch {}
+      start();
+      follow(event); // a tap on the track jumps there
+    });
+    slider.addEventListener("pointermove", (event) => { if (event.pointerId === pointer) follow(event); });
+    const release = (event) => {
+      if (event.pointerId !== pointer) return;
+      pointer = null;
+      finish();
+    };
+    for (const type of ["pointerup", "pointercancel", "lostpointercapture"]) slider.addEventListener(type, release);
+  }
+
   const sendVolume = (id, volume) => api("/api/host/sonos/volume", id ? { key: hostKey, id, volume } : { key: hostKey, volume }).catch(() => {});
-  const roomThrottles = new Map();
-  function roomThrottle(id) {
-    if (!roomThrottles.has(id)) roomThrottles.set(id, throttle((v) => sendVolume(id, v)));
-    return roomThrottles.get(id);
+  const tickedRooms = () => ((sonosSetup && sonosSetup.rooms) || []).filter((r) => r.ticked);
+  const average = (values) => Math.round(values.reduce((a, b) => a + b, 0) / values.length);
+  const roomSlider = (id) => [...$("speakers-rooms").children].find((li) => li.dataset.id === id)?.querySelector("input");
+
+  /** The volume row: under the transport (so for hosts, as it is), while the zone plays through
+   * Sonos. The slider is the group's volume, shown as the ticked rooms' average. */
+  function renderVolumeBar() {
+    const s = sonosSetup, shown = hosting() && !!(s && s.active);
+    $("volume-bar").hidden = !shown;
+    if (!shown) { $("devices-modal").hidden = true; return; }
+    const volumes = tickedRooms().map((r) => r.volume).filter((v) => v != null);
+    const master = $("master-volume");
+    master.disabled = !volumes.length && !sliderHeld(master);
+    if (!sliderHeld(master)) showVolume(master, volumes.length ? average(volumes) : 0);
+    const on = crossfadeWanted ?? snap.crossfade === true;
+    $("crossfade-btn").setAttribute("aria-pressed", String(on));
+    if (!$("devices-modal").hidden) renderSpeakers();
+    if (!readTimer) readRooms();
   }
 
-  /** One room in Speakers: its row (as setup's), and its volume while ticked. Built once per room,
+  // The group's volume: Sonos snapshots each room's volume as the drag starts, then the group
+  // moves, keeping their balance. The rooms' sliders (in Devices) show it at once.
+  let groupStart = null;
+  volumeSlider($("master-volume"), {
+    begin() {
+      groupStart = new Map(tickedRooms().filter((r) => r.volume != null).map((r) => [r.id, r.volume]));
+      api("/api/host/sonos/volume", { key: hostKey, begin: true }).catch(() => {});
+    },
+    move(value) {
+      if (!groupStart || !groupStart.size) return;
+      const base = average([...groupStart.values()]);
+      for (const [id, start] of groupStart) {
+        const slider = roomSlider(id);
+        if (!slider || slider.classList.contains("dragging")) continue;
+        holdSlider(slider);
+        showVolume(slider, Math.min(100, Math.max(0, base > 0 ? Math.round(start * value / base) : value)));
+      }
+    },
+    send: (value) => sendVolume(null, value),
+  });
+
+  /** A room's slider moved: the group's shows the new average at once. */
+  function masterFollowsRooms() {
+    const master = $("master-volume");
+    if (master.classList.contains("dragging")) return;
+    const values = tickedRooms().map((r) => {
+      const slider = roomSlider(r.id);
+      return slider && sliderHeld(slider) ? Number(slider.value) : r.volume;
+    }).filter((v) => v != null);
+    if (!values.length) return;
+    holdSlider(master);
+    showVolume(master, average(values));
+  }
+
+  // Crossfade: the hub's own setting (on Sonos, Sonos's crossfade). The button shows what was
+  // asked until a snapshot says the same (or the hub refused).
+  let crossfadeWanted = null;
+  $("crossfade-btn").addEventListener("click", async () => {
+    if (!hosting() || !snap) return;
+    const on = !(crossfadeWanted ?? snap.crossfade === true);
+    crossfadeWanted = on;
+    renderVolumeBar();
+    try {
+      await api("/api/host/settings", { key: hostKey, crossfade: on });
+    } catch (error) {
+      debugLog(`crossfade failed: ${error.message}`);
+      crossfadeWanted = null;
+      renderVolumeBar();
+      toast("Couldn't change crossfade");
+    }
+  });
+
+  /** One room in Devices: its row (as setup's), and its volume while ticked. Built once per room,
    * then updated in place, so a slider being dragged isn't replaced. */
   function speakerItem(id) {
     const li = document.createElement("li");
@@ -1909,25 +2045,17 @@
     li.innerHTML = '<ul class="speaker-head"></ul><div class="volume-row" hidden>'
       + `<span class="volume-icon">${outputIcons.quiet}</span><input type="range" class="volume" min="0" max="100" step="1">`
       + `<span class="volume-icon">${outputIcons.loud}</span></div>`;
-    const slider = li.querySelector("input");
-    slider.addEventListener("input", () => { volumeDrag = id; showVolume(slider); roomThrottle(id).submit(Number(slider.value)); });
-    slider.addEventListener("change", () => { roomThrottle(id).finish(Number(slider.value)); volumeDrag = null; });
+    volumeSlider(li.querySelector("input"), { move: masterFollowsRooms, send: (value) => sendVolume(id, value) });
     return li;
   }
 
-  /** Settings' Speakers section: while the zone plays through Sonos. Same rules as the iPad's
-   * Speakers panel: the last ticked room stays, and All Speakers shows with two or more. */
+  /** Devices: the rooms, while the zone plays through Sonos. Same rules as the iPad's Speakers
+   * panel: the last ticked room stays. */
   function renderSpeakers() {
-    const s = sonosSetup, shown = hosting() && !!(s && s.active);
-    $("settings-speakers").hidden = !shown;
-    if (!shown) return;
+    const s = sonosSetup;
+    if (!s) return;
     const rooms = s.rooms || [];
     const ticked = rooms.filter((r) => r.ticked);
-    const volumes = ticked.map((r) => r.volume).filter((v) => v != null);
-    $("speakers-all").hidden = ticked.length < 2 || !volumes.length;
-    if (volumeDrag === null && volumes.length) {
-      showVolume($("speakers-all-volume"), Math.round(volumes.reduce((a, b) => a + b, 0) / volumes.length));
-    }
     const list = $("speakers-rooms");
     for (const li of [...list.children]) if (!rooms.some((r) => r.id === li.dataset.id)) li.remove();
     rooms.forEach((room, index) => {
@@ -1943,9 +2071,16 @@
       const volume = li.querySelector(".volume-row"), slider = volume.querySelector("input");
       volume.hidden = !room.ticked || room.volume == null;
       slider.setAttribute("aria-label", `${room.name} volume`);
-      if (volumeDrag === null && room.volume != null) showVolume(slider, room.volume);
+      if (!sliderHeld(slider) && room.volume != null) showVolume(slider, room.volume);
     });
   }
+
+  $("devices-btn").addEventListener("click", () => {
+    $("devices-modal").hidden = false;
+    renderSpeakers();
+    readRooms();
+  });
+  $("devices-close").addEventListener("click", () => { $("devices-modal").hidden = true; });
 
   $("speakers-rooms").addEventListener("click", (event) => {
     const row = event.target.closest(".output-row");
@@ -1960,41 +2095,17 @@
     tickRoom(room.id, !room.ticked);
   });
 
-  // All Speakers: Sonos snapshots each room's volume as the drag starts, then the group moves,
-  // keeping their balance. The rooms' sliders show it at once.
-  let groupStart = null;
-  const groupThrottle = throttle((v) => sendVolume(null, v));
-  $("speakers-all-volume").addEventListener("input", (event) => {
-    const value = Number(event.target.value);
-    if (volumeDrag !== "all") {
-      volumeDrag = "all";
-      groupStart = new Map((sonosSetup.rooms || []).filter((r) => r.ticked && r.volume != null).map((r) => [r.id, r.volume]));
-      api("/api/host/sonos/volume", { key: hostKey, begin: true }).catch(() => {});
-    }
-    const base = [...groupStart.values()].reduce((a, b) => a + b, 0) / Math.max(1, groupStart.size);
-    for (const [id, start] of groupStart) {
-      const slider = [...$("speakers-rooms").children].find((li) => li.dataset.id === id)?.querySelector("input");
-      if (slider) showVolume(slider, Math.min(100, Math.max(0, base > 0 ? Math.round(start * value / base) : value)));
-    }
-    showVolume(event.target);
-    groupThrottle.submit(value);
-  });
-  $("speakers-all-volume").addEventListener("change", (event) => {
-    groupThrottle.finish(Number(event.target.value));
-    volumeDrag = null;
-    groupStart = null;
-  });
-
-  // While the Speakers section shows: the rooms read again every 2 s, so changes made in the
-  // Sonos app (volumes, groups, what other rooms play) show up.
-  let speakersTimer = null;
-  function pollSpeakers() {
-    clearTimeout(speakersTimer);
-    speakersTimer = null;
-    if (!settingsOpen() || $("settings-speakers").hidden) return;
+  // The rooms are read again (every 2 s while Devices is open, every 10 s while just the row
+  // shows), so changes made in the Sonos app (volumes, groups, what other rooms play) show up.
+  let readTimer = null;
+  function readRooms() {
+    clearTimeout(readTimer);
+    readTimer = null;
+    if ($("volume-bar").hidden || document.hidden) return;
     api("/api/host/sonos/read", { key: hostKey }).catch(() => {});
-    speakersTimer = setTimeout(pollSpeakers, 2000);
+    readTimer = setTimeout(readRooms, $("devices-modal").hidden ? 10000 : 2000);
   }
+  document.addEventListener("visibilitychange", () => { if (!document.hidden && snap) readRooms(); });
 
   function setAdvanced(open) {
     $("spotify-advanced").hidden = !open;
@@ -2246,8 +2357,6 @@
     $("settings-stop").textContent = `End ${snap.zoneName || "this zone"}`;
     fillWifi();
     fillPartyRow();
-    renderSpeakers();
-    if (!$("settings-speakers").hidden && !speakersTimer) pollSpeakers();
   }
 
   /** Saving is offered once someone has added a song (played or still in Up next); until then the

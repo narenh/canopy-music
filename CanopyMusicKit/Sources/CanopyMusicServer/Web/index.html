@@ -112,15 +112,29 @@
       <!-- Spotify chosen but not signed in (a sign-in that lapsed): its setup page. -->
       <button class="primary-btn wide spotify-btn open-spotify" id="spotify-open" type="button" hidden>Sign in to Spotify</button>
       <button class="text-btn small-link" id="spotify-change" type="button" hidden>Sign in again or change the Client ID</button>
-      <!-- Spotify, signed in: where music plays (a Spotify Connect device; not the TV itself). -->
-      <div id="setup-spotify-device" hidden>
-        <p class="muted-label" style="margin-top:18px" id="spotify-device-label">Plays on</p>
-        <label class="device-bar">
-          <span class="device-bar-name" id="spotify-device-name"></span>
-          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m6 9 6 6 6-6"/></svg>
-          <select id="spotify-device" aria-label="Where music plays"></select>
-        </label>
-        <p class="field-note" id="spotify-device-note"></p>
+      <!-- Where music plays, as the iPad's "Where should music play?": Spotify's Connect devices
+           (signed in; never the TV itself) or This Apple TV, then the household's Sonos rooms,
+           several at once. Choosing rooms leaves the device or the TV, and the other way round. -->
+      <div id="setup-output" hidden>
+        <p class="muted-label" style="margin-top:18px">Plays on</p>
+        <ul class="output-list" id="output-own"></ul>
+        <p class="field-note" id="spotify-device-note" hidden></p>
+        <div id="output-sonos" hidden>
+          <p class="muted-label output-head">Sonos</p>
+          <ul class="output-list" id="output-rooms"></ul>
+          <div class="output-note" id="output-sonos-note" hidden>
+            <p class="output-note-lead"><span class="dot warn"></span><span id="output-sonos-what"></span></p>
+            <p class="field-note" id="output-sonos-todo"></p>
+          </div>
+          <div id="output-account" hidden>
+            <p class="muted-label output-head">Whose account plays</p>
+            <label class="device-bar">
+              <span class="device-bar-name" id="output-account-name"></span>
+              <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m6 9 6 6 6-6"/></svg>
+              <select id="output-account-select" aria-label="Whose account plays"></select>
+            </label>
+          </div>
+        </div>
       </div>
     </div>
     <div class="picker-foot">
@@ -241,6 +255,21 @@
     <div class="setting-row"><span class="setting-label">Base playlist</span><span class="setting-value" id="settings-playlist">None yet</span><button type="button" class="pill-btn" id="settings-playlist-change">Change</button></div>
     <p class="small skipped-note" id="settings-playlist-skipped" hidden></p>
     <p class="small player-issue" id="settings-player-issue" hidden></p>
+    <!-- The zone plays through Sonos: its rooms, ticked to play there (they join and leave
+         without the song restarting; the last one stays), each with its volume, and All
+         Speakers with two or more. The iPad party screen's Speakers panel, for hosts. -->
+    <div id="settings-speakers" hidden>
+      <p class="settings-head">Speakers</p>
+      <div class="speakers-all" id="speakers-all" hidden>
+        <p class="speakers-all-label">All Speakers</p>
+        <div class="volume-row">
+          <span class="volume-icon"><svg viewBox="0 0 24 24" aria-hidden="true" stroke-linejoin="round"><path d="M4 9.5h3.5L12 6v12l-4.5-3.5H4z" fill="currentColor"/></svg></span>
+          <input type="range" class="volume" id="speakers-all-volume" min="0" max="100" step="1" aria-label="All speakers volume">
+          <span class="volume-icon"><svg viewBox="0 0 24 24" aria-hidden="true" stroke-linejoin="round"><path d="M3 9.5h3.5L11 6v12l-4.5-3.5H3z" fill="currentColor"/><path d="M14.5 9.2a4 4 0 0 1 0 5.6M17.3 6.8a7.5 7.5 0 0 1 0 10.4"/></svg></span>
+        </div>
+      </div>
+      <ul class="output-list speakers" id="speakers-rooms"></ul>
+    </div>
     <div class="setting-row" id="settings-party-row" hidden><span class="setting-label">Save as playlist</span><span class="setting-value" id="settings-party"></span><button type="button" class="pill-btn" id="settings-party-save">Save</button></div>
     <p class="settings-head">Phones</p>
     <label class="setting-row"><span>Queue from phones</span><input type="checkbox" class="switch" id="settings-queue"></label>

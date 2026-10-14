@@ -311,7 +311,7 @@ html.sheet-open, html.sheet-open body { overflow: hidden; }
 .service-option-note:empty { display: none; }
 /* Spotify chosen, not signed in: its setup page, from under the bar. */
 .open-spotify { margin-top: 10px; }
-#setup-spotify-device[hidden], #spotify-advanced[hidden], .open-spotify[hidden] { display: none; }
+#spotify-advanced[hidden], .open-spotify[hidden] { display: none; }
 /* Spotify's setup page: Back at the top, the steps, the Client ID and Sign in, then Advanced. */
 #setup-spotify-scroll { padding-bottom: calc(env(safe-area-inset-bottom) + 28px); }
 .page-head { display: flex; align-items: center; justify-content: space-between; }
@@ -347,6 +347,60 @@ html.sheet-open, html.sheet-open body { overflow: hidden; }
 .device-bar svg { flex: none; width: 18px; height: 18px; stroke-width: 2.2; color: var(--text-2); }
 /* The native picker, invisible over the bar: tapping the bar opens it. */
 .device-bar select { position: absolute; inset: 0; width: 100%; height: 100%; opacity: 0; font-size: 16px; }
+/* Where music plays (a TV zone's setup) and Speakers (settings): rows as the iPad's lists, with
+   a check for the one output chosen (a Connect device, This Apple TV) and a ring for each Sonos
+   room, several at once. */
+#setup-output[hidden], #output-sonos[hidden], #output-account[hidden], .output-note[hidden], #settings-speakers[hidden],
+.speakers-all[hidden], .volume-row[hidden], .output-sub[hidden] { display: none; }
+.output-list { list-style: none; margin: 0; padding: 0; background: var(--surface-2); border-radius: 12px; overflow: hidden; }
+.output-list > li { position: relative; }
+.output-list > li + li::before { content: ""; position: absolute; top: 0; left: 52px; right: 0; height: 1px; background: var(--line); }
+.output-row { display: flex; align-items: center; gap: 12px; width: 100%; padding: 11px 14px; text-align: left; }
+.output-row:active:not(:disabled) { background: var(--surface); }
+.output-row:disabled { cursor: default; }
+.output-icon { flex: none; width: 26px; display: grid; place-items: center; color: var(--text-2); }
+.output-icon svg { width: 22px; height: 22px; stroke-width: 1.7; }
+.output-text { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 1px; }
+.output-name { font-size: 16px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.output-sub { font-size: 13px; color: var(--text-2); }
+.output-sub.busy { color: #ff9f0a; }
+.output-sub.warn { color: #ffb340; }
+.output-row.dim .output-icon, .output-row.dim .output-text { opacity: .45; }
+.output-mark { flex: none; width: 24px; height: 24px; display: grid; place-items: center; }
+.output-mark.check svg { width: 20px; height: 20px; stroke-width: 2.6; color: var(--text); }
+.output-mark.tick { width: 22px; height: 22px; border-radius: 50%; border: 1.5px solid var(--text-3); }
+/* The system green as Increase Contrast draws it, dark enough for a white check (as the iPad's). */
+.output-mark.tick.on { border-color: #248a3d; background: #248a3d; }
+.output-mark.tick.on svg { width: 14px; height: 14px; stroke-width: 3.2; color: #fff; }
+.output-mark .spinner { width: 18px; height: 18px; color: var(--text-2); }
+/* The last room while the music plays: it stays, its tick quieter. */
+.output-row.last .output-mark { opacity: .55; }
+.output-head { margin-top: 14px; }
+.output-note { margin: 10px 2px 0; }
+.output-note-lead { display: flex; align-items: center; gap: 7px; font-size: 14px; font-weight: 600; }
+.output-note .field-note { margin-top: 3px; }
+.dot.warn { flex: none; width: 8px; height: 8px; border-radius: 50%; background: #ff9f0a; }
+#spotify-device-note[hidden] { display: none; }
+/* Settings › Speakers, inside the settings card. */
+.modal-card .output-list { background: var(--surface); }
+.speaker-head { list-style: none; margin: 0; padding: 0; }
+.volume-row { display: flex; align-items: center; gap: 8px; padding: 0 14px 12px 52px; }
+.speakers-all { background: var(--surface); border-radius: 12px; padding: 10px 0 0; margin-bottom: 8px; }
+.speakers-all .volume-row { padding-left: 14px; }
+.modal-card .speakers-all-label { font-size: 12px; font-weight: 600; color: var(--text-2); margin: 0 14px 6px; }
+.volume-icon { flex: none; display: grid; place-items: center; color: var(--text-2); }
+.volume-icon svg { width: 17px; height: 17px; stroke-width: 1.8; }
+/* Thumbless, the track itself dragged, as the system draws volume. */
+.modal-card input.volume, input.volume {
+  flex: 1; min-width: 0; width: auto; appearance: none; -webkit-appearance: none; height: 28px; padding: 0; margin: 0; background: transparent; border-radius: 0;
+}
+input.volume::-webkit-slider-runnable-track {
+  height: 8px; border-radius: 4px; background: linear-gradient(to right, #fff var(--fill, 0%), rgba(255, 255, 255, .18) var(--fill, 0%));
+}
+input.volume::-webkit-slider-thumb { -webkit-appearance: none; width: 8px; height: 8px; border-radius: 50%; background: transparent; border: 0; }
+input.volume::-moz-range-track { height: 8px; border-radius: 4px; background: rgba(255, 255, 255, .18); }
+input.volume::-moz-range-progress { height: 8px; border-radius: 4px; background: #fff; }
+input.volume::-moz-range-thumb { width: 8px; height: 8px; border: 0; background: transparent; }
 /* A dead end on the hub (the Spotify sign-in link after it finished or expired). */
 .message-page { display: flex; flex-direction: column; align-items: flex-start; gap: 18px; padding-top: calc(env(safe-area-inset-top) + 40px); }
 .message-page p { color: var(--text-2); font-size: 16px; }

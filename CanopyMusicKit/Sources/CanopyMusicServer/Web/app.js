@@ -1464,7 +1464,7 @@
     }
     const who = s.displayName ? `Signed in as ${s.displayName}` : "Signed in";
     // On Sonos rooms, Spotify Connect isn't used: the rooms' own readiness shows under Plays on.
-    if (sonosChosen()) return { state: "ok", what: "", todo: who, ready: true };
+    if (outputPlace() === "sonos") return { state: "ok", what: "", todo: who, ready: true };
     if (!s.devices) return { state: "checking", what: `${who}.`, todo: "Looking for devices…" };
     const chosen = s.deviceID && s.devices.find((d) => d.id === s.deviceID);
     if (chosen) return { state: "ok", what: "", todo: who, ready: true };
@@ -1481,9 +1481,14 @@
   const spotifyReady = (s) => !!(s && s.account === "signedIn" && s.devices && s.devices.some((d) => d.id === s.deviceID));
   /** Sonos rooms are chosen as where the music plays. */
   const sonosChosen = () => !!(sonosSetup && sonosSetup.chosen && sonosSetup.chosen.length);
+  /** Plays on's switch as the host last set it ("sonos" or "own"); null: as the hub says (Sonos
+   * while rooms are chosen). Sonos with no room ticked yet shows the rooms, nothing chosen. */
+  let placePicked = null;
+  /** Where the switch is: "sonos" (the rooms) or "own" (the Spotify device, or This Apple TV). */
+  const outputPlace = () => !sonosShown() ? "own" : placePicked || (sonosChosen() ? "sonos" : "own");
   /** Where music plays can play: Sonos rooms found with an account to stream from, or (Spotify)
    * the chosen Connect device listed; this Apple TV always can. */
-  const outputReady = () => sonosChosen() ? !!sonosSetup.ready : !isSpotify() || spotifyReady(spotify);
+  const outputReady = () => outputPlace() === "sonos" ? sonosChosen() && !!sonosSetup.ready : !isSpotify() || spotifyReady(spotify);
   /** The zone's music can play: Apple Music ready, or Spotify signed in, and where it plays ready.
    * Another zone on the Spotify account doesn't count here: Continue asks about it. */
   const setupReady = () => (isSpotify() ? spotifySignedIn(spotify) : musicAccess === "ok") && outputReady();
@@ -1506,8 +1511,12 @@
   function renderSetupMusic() {
     const bar = $("setup-music"), note = $("setup-music-note"), state = $("setup-music-state");
     const spotifyZone = isSpotify();
-    // Another service: its playlists, and the one picked, are the old service's.
-    if (shownService !== undefined && shownService !== snap.service) resetPlaylists();
+    // Another service: its playlists, and the one picked, are the old service's; Plays on's
+    // switch goes back to what the hub says.
+    if (shownService !== undefined && shownService !== snap.service) {
+      resetPlaylists();
+      placePicked = null;
+    }
     shownService = snap.service;
 
     let status;
@@ -1714,6 +1723,7 @@
       case "on": return `<span class="output-mark tick on">${icons.check}</span>`;
       case "off": return '<span class="output-mark tick"></span>';
       case "spin": return '<span class="output-mark"><span class="spinner"></span></span>';
+      case "use": return '<span class="output-mark use">Use</span>';
       default: return '<span class="output-mark"></span>';
     }
   }
@@ -1752,23 +1762,33 @@
   /** A Sonos room's row, in setup's Plays on and in Devices (where rooms join and leave as the music plays). */
   function roomRow(room, s) {
     const changing = roomsChanging.has(room.id) || room.state === "joining";
+    // Another zone plays on it: "Use" (the sheet asks first) instead of a tick.
+    const use = room.state === "inUse" && !room.ticked;
     return {
-      action: "room", id: room.id, icon: roomIcon(room.model), name: room.name, sub: room.status,
-      tone: room.state === "busy" ? "busy" : "", mark: changing ? "spin" : room.ticked ? "on" : "off",
+      action: use ? "use" : "room", id: room.id, icon: roomIcon(room.model), name: room.name, sub: room.status,
+      tone: room.state === "busy" || room.state === "inUse" ? "busy" : "",
+      mark: changing ? "spin" : use ? "use" : room.ticked ? "on" : "off",
       dim: room.state === "notResponding" || !s.hasAccount,
-      disabled: !s.hasAccount || room.state === "joining" || (!room.canTick && !room.ticked),
+      disabled: !s.hasAccount || room.state === "joining" || (!room.canTick && !room.ticked && !use),
     };
   }
 
-  /** Under the Music bar: where music plays. Spotify's Connect devices (signed in) or This Apple
-   * TV, then the Sonos rooms, "Whose account plays" with several accounts, and what to do when
-   * the service isn't linked in the Sonos app. */
+  /** Under the Music bar: where music plays. With Sonos rooms found, a switch first: Sonos or
+   * the Spotify device (This Apple TV). Under the other side, Spotify's Connect devices (signed
+   * in) or This Apple TV; under Sonos, the rooms, "Whose account plays" with several accounts,
+   * and what to do when the service isn't linked in the Sonos app. */
   function renderOutput() {
     const spotifyZone = isSpotify(), s = sonosSetup, onSonos = sonosChosen();
     const signedIn = spotifyZone && spotifySignedIn(spotify);
     const sonos = sonosShown();
     $("setup-output").hidden = spotifyZone ? !signedIn : !sonos;
     if ($("setup-output").hidden) return;
+
+    const place = outputPlace();
+    $("output-switch").hidden = !sonos;
+    $("output-switch-own").textContent = spotifyZone ? "Spotify device" : "This Apple TV";
+    for (const button of $("output-switch").children) button.setAttribute("aria-checked", String(button.dataset.place === place));
+    $("output-own-part").hidden = place === "sonos";
 
     const own = [];
     if (spotifyZone) {
@@ -1794,9 +1814,10 @@
     }
     fillOutputList($("output-own"), own);
 
-    $("output-sonos").hidden = !sonos;
-    if (!sonos) return;
+    $("output-sonos").hidden = place !== "sonos";
+    if (place !== "sonos") return;
     const rooms = s.rooms || [];
+    $("output-rooms-note").hidden = onSonos || !rooms.length || !s.hasAccount;
     const rows = rooms.length ? rooms.map((room) => roomRow(room, s))
       // Chosen before, not found now (asleep, unplugged, another Wi‑Fi): tapping it plays here instead.
       : [{ action: "off", icon: outputIcons.speaker, name: s.chosenName || "Sonos", sub: s.searched ? "Not found on this Wi‑Fi" : "Looking…",
@@ -1852,6 +1873,18 @@
     render();
   }
 
+  // Plays on's switch. Off Sonos is one tap: the hub lets go of the rooms and plays on the
+  // Spotify device (or this Apple TV). Onto Sonos shows the rooms; nothing moves until one is ticked.
+  $("output-switch").addEventListener("click", async (event) => {
+    const button = event.target.closest("button[data-place]");
+    if (!button || button.dataset.place === outputPlace()) return;
+    placePicked = button.dataset.place;
+    render();
+    if (placePicked === "own" && sonosChosen()) {
+      try { await api("/api/host/sonos/off", { key: hostKey }); } catch { toast("Couldn't change where music plays"); }
+    }
+  });
+
   $("output-own").addEventListener("click", async (event) => {
     const row = event.target.closest(".output-row");
     if (!row || row.disabled) return;
@@ -1869,8 +1902,71 @@
       return;
     }
     const room = sonosSetup && (sonosSetup.rooms || []).find((r) => r.id === row.dataset.id);
-    if (room && !roomsChanging.has(room.id)) tickRoom(room.id, !room.ticked);
+    if (!room || roomsChanging.has(room.id)) return;
+    if (row.dataset.action === "use") return openTakeover(room);
+    tickRoom(room.id, !room.ticked);
   });
+
+  // MARK: Taking rooms from another zone ("Use")
+
+  /** "Bedroom", "Bedroom and Move", "Bedroom, Move, and Kitchen". */
+  function roomList(names) {
+    if (names.length < 3) return names.join(" and ");
+    return `${names.slice(0, -1).join(", ")}, and ${names[names.length - 1]}`;
+  }
+
+  /** What the sheet asks, as the iPad's dialog (`SonosTakeoverPrompt`). */
+  function takeoverPrompt(room) {
+    const byID = new Map(((sonosSetup && sonosSetup.rooms) || []).map((r) => [r.id, r]));
+    const together = ((room.inUse && room.inUse.together) || [room.id]).filter((id) => byID.has(id));
+    const rooms = together.length > 1 ? together : [room.id];
+    const names = rooms.map((id) => byID.get(id).name);
+    const zone = room.inUse ? `${room.inUse.zone}'s zone` : "another zone";
+    return {
+      rooms,
+      title: `Use ${roomList(names)}?`,
+      text: `${rooms.length > 1 ? "They're" : "It's"} playing ${zone}. Its music stops there and plays here instead.`,
+      all: rooms.length > 2 ? `Use All ${rooms.length} Rooms` : rooms.length === 2 ? "Use Both Rooms" : null,
+      just: rooms.length > 1 ? `Just ${room.name}` : `Use ${room.name}`,
+    };
+  }
+
+  let takeover = null;
+  function openTakeover(room) {
+    const prompt = takeoverPrompt(room);
+    takeover = { room: room.id, rooms: prompt.rooms };
+    $("takeover-title").textContent = prompt.title;
+    $("takeover-text").textContent = prompt.text;
+    $("takeover-all").hidden = !prompt.all;
+    $("takeover-all").textContent = prompt.all || "";
+    $("takeover-just").textContent = prompt.just;
+    // With one room, its own button leads.
+    $("takeover-just").className = prompt.all ? "action-btn" : "primary-btn wide";
+    $("takeover-modal").hidden = false;
+  }
+  function closeTakeover() {
+    takeover = null;
+    $("takeover-modal").hidden = true;
+  }
+  /** Takes the rooms on the hub (the other zone isn't told); spinners until it answers. */
+  async function useRooms(ids) {
+    closeTakeover();
+    for (const id of ids) roomsChanging.add(id);
+    placePicked = "sonos";
+    render();
+    try {
+      await api("/api/host/sonos/use", { key: hostKey, ids });
+    } catch (error) {
+      debugLog(`sonos use failed: ${error.message}`);
+      toast(ids.length > 1 ? "Couldn't use those speakers" : "Couldn't use that speaker");
+    }
+    for (const id of ids) roomsChanging.delete(id);
+    render();
+  }
+  $("takeover-all").addEventListener("click", () => { if (takeover) useRooms(takeover.rooms); });
+  $("takeover-just").addEventListener("click", () => { if (takeover) useRooms([takeover.room]); });
+  $("takeover-cancel").addEventListener("click", closeTakeover);
+  $("takeover-modal").addEventListener("click", (event) => { if (event.target === $("takeover-modal")) closeTakeover(); });
 
   // MARK: The volume row (Sonos) and Devices
 
@@ -2101,6 +2197,7 @@
     if (!row || row.disabled || !sonosSetup) return;
     const room = (sonosSetup.rooms || []).find((r) => r.id === row.dataset.id);
     if (!room || roomsChanging.has(room.id)) return;
+    if (row.dataset.action === "use") return openTakeover(room);
     if (room.ticked && sonosSetup.rooms.filter((r) => r.ticked).length === 1) {
       toast("The last speaker stays while the music plays.");
       return;

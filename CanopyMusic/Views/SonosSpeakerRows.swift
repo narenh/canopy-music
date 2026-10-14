@@ -2,13 +2,17 @@ import CanopyMusicCore
 import CanopyMusicServer
 import SwiftUI
 
-/// "Where should music play?"'s Sonos section (start screen): the household's rooms, several
-/// at once. Ticking one moves the music there from this device or a Spotify Connect device (a
-/// gap while it switches); once on Sonos, more rooms join and leave without a restart. Each
-/// row's second line is its model, or what it's busy playing (orange), or that it doesn't
-/// answer. Several linked accounts for the zone's service get a "Whose account plays" picker.
+/// "Where should music play?"'s Sonos section (start screen), under its Sonos segment: the
+/// household's rooms, several at once. Ticking one moves the music there from this device or a
+/// Spotify Connect device (a gap while it switches); once on Sonos, more rooms join and leave
+/// without a restart. Each row's second line is its model, what it's busy playing (orange),
+/// that another Canopy Music zone plays there (orange, with "Use" instead of a tick), or that it
+/// doesn't answer. Several linked accounts for the zone's service get a "Whose account plays"
+/// picker.
 struct SonosPickerSection: View {
     @Environment(AppModel.self) private var model
+    /// "Use" was tapped on this room: the dialog asks first.
+    @State private var takingOver: String?
 
     private var household: SonosHousehold { model.sonos }
     private var hasAccount: Bool { model.sonosAccount != nil }
@@ -51,11 +55,19 @@ struct SonosPickerSection: View {
                 } else if model.sonosOutput != nil, model.sonosAccountsForZone.count > 1 {
                     accountPicker
                 }
-            } header: {
-                Text("Sonos")
             }
             .listRowBackground(Color.white.opacity(0.08))
             .task {
+                #if DEBUG
+                // `-sonosAskUse <room name>`: taps that room's "Use" once it's listed (screenshots).
+                let args = ProcessInfo.processInfo.arguments
+                if let i = args.firstIndex(of: "-sonosAskUse"), i + 1 < args.count {
+                    Task {
+                        try? await Task.sleep(for: .seconds(2))
+                        takingOver = household.rooms.first { $0.roomName == args[i + 1] }?.id
+                    }
+                }
+                #endif
                 // Busy rooms and ones that don't answer, kept current while the list shows.
                 while !Task.isCancelled {
                     await model.readSonosRooms()
@@ -68,11 +80,15 @@ struct SonosPickerSection: View {
     private func row(_ room: SonosPlayer) -> some View {
         let ticked = model.isSonosRoomTicked(room.id)
         let joining = model.sonosJoining.contains(room.id)
-        let status = SonosRoomStatus.of(roomID: room.id, model: room.displayName, ticked: ticked, joining: joining,
-                                        live: model.sonosIsLive, reading: household.readings[room.id])
+        let status = model.sonosStatus(of: room)
+        // Another zone's: "Use" (asked first), never a tick.
+        let offersUse = status.isInUse && !ticked
         return Button {
-            guard status.canTick else { return }
-            model.toggleSonosRoom(room.id)
+            if offersUse {
+                takingOver = room.id
+            } else if ticked || status.canTick {
+                model.toggleSonosRoom(room.id)
+            }
         } label: {
             HStack(spacing: 12) {
                 // Secondary, ticked or not, as This iPad's and the Music section's icons are.
@@ -82,7 +98,11 @@ struct SonosPickerSection: View {
                     SonosStatusText(status: status)
                 }
                 Spacer(minLength: 8)
-                SonosCheck(ticked: ticked, joining: joining)
+                if offersUse {
+                    SonosUseLabel()
+                } else {
+                    SonosCheck(ticked: ticked, joining: joining)
+                }
             }
             .contentShape(Rectangle())
             .opacity(status == .notResponding || !hasAccount ? 0.45 : 1)
@@ -90,6 +110,8 @@ struct SonosPickerSection: View {
         .buttonStyle(.plain)
         .disabled(!hasAccount || status == .notResponding)
         .accessibilityAddTraits(ticked ? .isSelected : [])
+        .accessibilityHint(offersUse ? "Asks before taking it from the other zone" : "")
+        .sonosTakeoverDialog(for: room.id, asking: $takingOver)
     }
 
     /// "Whose account plays": Sonos names no accounts, so each is told apart by a song it played.
@@ -114,13 +136,61 @@ struct SonosStatusText: View {
     var body: some View {
         Text(status.text)
             .font(.footnote)
-            .foregroundStyle(isBusy ? AnyShapeStyle(Color.orange) : AnyShapeStyle(.secondary))
+            .foregroundStyle(status.isBusy ? AnyShapeStyle(Color.orange) : AnyShapeStyle(.secondary))
             .lineLimit(2)
     }
+}
 
-    private var isBusy: Bool {
-        if case .busy = status { return true }
-        return false
+/// "Use", where a tick would be, on a room another Canopy Music zone plays on. The whole row is
+/// the button; this is its label.
+struct SonosUseLabel: View {
+    var body: some View {
+        Text("Use")
+            .font(.footnote.weight(.semibold))
+            .padding(.horizontal, 10)
+            .padding(.vertical, 5)
+            .background(Color.white.opacity(0.14), in: Capsule())
+    }
+}
+
+extension View {
+    /// Asks before "Use" takes rooms another zone plays on, from `roomID`'s row, while
+    /// `asking` is that room (cleared when it closes): "Use Bedroom and Move?", with Use Both
+    /// Rooms, Just Bedroom and Cancel. The other zone isn't told.
+    func sonosTakeoverDialog(for roomID: String, asking: Binding<String?>) -> some View {
+        modifier(SonosTakeoverDialog(roomID: roomID, asking: asking))
+    }
+}
+
+private struct SonosTakeoverDialog: ViewModifier {
+    @Environment(AppModel.self) private var model
+    let roomID: String
+    @Binding var asking: String?
+
+    private struct Question {
+        var together: [String]
+        var prompt: SonosTakeoverPrompt
+    }
+
+    private var question: Question? {
+        guard asking == roomID, let room = model.sonos.player(roomID), let claim = model.sonosController.claim(on: roomID) else { return nil }
+        let together = model.sonosTakenTogether(with: roomID)
+        let names = together.compactMap { model.sonos.player($0)?.roomName }
+        return Question(together: together, prompt: SonosTakeoverPrompt(room: room.roomName, together: names, zone: claim.zone))
+    }
+
+    func body(content: Content) -> some View {
+        let question = question
+        content.confirmationDialog(question?.prompt.title ?? "", isPresented: Binding(get: { question != nil }, set: { if !$0 { asking = nil } }),
+                                   titleVisibility: .visible, presenting: question) { asking in
+            if let all = asking.prompt.all {
+                Button(all) { model.takeOverSonosRooms(asking.together) }
+            }
+            Button(asking.prompt.just) { model.takeOverSonosRooms([roomID]) }
+            Button("Cancel", role: .cancel) {}
+        } message: { asking in
+            Text(asking.prompt.message)
+        }
     }
 }
 

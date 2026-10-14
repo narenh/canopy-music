@@ -93,9 +93,11 @@ public final class PartyServer: Sendable {
 
         // Another device checking this zone is really here, as its Bonjour announcement says,
         // before that announcement's Spotify account blocks it (`ZoneProbe`). Only what the TXT
-        // record already makes public.
+        // record already makes public. Also the Sonos rooms the zone plays on, so another hub's
+        // lists say "In use by …" for them (`SonosClaimExchange`).
         await server.appendRoute("GET /api/zone") { _ in
-            try .json(ZoneCheck(hub: await session.hubID, spotify: await session.announcedSpotifyAccount))
+            try .json(ZoneCheck(hub: await session.hubID, spotify: await session.announcedSpotifyAccount,
+                                sonos: await session.sonosHandler?.sonosClaim()))
         }
 
         // Another hub without an account for a service asks what this one knows of its Sonos
@@ -383,6 +385,13 @@ public final class PartyServer: Sendable {
             let ok = await handler.setSonosRoom(id, on: on)
             return HTTPResponse(statusCode: ok ? .noContent : .conflict)
         }
+        // "Use", confirmed on the page: rooms another Canopy Music zone plays on become this
+        // zone's too (`{ids}`). 409 as for a tick (a room that doesn't answer, no account,
+        // moving onto Sonos after setup).
+        await hostSonos("POST /api/host/sonos/use") { body, handler in
+            guard let ids = body.ids, !ids.isEmpty else { return HTTPResponse(statusCode: .badRequest) }
+            return HTTPResponse(statusCode: await handler.useSonosRooms(ids) ? .noContent : .conflict)
+        }
         // Back to the hub's own output: the Apple TV, or the Spotify Connect device.
         await hostSonos("POST /api/host/sonos/off") { _, handler in
             HTTPResponse(statusCode: await handler.leaveSonos() ? .noContent : .conflict)
@@ -650,6 +659,8 @@ struct HostSonosBody: Decodable {
     var volume: Int?
     /// The group's volume is about to move (`SnapshotGroupVolume` first).
     var begin: Bool?
+    /// Rooms another zone plays on, to take over ("Use", confirmed).
+    var ids: [String]?
 }
 
 extension PartyServer {

@@ -146,6 +146,13 @@ final class TVModel {
         // Moving the music on or off Sonos (or to another account) only while the host sets the
         // zone up; once it plays, rooms join and leave.
         sonos.canChangeOutput = { [weak self] in self.map { $0.role == .hub && $0.session.isWaitingForSetup } ?? false }
+        // Rooms another zone plays on aren't chosen for a zone being set up (a choice kept from
+        // an earlier zone lets go of them).
+        sonos.isSettingUp = { [weak self] in self.map { $0.role == .hub && $0.session.isWaitingForSetup } ?? false }
+        #if DEBUG
+        // `-sonosFakeOtherZone`: "Living Room iPad" plays in Bedroom and Move (`SonosFakeHousehold`).
+        if Self.isSonosFake, SonosFakeHousehold.isOtherZone { sonos.standingClaims = [SonosFakeHousehold.otherZoneClaim] }
+        #endif
         spotify.onChange = { [weak self] in self?.pushSpotifySetup() }
         // The app's own audio is only the motion artwork's silent video; the music plays in the
         // Apple Music player's own session. Left at the default (not mixable), the music starting
@@ -318,6 +325,8 @@ final class TVModel {
         // Sonos: the rooms for the host's page, and a Sonos engine's rooms kept as the output.
         session.sonosHandler = sonos
         sonos.connect(session)
+        // A new zone: rooms taken over for an earlier one are just rooms again.
+        if fresh { sonos.beginSetup() }
         sonos.household.start()
         // The zone becomes real when its music starts (a phone's "Start the music"): only then is
         // it recorded, so only then does it come back after a crash or offer Resume.

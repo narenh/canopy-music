@@ -127,17 +127,24 @@ private struct SonosPanelRow: View {
     let room: SonosPlayer
     /// The only ticked room: it stays (leaving Sonos is on the start screen).
     let onlyTicked: Bool
+    /// "Use" was tapped: the dialog asks first.
+    @State private var takingOver: String?
 
     var body: some View {
         let ticked = model.isSonosRoomTicked(room.id)
         let joining = model.sonosJoining.contains(room.id)
         let reading = model.sonos.readings[room.id]
-        let status = SonosRoomStatus.of(roomID: room.id, model: room.displayName, ticked: ticked, joining: joining,
-                                        live: true, reading: reading)
+        let status = model.sonosStatus(of: room, live: true)
+        // Another zone's: "Use" (asked first; it joins this group), never a tick.
+        let offersUse = status.isInUse && !ticked
         VStack(alignment: .leading, spacing: 8) {
             Button {
+                if offersUse {
+                    takingOver = room.id
+                    return
+                }
                 // The last room stays; only its tick is dimmed (not the whole row, as disabling would).
-                guard !onlyTicked, status.canTick else { return }
+                guard !onlyTicked, ticked || status.canTick else { return }
                 model.toggleSonosRoom(room.id)
             } label: {
                 HStack(spacing: 12) {
@@ -147,11 +154,16 @@ private struct SonosPanelRow: View {
                         SonosStatusText(status: status)
                     }
                     Spacer(minLength: 8)
-                    SonosCheck(ticked: ticked, joining: joining)
-                        .opacity(onlyTicked ? 0.55 : 1)
+                    if offersUse {
+                        SonosUseLabel()
+                    } else {
+                        SonosCheck(ticked: ticked, joining: joining)
+                            .opacity(onlyTicked ? 0.55 : 1)
+                    }
                 }
                 .contentShape(Rectangle())
             }
+            .sonosTakeoverDialog(for: room.id, asking: $takingOver)
             .buttonStyle(.plain)
             .disabled(status == .notResponding)
             .opacity(status == .notResponding ? 0.45 : 1)

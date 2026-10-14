@@ -388,7 +388,20 @@ html.sheet-open, html.sheet-open body { overflow: hidden; }
 .output-note-lead { display: flex; align-items: center; gap: 7px; font-size: 14px; font-weight: 600; }
 .output-note .field-note { margin-top: 3px; }
 .dot.warn { flex: none; width: 8px; height: 8px; border-radius: 50%; background: #ff9f0a; }
-#spotify-device-note[hidden] { display: none; }
+#spotify-device-note[hidden], #output-own-part[hidden], #output-rooms-note[hidden], .segmented[hidden] { display: none; }
+/* Plays on's switch: Sonos, or the Spotify device / This Apple TV. */
+.segmented { display: flex; gap: 3px; padding: 3px; margin-bottom: 8px; background: var(--surface); border-radius: 12px; }
+.segmented button { flex: 1; min-width: 0; padding: 8px 6px; border-radius: 9px; font-size: 14px; font-weight: 600; color: var(--text-2); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; transition: background-color .2s, color .2s; }
+.segmented button[aria-checked="true"] { background: var(--surface-2); color: var(--text); }
+/* "Use", where a room another zone plays on would have its tick. */
+.output-mark.use { width: auto; height: auto; font-size: 13px; font-weight: 650; padding: 5px 11px; border-radius: 999px; background: var(--surface-2); color: var(--text); }
+/* The takeover sheet: a card at the bottom, its buttons stacked. */
+.modal.bottom { place-items: end center; padding: 12px 12px max(12px, env(safe-area-inset-bottom)); }
+.action-card h2 { font-size: 18px; margin: 0; }
+.action-card p { margin: 6px 0 14px; }
+.action-buttons { display: flex; flex-direction: column; gap: 8px; }
+.action-buttons [hidden] { display: none; }
+.action-btn { width: 100%; padding: 13px; font-size: 16px; font-weight: 600; border-radius: 999px; background: var(--surface-2); color: var(--text); }
 /* Devices (the party page's Speakers panel), a card like the settings'. */
 .devices-card { max-height: 86vh; overflow-y: auto; overscroll-behavior: contain; }
 .devices-card .card-head { margin-bottom: 14px; }

@@ -346,8 +346,14 @@ final class AppModel {
         // Debug launches above may have changed the service.
         sonosController.service = sonosService
         sonosController.onOutputChanged = { [weak self] in self?.rebuildSessionForOutput() }
-        // Other hubs' zones, asked for Sonos accounts this one hasn't seen.
+        // Other hubs' zones, asked for Sonos accounts this one hasn't seen, and which rooms they play on.
         sonosController.peers = { [weak self] in self?.otherZones ?? [] }
+        // The start screen before Start: rooms another zone plays on aren't this zone's choice.
+        sonosController.isSettingUp = { [weak self] in self.map { $0.zoneRole == .hub && !$0.isLive } ?? false }
+        #if DEBUG
+        // `-sonosFakeOtherZone`: "Living Room iPad" plays in Bedroom and Move (`SonosFakeHousehold`).
+        if Self.isSonosFake, SonosFakeHousehold.isOtherZone { sonosController.standingClaims = [SonosFakeHousehold.otherZoneClaim] }
+        #endif
         sonosController.onError = { [weak self] message in self?.errorMessage = message }
         // A host's phone sees the rooms in the party page's volume row and Devices (hosts' snapshots).
         sonosController.onChange = { [weak self] in self?.publishSonosSetup() }
@@ -916,6 +922,8 @@ final class AppModel {
         clearZone()
         isLive = false
         zoneRole = .hub
+        // A new zone's setup: rooms taken over for this one are just rooms again.
+        sonosController.beginSetup()
         isLocked = false
         UIApplication.shared.isIdleTimerDisabled = false
         Task { await stopServer() }
@@ -1315,6 +1323,21 @@ final class AppModel {
     /// start screen goes back to this device (the Speakers panel doesn't offer that).
     func toggleSonosRoom(_ roomID: String) {
         sonosController.toggle(roomID)
+    }
+
+    /// A room's second line (`live`: the party screen's Speakers panel).
+    func sonosStatus(of room: SonosPlayer, live: Bool? = nil) -> SonosRoomStatus {
+        sonosController.status(of: room, live: live)
+    }
+
+    /// The rooms "Use" on `roomID` offers together (the other zone's, in its group).
+    func sonosTakenTogether(with roomID: String) -> [String] {
+        sonosController.takenTogether(with: roomID)
+    }
+
+    /// "Use", confirmed: rooms another zone plays on become this zone's too.
+    func takeOverSonosRooms(_ roomIDs: [String]) {
+        sonosController.takeOver(roomIDs)
     }
 
     /// "Whose account plays".

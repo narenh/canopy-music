@@ -9,16 +9,36 @@ import Foundation
 /// Bedroom (Beam) is idle, Move (Move) is playing something from the Sonos app, and Kitchen
 /// (One) doesn't answer. On the iPad, pair with `-sonosFakeParty 1|2` for the party screen
 /// playing in Bedroom (and Move), and `-sonosPanel` to open its Speakers panel.
+///
+/// `-sonosFakeOtherZone` (`otherZone`): another Canopy Music zone, "Living Room iPad" on Apple
+/// Music, plays in Bedroom and Move (grouped, Bedroom leading), and Kitchen answers, so it's the
+/// free room. The hub is told of that zone as if it had asked it (`otherZoneClaim`); no second
+/// hub runs.
 @MainActor
 public enum SonosFakeHousehold {
-    public static func make() -> SonosSimulator {
+    public static let bedroom = "RINCON_FAKEBEDROOM01400"
+    public static let move = "RINCON_FAKEMOVE0001400"
+    public static let kitchen = "RINCON_FAKEKITCHEN01400"
+
+    /// The made-up zone `-sonosFakeOtherZone` says plays in Bedroom and Move.
+    public static let otherZoneClaim = SonosZoneClaim(zone: "Living Room iPad", service: "Apple Music", household: "Sonos_Simulated",
+                                                      rooms: [bedroom, move])
+
+    public static var isOtherZone: Bool { ProcessInfo.processInfo.arguments.contains("-sonosFakeOtherZone") }
+
+    public static func make(otherZone: Bool = isOtherZone) -> SonosSimulator {
         let simulator = SonosSimulator(rooms: [
-            .init(id: "RINCON_FAKEBEDROOM01400", name: "Bedroom", model: "Beam", host: "192.0.2.11", volume: 38),
-            .init(id: "RINCON_FAKEMOVE0001400", name: "Move", model: "Move", host: "192.0.2.12", volume: 25),
-            .init(id: "RINCON_FAKEKITCHEN01400", name: "Kitchen", model: "One", host: "192.0.2.13", volume: 30, reachable: false),
+            .init(id: bedroom, name: "Bedroom", model: "Beam", host: "192.0.2.11", volume: 38),
+            .init(id: move, name: "Move", model: "Move", host: "192.0.2.12", volume: 25),
+            .init(id: kitchen, name: "Kitchen", model: "One", host: "192.0.2.13", volume: 30, reachable: otherZone),
         ])
-        simulator.play(.init(uri: "x-sonos-spotify:spotify%3atrack%3a6dOtVTDdiauQNBQEDOtlAB?sid=12&flags=8232&sn=4",
-                             title: "Birds of a Feather", artist: "Billie Eilish"), in: "RINCON_FAKEMOVE0001400")
+        if otherZone {
+            simulator.group([bedroom, move])
+            simulator.play(.init(uri: "x-sonos-http:song%3a1000000001.mp4?sid=204&flags=8224&sn=3", title: "Ribs", artist: "Lorde"), in: bedroom)
+        } else {
+            simulator.play(.init(uri: "x-sonos-spotify:spotify%3atrack%3a6dOtVTDdiauQNBQEDOtlAB?sid=12&flags=8232&sn=4",
+                                 title: "Birds of a Feather", artist: "Billie Eilish"), in: move)
+        }
         // Feels like real speakers: answers take a moment, and joining a group longer.
         simulator.latency = .milliseconds(40)
         simulator.joinDelay = .milliseconds(1200)

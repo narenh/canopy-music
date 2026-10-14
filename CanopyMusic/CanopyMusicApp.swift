@@ -265,6 +265,10 @@ struct RootView: View {
             // `-showOutputPicker`: opens "Where should music play?" on the start screen.
             if args.contains("-showOutputPicker") {
                 try? await Task.sleep(for: .seconds(2))
+                // `-sonosFake`: once the simulated household's rooms are listed.
+                for _ in 0..<50 where AppModel.isSonosFake && model.sonos.rooms.isEmpty {
+                    try? await Task.sleep(for: .milliseconds(200))
+                }
                 model.isPickingSpotifyDevice = true
             }
             // `-autoLoad` loads the first demo playlist without playing, for host-screen screenshots.

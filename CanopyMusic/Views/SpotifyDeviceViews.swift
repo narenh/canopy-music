@@ -134,18 +134,48 @@ private struct OutputPickerPresenter: ViewModifier {
 }
 
 /// "Where should music play?" For Spotify: the Spotify Connect devices, kept current while open.
-/// For Apple Music: this device (and its AirPlay speakers). Then, on the start screen, the Sonos
-/// rooms (`SonosPickerSection`): choosing rooms leaves this device or the Connect device, and
-/// choosing this device or a Connect device leaves Sonos.
+/// For Apple Music: this device (and its AirPlay speakers). On the start screen, with Sonos rooms
+/// on the Wi‑Fi, a switch at the top chooses where first: **Sonos** (its rooms,
+/// `SonosPickerSection`) or **Spotify device** / **This iPad**. Switching away from Sonos is one
+/// tap and lets go of the rooms (the music moves back, with a gap if it's playing); ticking rooms
+/// leaves this device or the Connect device.
 struct OutputPicker: View {
     @Environment(AppModel.self) private var model
     @Environment(\.dismiss) private var dismiss
     let includesSonos: Bool
+    /// The switch was set to Sonos with no room ticked yet (the rooms show, the music stays put).
+    @State private var choosingSonos = false
 
     private static let intro = "Open Spotify on this \(DeviceKind.noun) or another device in your home. That's where music will play from."
 
     private var showsSonos: Bool {
         includesSonos && model.sonosService != nil && (!model.sonos.rooms.isEmpty || model.sonosOutput != nil)
+    }
+
+    private enum Place: Hashable { case sonos, own }
+
+    /// Where the switch is: Sonos while rooms are chosen (or it was just set there).
+    private var place: Place {
+        showsSonos && (model.sonosOutput != nil || choosingSonos) ? .sonos : .own
+    }
+
+    /// The other side of the switch: "Spotify device", or "This iPad" ("This Mac").
+    private var ownName: String {
+        model.provider == .spotify ? "Spotify device" : "This \(DeviceKind.noun)"
+    }
+
+    private var placeSwitch: some View {
+        Picker("Plays on", selection: Binding(get: { place }, set: { next in
+            choosingSonos = next == .sonos
+            // One tap off Sonos: the rooms are let go, and the music goes back to this device
+            // (or the Connect device).
+            if next == .own { model.useThisDevice() }
+        })) {
+            Text("Sonos").tag(Place.sonos)
+            Text(ownName).tag(Place.own)
+        }
+        .pickerStyle(.segmented)
+        .labelsHidden()
     }
 
     var body: some View {
@@ -164,6 +194,14 @@ struct OutputPicker: View {
             }
         }
         .tint(model.provider.accent)
+        // Opened on Sonos stays on Sonos, even once the last room is unticked.
+        .onAppear {
+            choosingSonos = model.sonosOutput != nil
+            #if DEBUG
+            // `-showOutputPicker -outputPickerSonos`: opens on the Sonos side (for screenshots).
+            if ProcessInfo.processInfo.arguments.contains("-outputPickerSonos") { choosingSonos = true }
+            #endif
+        }
         .task {
             guard model.provider == .spotify else { return }
             while !Task.isCancelled {
@@ -175,9 +213,18 @@ struct OutputPicker: View {
 
     private var list: some View {
         Form {
-            if model.provider == .spotify {
+            if showsSonos {
+                Section {
+                    placeSwitch
+                }
+                .listRowBackground(Color.clear)
+                .listRowInsets(EdgeInsets())
+            }
+            if place == .sonos {
+                SonosPickerSection()
+            } else if model.provider == .spotify {
                 spotifySection
-                if model.spotifyDevices.isEmpty || !showsSonos {
+                if model.spotifyDevices.isEmpty {
                     Section {
                         OpenSpotifyButton(prominent: false)
                             .frame(maxWidth: .infinity)
@@ -189,9 +236,6 @@ struct OutputPicker: View {
                     ThisDeviceRow()
                 }
                 .listRowBackground(Color.white.opacity(0.08))
-            }
-            if showsSonos {
-                SonosPickerSection()
             }
         }
         .scrollContentBackground(.hidden)

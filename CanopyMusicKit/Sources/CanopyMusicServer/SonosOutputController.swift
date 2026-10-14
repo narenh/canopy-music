@@ -80,6 +80,18 @@ public final class SonosOutputController {
     public var service: SonosMusicService? {
         didSet { if service != oldValue { changed() } }
     }
+    /// The rooms other Canopy Music zones on the network say they play on (`GET /api/zone`,
+    /// asked of `peers` while a room list shows), so they read "In use by …" (`claim(on:)`).
+    public private(set) var claims: [SonosZoneClaim] = [] {
+        didSet { if claims != oldValue { changed() } }
+    }
+    /// Claims known without asking: a made-up other zone (`-sonosFakeOtherZone`). Set by the app.
+    public var standingClaims: [SonosZoneClaim] = [] {
+        didSet { if standingClaims != oldValue { changed() } }
+    }
+    /// Rooms the host took from another zone ("Use", confirmed) while setting this one up: they
+    /// stay chosen though that zone still says it plays there (until the first play takes them).
+    public private(set) var takenOver: Set<String> = []
 
     /// The zone's session, whose engine plays through Sonos when the output is Sonos (`connect`).
     @ObservationIgnored public private(set) weak var session: PartySession?
@@ -92,6 +104,10 @@ public final class SonosOutputController {
     /// Whether a host's phone may move the music between Sonos and the hub's own output, or
     /// change the account (`SonosOutputHandler`): only while the zone is being set up.
     @ObservationIgnored public var canChangeOutput: @MainActor () -> Bool = { false }
+    /// The zone's music hasn't started yet (the TV's setup page, the iPad's start screen before
+    /// Start): rooms another zone plays on are then never this zone's choice unless taken over,
+    /// so a choice kept from an earlier zone lets go of them (`releaseClaimedRooms`).
+    @ObservationIgnored public var isSettingUp: @MainActor () -> Bool = { false }
     /// For the engines it makes (`[sonos-engine] …` in debug builds).
     @ObservationIgnored public var engineLog: (@MainActor (String) -> Void)?
     /// nil: nothing is kept (a simulated household).
@@ -106,6 +122,13 @@ public final class SonosOutputController {
     /// than `askInterval`; a new zone is asked at once).
     @ObservationIgnored private var lastAsked: (key: String, at: Date)?
     @ObservationIgnored private var isAsking = false
+    /// How other zones are asked which rooms they play on (tests replace the network).
+    @ObservationIgnored private let claimExchange: SonosClaimExchange
+    /// Each zone's last answer (by address) and when: a zone that misses one answer keeps its
+    /// claim for `claimLifetime`, so a slow reply doesn't make its rooms look free for a moment.
+    @ObservationIgnored private var claimAnswers: [String: (claim: SonosZoneClaim?, at: Date)] = [:]
+    @ObservationIgnored private var lastClaimsAsked: Date?
+    @ObservationIgnored private var isAskingClaims = false
 
     public static let outputKey = "sonosOutput"
     public static let accountsKey = "sonosAccounts"
@@ -115,13 +138,20 @@ public final class SonosOutputController {
     /// service, the serial doesn't matter. It does with several ("Whose account plays").
     public static let assumedSerial = 1
     static let askInterval: TimeInterval = 60
+    /// Other zones are asked which rooms they play on at most this often (the lists read the
+    /// rooms every 2–4 s).
+    static let claimInterval: TimeInterval = 3
+    static let claimLifetime: TimeInterval = 15
 
     /// `defaults`: where the rooms and accounts are kept (nil keeps nothing, for a simulated household).
-    /// `exchange`: how other hubs are asked for accounts (tests replace the network).
-    public init(household: SonosHousehold, defaults: UserDefaults? = .standard, exchange: SonosAccountExchange = SonosAccountExchange()) {
+    /// `exchange`, `claimExchange`: how other hubs are asked for accounts, and which rooms they
+    /// play on (tests replace the network).
+    public init(household: SonosHousehold, defaults: UserDefaults? = .standard, exchange: SonosAccountExchange = SonosAccountExchange(),
+                claimExchange: SonosClaimExchange = SonosClaimExchange()) {
         self.household = household
         self.defaults = defaults
         self.exchange = exchange
+        self.claimExchange = claimExchange
         output = defaults?.data(forKey: Self.outputKey).flatMap { try? JSONDecoder().decode(SonosOutput.self, from: $0) }
         chosenAccounts = defaults?.data(forKey: Self.accountsKey).flatMap { try? JSONDecoder().decode([String: SonosAccount].self, from: $0) } ?? [:]
         memory = defaults?.data(forKey: Self.knownAccountsKey).flatMap { try? JSONDecoder().decode(SonosAccountMemory.self, from: $0) } ?? SonosAccountMemory()
@@ -194,6 +224,47 @@ public final class SonosOutputController {
     /// so ticked rooms say "Playing Canopy Music".
     public var isLive: Bool { engine?.isGrouped == true }
 
+    /// Live, and the rooms are still this zone's: no other source (another zone that took them
+    /// over, the Sonos app) has them.
+    public var ownsRooms: Bool { isLive && engine?.hasLostControl != true }
+
+    // MARK: Other zones' rooms
+
+    /// The claims that count here: other zones', in this household (or one not read yet).
+    private var otherClaims: [SonosZoneClaim] {
+        let mine = householdKey
+        return (claims + standingClaims).filter { claim in claim.household == nil || mine == nil || claim.household == mine }
+    }
+
+    /// The other zone playing on `roomID`: one that says it plays there, whose rooms lead the
+    /// room's group in the live layout (a room moved into another group since isn't its). Never
+    /// for this zone's own rooms while it plays there. A room playing another hub's songs that
+    /// no zone claims reads as any busy room does ("Playing …").
+    public func claim(on roomID: String) -> SonosZoneClaim? {
+        if ownsRooms, engine?.target.rooms.contains(where: { $0.id == roomID }) == true { return nil }
+        return SonosZoneClaim.playing(on: roomID, coordinatorID: household.group(containing: roomID)?.coordinatorID, in: otherClaims)
+    }
+
+    /// The rooms "Use" on `roomID` offers together: the same zone's, in the same group now, in
+    /// the list's order (just `roomID` when it plays there alone).
+    public func takenTogether(with roomID: String) -> [String] {
+        guard let theirs = claim(on: roomID) else { return [roomID] }
+        let coordinator = household.group(containing: roomID)?.coordinatorID
+        let together = household.rooms.map(\.id).filter { id in
+            claim(on: id) == theirs && (coordinator == nil || household.group(containing: id)?.coordinatorID == coordinator)
+        }
+        return together.contains(roomID) ? together : [roomID]
+    }
+
+    /// A room's second line in the lists (start screen, Speakers, the phone page). `live`: the
+    /// party screen's Speakers, where ticked rooms play the zone's music (by default, whether
+    /// they do: `ownsRooms`).
+    public func status(of player: SonosPlayer, live: Bool? = nil) -> SonosRoomStatus {
+        SonosRoomStatus.of(roomID: player.id, model: player.displayName, ticked: isTicked(player.id), joining: joining.contains(player.id),
+                           live: live.map { $0 && engine?.hasLostControl != true } ?? ownsRooms,
+                           reading: household.readings[player.id], claim: claim(on: player.id))
+    }
+
     /// An engine for the current output, or nil when the music doesn't play through Sonos.
     public func makeEngine() -> SonosEngine? {
         guard let playback else { return nil }
@@ -238,14 +309,52 @@ public final class SonosOutputController {
 
     /// Back to this device (AirPlay), or for Spotify its Spotify Connect device.
     public func leave() {
+        takenOver = []
         guard output != nil else { return }
         output = nil
         onOutputChanged?()
     }
 
-    /// A room's row was tapped.
+    /// "Use", confirmed: rooms another zone plays on become this zone's too, with any already
+    /// chosen. Not on Sonos yet: the music moves there. Before it has played there: only the
+    /// choice changes, and the grouping at the first play takes them (`SonosGroupingPlan`: out
+    /// of the other zone's group, or leading it). Playing: they join without a restart. The
+    /// other zone isn't told; its engine finds another source on them and leaves them alone.
+    public func takeOver(_ roomIDs: [String]) {
+        let ids = roomIDs.filter { household.player($0) != nil && !isTicked($0) }
+        guard !ids.isEmpty else { return }
+        takenOver.formUnion(ids)
+        engineLog?("taking over \(ids.compactMap { household.player($0)?.roomName }.joined(separator: ", ")) from \(ids.compactMap { claim(on: $0)?.zone }.first ?? "another zone")")
+        guard output != nil else { return select(rooms: ids) }
+        for id in ids { add(id) }
+    }
+
+    /// A new zone is being set up on this hub (the TV's Create, the iPad's start screen after
+    /// End): rooms taken over for an earlier one are just rooms again, and a kept choice lets go
+    /// of those another zone plays on.
+    public func beginSetup() {
+        takenOver = []
+        releaseClaimedRooms()
+    }
+
+    /// While the zone is set up: chosen rooms another zone plays on (and that the host didn't
+    /// take over) aren't this zone's choice. A choice kept from an earlier zone was ticking them
+    /// on the TV's page while the iPad's zone played there, and getting off them took unticking
+    /// each. With none left, the music plays on the hub's own output.
+    func releaseClaimedRooms() {
+        guard isSettingUp(), !isLive, let output else { return }
+        let claimed = output.roomIDs.filter { !takenOver.contains($0) && claim(on: $0) != nil }
+        guard !claimed.isEmpty else { return }
+        engineLog?("\(claimed.compactMap { household.player($0)?.roomName }.joined(separator: ", ")): another zone plays there; not chosen")
+        let rest = output.roomIDs.filter { !claimed.contains($0) }
+        guard !rest.isEmpty, let target = household.target(rooms: rest) else { return leave() }
+        engine?.retarget(target)
+        self.output = SonosOutput(roomIDs: rest, target: target)
+    }
+
+    /// A room's row was tapped. Not another zone's room: that's "Use" (`takeOver`), confirmed.
     public func toggle(_ roomID: String) {
-        if isTicked(roomID) { remove(roomID) } else { add(roomID) }
+        if isTicked(roomID) { remove(roomID) } else if claim(on: roomID) == nil { add(roomID) }
     }
 
     /// Adds a room. Not on Sonos yet: the music moves there (a rebuild, with a gap). On Sonos and
@@ -260,6 +369,12 @@ public final class SonosOutputController {
             return
         }
         let room = SonosHousehold.room(player)
+        // Another source has the rooms now: nothing is sent to its group; the room is only
+        // noted, and the next play takes them all back.
+        guard !engine.hasLostControl else {
+            Task { try? await engine.addRoom(room) }
+            return
+        }
         guard engine.isGrouped else {
             if let target = household.target(rooms: output.roomIDs + [roomID]) {
                 engine.retarget(target)
@@ -294,6 +409,11 @@ public final class SonosOutputController {
     public func remove(_ roomID: String) {
         guard let output, output.roomIDs.contains(roomID) else { return }
         guard output.roomIDs.count > 1 else { return leave() }
+        if let engine, engine.hasLostControl {
+            // Another source has the rooms: only the choice changes (nothing is sent to them).
+            Task { try? await engine.removeRoom(roomID) }
+            return
+        }
         guard let engine, engine.isGrouped else {
             // Nothing set up on the speakers yet: only the choice changes.
             let rest = output.roomIDs.filter { $0 != roomID }
@@ -367,7 +487,11 @@ public final class SonosOutputController {
         guard !isReading else { return changed() }
         isReading = true
         defer { isReading = false }
-        await household.readRooms(ourCoordinatorID: isLive ? engine?.target.coordinator.id : nil)
+        // Which rooms other zones play on, asked while the rooms are read.
+        async let asked: Void = refreshClaims()
+        await household.readRooms(ourCoordinatorID: ownsRooms ? engine?.target.coordinator.id : nil)
+        await asked
+        releaseClaimedRooms()
         changed()
         // While a room list shows: other hubs may know an account this one hasn't seen.
         Task { await askPeersIfMissing() }
@@ -381,8 +505,13 @@ public final class SonosOutputController {
     /// right now.
     public func householdRefreshed() {
         defer {
+            releaseClaimedRooms()
             changed()
             Task { await askPeersIfMissing() }
+            Task {
+                await refreshClaims()
+                releaseClaimedRooms()
+            }
         }
         // Every account discovery shows is remembered for this household, so it stays usable
         // once the queue (or favourite, or song playing) that showed it is gone.
@@ -461,6 +590,32 @@ public final class SonosOutputController {
         rebuildIfAccountChanged()
     }
 
+    /// Asks the other zones (`peers`) which rooms they play on (`GET /api/zone`), at most every
+    /// `claimInterval`, all at once, each within the exchange's timeout. A zone that misses an
+    /// answer keeps its last claim for `claimLifetime`; a zone no longer listed loses it.
+    func refreshClaims(now: Date = Date()) async {
+        guard !isAskingClaims else { return }
+        if let lastClaimsAsked, now.timeIntervalSince(lastClaimsAsked) < Self.claimInterval { return }
+        lastClaimsAsked = now
+        let zones = peers()
+        let listed = Set(zones.map(\.address))
+        claimAnswers = claimAnswers.filter { listed.contains($0.key) && now.timeIntervalSince($0.value.at) < Self.claimLifetime }
+        if !zones.isEmpty {
+            isAskingClaims = true
+            for answer in await claimExchange.ask(zones) {
+                // The zone's name as it says it now, else as announced.
+                let claim = answer.claim.map { claim in
+                    var claim = claim
+                    if claim.zone.isEmpty { claim.zone = answer.zone.name }
+                    return claim
+                }
+                claimAnswers[answer.zone.address] = (claim, now)
+            }
+            isAskingClaims = false
+        }
+        claims = claimAnswers.sorted { $0.key < $1.key }.compactMap(\.value.claim)
+    }
+
     // MARK: What a host's phone sees
 
     /// The rooms and choices for hosts' snapshots; nil without a service Sonos can stream.
@@ -468,13 +623,13 @@ public final class SonosOutputController {
         guard let service else { return nil }
         let live = isLive
         let rooms = household.rooms.map { player -> SonosSetup.Room in
-            let ticked = isTicked(player.id)
             let reading = household.readings[player.id]
-            let status = SonosRoomStatus.of(roomID: player.id, model: player.displayName, ticked: ticked, joining: joining.contains(player.id),
-                                            live: live, reading: reading)
-            return SonosSetup.Room(id: player.id, name: player.roomName, model: player.displayName, ticked: ticked,
+            let status = status(of: player)
+            let inUse = claim(on: player.id).map { SonosSetup.InUse(zone: $0.zone, service: $0.service, together: takenTogether(with: player.id)) }
+            return SonosSetup.Room(id: player.id, name: player.roomName, model: player.displayName, ticked: isTicked(player.id),
                                    status: status.text, state: status.kind, canTick: status.canTick,
-                                   volume: reading?.responding == false ? nil : reading?.volume)
+                                   volume: reading?.responding == false ? nil : reading?.volume,
+                                   inUse: status.isInUse ? inUse : nil)
         }
         let found = accounts
         let chosen = output?.roomIDs ?? []
@@ -494,6 +649,8 @@ extension SonosOutputController: SonosOutputHandler {
         if on {
             guard !isTicked(roomID), let player = household.player(roomID), account != nil,
                   household.readings[player.id]?.responding != false, !joining.contains(roomID) else { return false }
+            // Another zone's: "Use" asks first (`useSonosRooms`).
+            guard claim(on: roomID) == nil else { return false }
             // Moving the music onto Sonos rebuilds the session: setup only.
             guard output != nil || canChangeOutput() else { return false }
             add(roomID)
@@ -504,6 +661,24 @@ extension SonosOutputController: SonosOutputHandler {
         guard output.roomIDs.count > 1 || canChangeOutput() else { return false }
         remove(roomID)
         return true
+    }
+
+    public func useSonosRooms(_ roomIDs: [String]) -> Bool {
+        let ids = roomIDs.filter { !isTicked($0) }
+        guard !ids.isEmpty, account != nil else { return false }
+        for id in ids {
+            guard household.player(id) != nil, household.readings[id]?.responding != false, !joining.contains(id) else { return false }
+        }
+        // Moving the music onto Sonos rebuilds the session: setup only, as a tick.
+        guard output != nil || canChangeOutput() else { return false }
+        takeOver(ids)
+        return true
+    }
+
+    public func sonosClaim() -> SonosZoneClaim? {
+        guard let engine, let service, !engine.hasLostControl else { return nil }
+        return SonosZoneClaim(zone: session?.zoneName ?? "", service: service.sonosName, household: household.householdID,
+                              rooms: engine.target.rooms.map(\.id))
     }
 
     public func leaveSonos() -> Bool {

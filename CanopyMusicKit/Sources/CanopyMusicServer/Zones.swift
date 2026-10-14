@@ -55,16 +55,79 @@ public struct ZoneListing: Identifiable, Hashable, Sendable {
     }
 }
 
-/// What a hub answers at `GET /api/zone`: which hub it is, and the Spotify account fingerprint
-/// it announces now (nil for Apple Music, or before the account is known). Both are public
-/// already, in its TXT record.
+/// What a hub answers at `GET /api/zone`: which hub it is, the Spotify account fingerprint it
+/// announces now (nil for Apple Music, or before the account is known), both public already in
+/// its TXT record; and the Sonos rooms its zone plays on (`sonos`, nil when it doesn't), so
+/// another hub shows them as "In use by …". Room ids are no more than any Sonos app on the
+/// network sees.
 public struct ZoneCheck: Codable, Equatable, Sendable {
     public var hub: String?
     public var spotify: String?
+    public var sonos: SonosZoneClaim?
 
-    public init(hub: String?, spotify: String?) {
+    public init(hub: String?, spotify: String?, sonos: SonosZoneClaim? = nil) {
         self.hub = hub
         self.spotify = spotify
+        self.sonos = sonos
+    }
+}
+
+/// Asks the other zones on the network (`GET /api/zone`) which Sonos rooms they play on, all at
+/// once, each within `timeout`. A zone that doesn't answer, or answers as another hub than its
+/// announcement says, adds nothing.
+public struct SonosClaimExchange: Sendable {
+    public let timeout: Duration
+    private let fetch: ZoneProbe.Fetch
+
+    /// `fetch` replaces the network (tests); by default an ephemeral `URLSession`.
+    public init(timeout: Duration = .seconds(2), fetch: ZoneProbe.Fetch? = nil) {
+        self.timeout = timeout
+        if let fetch {
+            self.fetch = fetch
+        } else {
+            let config = URLSessionConfiguration.ephemeral
+            config.timeoutIntervalForRequest = Double(timeout.components.seconds) + 1
+            config.waitsForConnectivity = false
+            config.requestCachePolicy = .reloadIgnoringLocalCacheData
+            let session = URLSession(configuration: config)
+            self.fetch = { url in
+                let (data, response) = try await session.data(from: url)
+                return (data, (response as? HTTPURLResponse)?.statusCode ?? 0)
+            }
+        }
+    }
+
+    /// Each zone that answered as itself, with its claim (nil: it plays on no Sonos rooms).
+    public func ask(_ zones: [ZoneListing]) async -> [(zone: ZoneListing, claim: SonosZoneClaim?)] {
+        await withTaskGroup(of: (ZoneListing, SonosZoneClaim?)?.self) { group in
+            for zone in zones {
+                guard let url = zone.baseURL?.appending(path: "api/zone") else { continue }
+                group.addTask { await self.answer(url, zone: zone) }
+            }
+            var answers: [(zone: ZoneListing, claim: SonosZoneClaim?)] = []
+            for await answer in group {
+                if let answer { answers.append((answer.0, answer.1)) }
+            }
+            return answers
+        }
+    }
+
+    private func answer(_ url: URL, zone: ZoneListing) async -> (ZoneListing, SonosZoneClaim?)? {
+        await withTaskGroup(of: (ZoneListing, SonosZoneClaim?)??.self) { group in
+            group.addTask {
+                guard let (data, status) = try? await fetch(url), status == 200,
+                      let check = try? JSONDecoder().decode(ZoneCheck.self, from: data),
+                      zone.hubID == nil || check.hub == zone.hubID else { return .some(nil) }
+                return .some((zone, check.sonos))
+            }
+            group.addTask {
+                try? await Task.sleep(for: timeout)
+                return .some(nil)
+            }
+            let first = await group.next() ?? nil
+            group.cancelAll()
+            return first ?? nil
+        }
     }
 }
 

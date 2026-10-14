@@ -47,7 +47,7 @@ struct TVRootView: View {
                 theme: ArtworkTheme(backgroundItem?.track.colors), source: ArtworkCache.shared, colorsUntilLoaded: true
             )
                 // Changes evenly to the new song's, starting with the party screen's slide and
-                // settling after it (`TVPartyView.showCurrent`).
+                // settling after it (`SongSlider.showCurrent`).
                 .animation(.linear(duration: 2), value: backgroundItem?.id)
             // Dusk on the screens with no song (the zone list and the start screen), as on the
             // iPad; it fades into the song's background as the party screen comes in.
@@ -529,34 +529,23 @@ struct TVPartyView: View {
     @State private var stepper = RemoteStepper()
     /// The song the now-playing column shows. When the song changes (remote, a phone, or the song
     /// ending) the new song's art and text push the old one's out sideways, like turning a page
-    /// (`showCurrent`); the background changes evenly from the same moment, settling after it.
-    @State private var shown: QueueItem?
-    @State private var started = false
-    /// Which way the last slide went: forward brings the new song in from the right.
-    @State private var forward = true
-    /// When the slide under way finishes.
-    @State private var slideEnds: ContinuousClock.Instant?
+    /// (`SongSlider`, shared with the iPad); the background changes evenly from the same moment,
+    /// settling after it.
+    @State private var slider = SongSlider()
     /// Width of the now-playing column, edge to edge (the slide's clip).
     @State private var columnWidth: CGFloat = 1000
     /// The Now Playing art's side as laid out, for the size its images are decoded at.
     @State private var artSide: CGFloat = 600
     @Environment(\.displayScale) private var displayScale
-    static let slide = 0.5
-    /// Fast at first, then slowing to a stop: the pages arrive and settle (an ease-out quint).
-    static let slideAnimation = Animation.timingCurve(0.22, 1, 0.36, 1, duration: slide)
     /// The logo's visible top and left margin from the screen edges, level with the capitals in
     /// "Up next". The image has 6.5pt of empty space above the arc and 1pt to its left.
     static let logoInset: CGFloat = 71
 
     var body: some View {
         let session = model.session
-        // What's actually playing: a Spotify hub's can be a track from outside its queue.
-        let live = session.nowPlaying
-        // The live item while it's the one shown, so its changes (a requester's name) show.
-        let current = !started || shown?.id == live?.id ? live : shown
-        // The song shown leaves the way the change to the live one goes, so that's set while it's
-        // still shown; the song coming in arrives the way `showCurrent` set.
-        let goesForward = started && shown?.id != live?.id ? slidesForward(from: shown) : forward
+        // What's actually playing (a Spotify hub's can be a track from outside its queue), once
+        // it has slid in.
+        let current = slider.current(in: session)
         let footerHeight = songTextHeight + (model.role == .display ? badgeHeight : 0)
         GeometryReader { geo in
             // As big as fits, up to a size that leaves room around the corner logo.
@@ -564,12 +553,8 @@ struct TVPartyView: View {
             HStack(alignment: .top, spacing: 70) {
                 // Now playing.
                 VStack(alignment: .leading, spacing: 0) {
-                    ZStack {
-                        nowPlaying(current, art: art)
-                            .id(current?.id)
-                            // Far enough that the song going out ends past the screen's left edge
-                            // (shadow and all), and the one coming in starts behind Up next.
-                            .transition(SongSlide(offset: (columnWidth + 160) * (goesForward ? 1 : -1)))
+                    SongPages(slider: slider, session: session, columnWidth: columnWidth, artBucket: artBucket, log: model.debugLog) { item in
+                        nowPlaying(item, art: art)
                     }
                     if model.role == .display {
                         TVZoneBadge()
@@ -651,12 +636,6 @@ struct TVPartyView: View {
         // Left and right on the remote: previous and skip. They reach here through "Up next",
         // which holds focus (it's the only focusable view, so they can't move focus instead).
         .onMoveCommand(perform: move)
-        // A newer change cancels this one part way, and `showCurrent` goes on to the newest song.
-        .task(id: model.session.nowPlaying?.id) { await showCurrent() }
-        // The next song or two's art at Now Playing size, loaded ahead so the slide to it has it
-        // (`showCurrent` waits only a moment). Just those: every row's would cost as much again
-        // as the whole list of rows many times over, and most of them get skipped or reordered.
-        .task(id: prewarm) { ArtworkCache.shared.prewarm(prewarm.urls, bucket: prewarm.bucket) }
         .preference(key: TVShownSongKey.self, value: TVShownSong(item: current))
         #if DEBUG
         // `-autoStep`: 6 s after the party shows, presses right three times at once, then left
@@ -677,16 +656,6 @@ struct TVPartyView: View {
     /// The size bucket the Now Playing art decodes at (`ArtworkImage` works out the same from its frame).
     private var artBucket: Int {
         ArtworkSizing.bucket(points: Double(artSide), scale: Double(displayScale))
-    }
-
-    private struct Prewarm: Equatable {
-        let urls: [URL]
-        let bucket: Int
-    }
-
-    /// The first two Up next songs' big images, at the Now Playing size.
-    private var prewarm: Prewarm {
-        Prewarm(urls: model.session.state.upNext.prefix(2).compactMap { ArtworkURL.url(for: $0.track, large: true) }, bucket: artBucket)
     }
 
     /// The song's art, title, artist line and progress: one page of the slide.
@@ -736,46 +705,6 @@ struct TVPartyView: View {
         .frame(width: art, alignment: .leading)
     }
 
-    /// Whether going from `item` to the session's current song is a step forward. Going back puts
-    /// the song that was playing at the top of Up next; anything else (a skip, the song ending, a
-    /// jump in the queue) counts as forward.
-    private func slidesForward(from item: QueueItem?) -> Bool {
-        guard let item else { return true }
-        return model.session.state.upNext.first?.id != item.id
-    }
-
-    /// Slides from the shown song to the session's current one. A change during a slide waits for
-    /// it to finish (a moment), then slides once straight to the newest song: never two slides at
-    /// once, and songs skipped past in between never show.
-    private func showCurrent() async {
-        let session = model.session
-        guard started else {
-            shown = session.nowPlaying
-            started = true
-            return
-        }
-        if let slideEnds {
-            do { try await Task.sleep(until: slideEnds, clock: .continuous) } catch { return }
-        }
-        guard shown?.id != session.nowPlaying?.id else { return }
-        // The new song's art is loaded before it slides in (the pre-warm of the next songs' has
-        // usually loaded it already); after a moment it slides anyway, and the art shows when
-        // it's loaded.
-        if let url = ArtworkURL.url(for: session.nowPlaying?.track, large: true) {
-            let start = ContinuousClock.now
-            let ready = await ArtworkCache.shared.ready(url, bucket: artBucket, within: .milliseconds(300))
-            model.debugLog("artwork \(ready ? "ready" : "not ready") after \(ContinuousClock.now - start) (\(artBucket) px)")
-            if Task.isCancelled { return }
-        }
-        let goingForward = slidesForward(from: shown)
-        slideEnds = .now + .seconds(Self.slide)
-        // Both pages move in this one animation, so they stay together.
-        withAnimation(Self.slideAnimation) {
-            forward = goingForward
-            shown = session.nowPlaying
-        }
-    }
-
     /// Previous or skip, as the back and skip buttons elsewhere; ignored while one is still going,
     /// and on a display while its hub doesn't let displays control playback (`RemoteStepper`).
     private func move(_ direction: MoveCommandDirection) {
@@ -800,16 +729,6 @@ struct TVShownSongKey: PreferenceKey {
 
     static func reduce(value: inout TVShownSong?, nextValue: () -> TVShownSong?) {
         value = value ?? nextValue()
-    }
-}
-
-/// The now-playing page turn: the new song comes in from `offset` (right when it's positive)
-/// while the old one goes out the other way, the same distance.
-private struct SongSlide: Transition {
-    let offset: CGFloat
-
-    func body(content: Content, phase: TransitionPhase) -> some View {
-        content.offset(x: phase == .willAppear ? offset : phase == .didDisappear ? -offset : 0)
     }
 }
 
@@ -920,16 +839,7 @@ struct TVProgress: View {
     /// on): its bar holds where it was, and the next song's starts from its own time.
     let itemID: QueueItem.ID?
     let duration: TimeInterval
-    @State private var held = HeldTime()
-
-    private final class HeldTime {
-        var time: TimeInterval = 0
-
-        func show(_ live: TimeInterval?) -> TimeInterval {
-            if let live { time = live }
-            return time
-        }
-    }
+    @State private var held = HeldSongTime()
 
     var body: some View {
         // Every frame while playing so the bar grows smoothly (a seek just jumps); twice a second

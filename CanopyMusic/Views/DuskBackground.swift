@@ -15,7 +15,7 @@ struct DuskBackground: View {
             return min(1, max(0, value))
         }
         #endif
-        return 0.2
+        return 0.35
     }()
 
     /// A radial gradient from `color` at `center` to transparent at the ellipse with radii

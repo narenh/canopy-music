@@ -262,12 +262,24 @@ public final class PartySession {
     @ObservationIgnored private var generation = 0
     /// The queue item the engine currently has loaded as its current track.
     @ObservationIgnored private var loadedItemID: UUID?
-    /// A skip or previous while paused moved the queue on without the player, which is still
-    /// paused on the song before, where it was (`position`).
+    /// A skip or previous moved the queue on without the player, which is still on the song
+    /// before: playing it until the taps settle (`landNow`), or paused on it, where it was.
     @ObservationIgnored private var playerOnOldSong = false
+    /// How long skips and previouses must pause before the player is told where they landed.
+    /// Each tap moves the queue at once; the player gets only the song the burst ends on.
+    public static let defaultLandingDelay: TimeInterval = 0.35
+    @ObservationIgnored var landingDelay = PartySession.defaultLandingDelay
+    /// The wait for the taps to settle (cancelled by each new tap).
+    @ObservationIgnored private var landingTimer: Task<Void, any Error>?
+    /// Whether the song landed on should play: the music was playing when the burst began, or a
+    /// play since. nil when no landing is waiting.
+    @ObservationIgnored private var landingPlays: Bool?
+    /// The landing moved the player to its staged song (this item), which the queue is already
+    /// on: the player's `.advancedToStaged` confirms it rather than moving the queue on again.
+    @ObservationIgnored private var skippedToStagedID: UUID?
 
-    /// Where the current song is. The engine's time, except after a skip or previous while
-    /// paused: that's the song before's, and the new song is at 0:00 until it plays.
+    /// Where the current song is. The engine's time, except after a skip or previous the player
+    /// hasn't followed yet: that's the song before's, and the new song is at 0:00 until it plays.
     public var position: TimeInterval { playerOnOldSong ? 0 : engine.currentTime }
     /// A restored session whose engine (not a followed one) was asked to `attach`, and hasn't
     /// yet reported the player on the restored song, nor been given a song since.
@@ -452,6 +464,7 @@ public final class PartySession {
     public func replaceService(catalog: any MusicCatalog, engine: any PlaybackEngine, serviceName: String?) -> Bool {
         guard remote == nil, state.playlistName == nil, !hasParty, state.history.isEmpty else { return false }
         generation += 1
+        callOffLanding()
         stagingRun += 1
         stagingTask = nil
         stagedItemID = nil
@@ -478,6 +491,7 @@ public final class PartySession {
     public func end() {
         guard remote == nil else { return }
         generation += 1
+        callOffLanding()
         if engine.isPlaying { engine.pause() }
         saveTask?.cancel()
         saveTask = nil
@@ -501,6 +515,7 @@ public final class PartySession {
     /// a chained engine call that finishes later changes nothing, and nothing outlives it.
     public func shutdown() {
         generation += 1
+        callOffLanding()
         stagingRun += 1
         stagingTask = nil
         if remote == nil {
@@ -603,6 +618,7 @@ public final class PartySession {
             return
         }
         generation += 1
+        callOffLanding()
         if engine.isPlaying { engine.pause() }
         stagedItemID = nil
         loadedItemID = nil
@@ -626,6 +642,12 @@ public final class PartySession {
         if let remote {
             isPlaying = true
             try await remote.send(.play)
+            return
+        }
+        if let landingTimer {
+            // Skips still settling: the song they land on plays, once they have.
+            landingPlays = true
+            _ = try? await Self.value(of: landingTimer)
             return
         }
         let result: Result<Void, any Error> = try await serially {
@@ -662,6 +684,7 @@ public final class PartySession {
     /// Pauses at once. A song change still in flight on the chain (a skip's play, say) would
     /// start the music again when it lands, so the pause is repeated after it, in its turn: a
     /// play pressed in between is queued behind that and wins, as the order of presses says.
+    /// Skips still settling land paused.
     public func pause() {
         if let remote {
             isPlaying = false
@@ -670,6 +693,7 @@ public final class PartySession {
         }
         engine.pause()
         isPlaying = engine.isPlaying
+        if landingPlays != nil { landingPlays = false }
         broadcast()
         guard pendingOperations > 0 else { return }
         Task {
@@ -690,31 +714,22 @@ public final class PartySession {
     }
 
     /// Like the Music app: restarts the song if it's more than a few seconds in, otherwise goes
-    /// to the previous song (and keeps playing or paused as it was).
+    /// to the previous song (and keeps playing or paused as it was). Goes back as `skip` goes on.
     public func previous() async {
         if let remote {
             try? await remote.send(.previous)
             return
         }
-        try? await serially { await self.previousNow() }
-    }
-
-    private func previousNow() async {
         guard position <= 3, !state.history.isEmpty else {
-            engine.restartCurrent()
-            broadcast()
+            // A song the player hasn't started yet starts from its beginning anyway.
+            guard !playerOnOldSong else { return }
+            try? await serially {
+                self.engine.restartCurrent()
+                self.broadcast()
+            }
             return
         }
-        let wasPlaying = engine.isPlaying
-        stagedItemID = nil
-        cancelStaging()
-        if !wasPlaying { playerOnOldSong = true }
-        mutate { $0.goBack() }
-        if wasPlaying, let current = state.current {
-            try? await play(current)
-        } else {
-            loadedItemID = nil
-        }
+        await step { $0.goBack() }
     }
 
     public func seek(to time: TimeInterval) {
@@ -727,7 +742,7 @@ public final class PartySession {
         }
         // Not during a song change: the position belongs to the song going away, and a seek on
         // a player mid-call is the kind of overlap that wedges it (see `serially`).
-        guard pendingOperations == 0 else { return }
+        guard pendingOperations == 0, !playerOnOldSong else { return }
         engine.seek(to: max(0, time))
         broadcast()
     }
@@ -737,30 +752,75 @@ public final class PartySession {
             try? await remote.send(.next)
             return
         }
-        try? await serially { await self.skipNow() }
-    }
-
-    private func skipNow() async {
-        let wasPlaying = engine.isPlaying
-        // Follow mode: the player's own queue is what Up next shows first, so skip goes there.
-        // With nothing of the player's queued, skip moves Canopy's queue on as usual (which also
+        // Follow mode: the player's own queue is what Up next shows first, so skip goes there,
+        // one press at a time (it isn't Canopy's queue to move ahead of the player). With
+        // nothing of the player's queued, skip moves Canopy's queue on as usual (which also
         // takes back a player that's been following someone else).
-        if wasPlaying, follower != nil, !foreignUpcoming.isEmpty {
-            let generation = generation
-            _ = try? await timed("skipInPlayer") { try await self.follower?.skipInPlayer() }
-            guard generation == self.generation else { engine.pause(); return }
+        if landingPlays == nil, engine.isPlaying, follower != nil, !foreignUpcoming.isEmpty {
+            try? await serially {
+                let generation = self.generation
+                _ = try? await self.timed("skipInPlayer") { try await self.follower?.skipInPlayer() }
+                guard generation == self.generation else { self.engine.pause(); return }
+            }
             return
         }
-        if wasPlaying, stagedItemID != nil {
+        await step { $0.advance() }
+    }
+
+    /// A skip or previous: the queue (and everyone's screen) moves at once, and the player
+    /// follows once the taps settle, with only the song they landed on (`landNow`). Telling
+    /// the player every tap kept it loading songs that were skipped straight away, and its
+    /// skips to the staged song could outrun the polls that report them. Returns once the
+    /// player has followed, or a later tap has taken over.
+    private func step(_ change: (inout QueueState) -> Void) async {
+        if landingPlays == nil { landingPlays = engine.isPlaying }
+        cancelStaging()
+        // The player stays on the song before (playing or paused) until the landing.
+        playerOnOldSong = true
+        loadedItemID = nil
+        mutate(change)
+        landingTimer?.cancel()
+        let delay = landingDelay
+        let timer = Task<Void, any Error> { @MainActor [weak self] in
+            try await Task.sleep(for: .seconds(delay))
+            guard let self else { return }
+            self.landingTimer = nil
+            try await self.serially { await self.landNow() }
+        }
+        landingTimer = timer
+        _ = try? await Self.value(of: timer)
+    }
+
+    /// The taps have settled: the player gets the song they landed on, in turn with its other
+    /// commands, so one in flight finishes first and the newest song is sent after it.
+    private func landNow() async {
+        // Another burst has begun since: its own landing follows.
+        guard landingTimer == nil, let plays = landingPlays else { return }
+        landingPlays = nil
+        // Playing then, or now that the commands before have run (a Play still in flight as the
+        // taps began). Paused: the player stays where it was, and Play starts the new song.
+        guard plays || engine.isPlaying, let current = state.current, loadedItemID != current.id else { return }
+        if stagedItemID == current.id {
+            // The song staged behind the old one: the player has it ready, gapless. Sent once;
+            // its `.advancedToStaged` then confirms it (`skippedToStagedID`).
+            stagedItemID = nil
+            skippedToStagedID = current.id
             let generation = generation
             let skipped = (try? await timed("skipToStaged") { try await self.engine.skipToStaged() }) != nil
             guard generation == self.generation else { engine.pause(); return }
             if skipped { return }
+            skippedToStagedID = nil
         }
-        cancelStaging()
-        if !wasPlaying { playerOnOldSong = true }
-        mutate { $0.advance() }
-        if wasPlaying, let current = state.current { try? await play(current) }
+        try? await play(current)
+    }
+
+    /// Ends a burst of skips without the player following (the session is starting over).
+    private func callOffLanding() {
+        landingTimer?.cancel()
+        landingTimer = nil
+        landingPlays = nil
+        skippedToStagedID = nil
+        playerOnOldSong = false
     }
 
     /// Crossfade as the hub last set it (nil until it has), kept so a host's page can show it and
@@ -959,6 +1019,7 @@ public final class PartySession {
         stagedItemID = nil
         loadedItemID = item.id
         playerOnOldSong = false
+        skippedToStagedID = nil
         awaitingAttach = false
         // A new song of ours: any staging for the old one is off.
         cancelStaging()
@@ -1068,7 +1129,8 @@ public final class PartySession {
     private func handle(_ event: PlaybackEvent) {
         switch event {
         case .advancedToStaged:
-            var id = stagedItemID
+            var id = skippedToStagedID ?? stagedItemID
+            skippedToStagedID = nil
             if id == nil, let follower {
                 // Staged but not yet confirmed (or confirmation failed and the song got there
                 // anyway): the item the player is actually on.
@@ -1082,8 +1144,20 @@ public final class PartySession {
                 externalCurrent = nil
                 playerIssue = nil
             }
-            playerOnOldSong = false
-            mutate { $0.advance(to: id) }
+            if playerOnOldSong {
+                // A skip or previous has already moved the queue. The player has caught up
+                // with it (the landing's skip to the staged song), or the song before ended
+                // into one the queue has left, and the landing plays the right one.
+                guard let id, id == state.current?.id else {
+                    loadedItemID = nil
+                    return
+                }
+                playerOnOldSong = false
+                broadcast()
+                Task { await syncStaging() }
+            } else {
+                mutate { $0.advance(to: id) }
+            }
             loadedItemID = state.current?.id
             if follower != nil { readPlayerQueueSoon() }
             // Nothing current (the zone ended as the player moved on): nothing started.
@@ -1098,20 +1172,24 @@ public final class PartySession {
                 cancelStaging()
                 externalCurrent = nil
             }
+            // The song before a skip or previous ended: the queue has already moved on, and
+            // the landing plays its song.
+            guard !playerOnOldSong else { return }
             mutate { $0.advance() }
             if let current = state.current {
                 Task { try? await serially { try? await self.play(current) } }
             }
         case .statusChanged:
             // After a relaunch, the followed player is found still on the restored song: it's
-            // loaded, so Play resumes it rather than starting it over.
-            if let follower, loadedItemID == nil, let current = state.current,
+            // loaded, so Play resumes it rather than starting it over. Not a song a skip and a
+            // previous came back to: that one starts over.
+            if let follower, loadedItemID == nil, !playerOnOldSong, let current = state.current,
                follower.playerTrackID == current.track.id {
                 loadedItemID = current.id
             }
             // Likewise an engine that attached to the restored song (a Sonos group still on it).
             // Its next song is then staged as usual (or found already there).
-            if follower == nil, awaitingAttach, loadedItemID == nil, let current = state.current,
+            if follower == nil, awaitingAttach, loadedItemID == nil, !playerOnOldSong, let current = state.current,
                engine.attachedTrackID == current.track.id {
                 awaitingAttach = false
                 loadedItemID = current.id
@@ -1416,8 +1494,9 @@ public final class PartySession {
                     self.followTick()
                     continue
                 }
+                // `position`: not the time of a song the player hasn't left yet.
                 guard self.stagedItemID == nil, let duration = self.state.current?.track.duration,
-                      duration - self.engine.currentTime < Self.lateStageLead,
+                      duration - self.position < Self.lateStageLead,
                       !self.state.upNext.isEmpty else { continue }
                 self.mutate { $0.lockNext() }
             }

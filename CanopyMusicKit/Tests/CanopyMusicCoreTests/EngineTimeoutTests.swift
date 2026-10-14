@@ -145,7 +145,8 @@ final class HangingEngine: PlaybackEngine {
         skip.cancel()
         await skip.value
         #expect(Date().timeIntervalSince(started) < 1)
-        #expect(session.state.current?.track.id == "a") // not yet: the play is still stuck
+        // The queue moved at once; the player follows once the stuck play is done.
+        #expect(session.state.current?.track.id == "b")
         engine.release()
         _ = await play.value
         await settle()

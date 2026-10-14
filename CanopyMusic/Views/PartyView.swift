@@ -436,6 +436,15 @@ struct NowPlayingView: View {
                 ) { item in
                     page(item, side: side, width: width)
                 }
+                .frame(maxWidth: .infinity)
+                // The slide shows from the screen's left edge to the edge of Up next. Only the
+                // pages: under a mask the AirPlay button (a UIKit view) can't keep its popover open.
+                .mask {
+                    Rectangle()
+                        .padding(.leading, -2000)
+                        .padding(.trailing, -inset)
+                        .padding(.vertical, -300)
+                }
                 if item != nil {
                     if model.isDisplay { DisplayZoneLine().frame(maxWidth: side) }
                     // Displays: transport only while the hub allows it (no AirPlay or crossfade).
@@ -456,12 +465,6 @@ struct NowPlayingView: View {
             // The slide's timing, not the background's 2 s (`PartyView`), which changes with it;
             // also for what moves with the song (the controls arriving with the first one).
             .animation(SongSlider.animation, value: item?.id)
-            // The slide shows from the screen's left edge to the edge of Up next.
-            .mask {
-                Rectangle()
-                    .padding(.leading, -2000)
-                    .padding(.vertical, -300)
-            }
         }
         // The right pane's 24 pt vertical padding, so a column that's full stops where Up next does.
         .padding(.bottom, 24)

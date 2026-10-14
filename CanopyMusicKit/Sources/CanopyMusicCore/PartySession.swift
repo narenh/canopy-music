@@ -101,9 +101,12 @@ public struct PartySnapshot: Codable, Equatable, Sendable {
     /// Apple TV hubs: Spotify's setup (sign-in, devices, the sign-in page). Hosts only, as
     /// `musicAccess`.
     public var spotify: SpotifySetup?
-    /// The hub's Sonos rooms: where an Apple TV zone plays (setup), and the zone settings'
-    /// Speakers section while it plays through Sonos. Hosts only, as `musicAccess`.
+    /// The hub's Sonos rooms: where an Apple TV zone plays (setup), and the party page's volume
+    /// row and Devices while it plays through Sonos. Hosts only, as `musicAccess`.
     public var sonos: SonosSetup?
+    /// Whether the hub's crossfade is on (on Sonos, Sonos's own), for the party page's Crossfade
+    /// button. Hosts only, as `musicAccess`; nil until the hub has set it, and from older hubs.
+    public var crossfade: Bool?
 }
 
 /// Owns the queue and keeps the player in step with it. Both the iPad UI and the phone server
@@ -375,8 +378,10 @@ public final class PartySession {
     /// set only on the iPad.)
     public func applyHostSettings(zoneName: String?, phonesCanQueue: Bool? = nil, phonesCanReorder: Bool?,
                                   displaysCanControl: Bool?, wifi: WifiDetails? = nil,
-                                  screensaverWhilePlaying: Bool? = nil) {
+                                  screensaverWhilePlaying: Bool? = nil, crossfade: Bool? = nil) {
         if let wifi { self.wifi = wifi }
+        // The party page's Crossfade button: the length stays the hub's.
+        if let crossfade { setCrossfade(enabled: crossfade, duration: crossfadeDuration) }
         if let screensaverWhilePlaying, hubKind == .tv { self.screensaverWhilePlaying = screensaverWhilePlaying }
         if let zoneName, !zoneName.isEmpty { self.zoneName = zoneName }
         if let phonesCanQueue { self.phonesCanQueue = phonesCanQueue }
@@ -425,6 +430,8 @@ public final class PartySession {
         self.engine = engine
         engine.onEvent = { [weak self] event in self?.handle(event) }
         if !engine.canReplaceStaged { startLateStagingTicker() }
+        // The new engine plays with the hub's crossfade too (a TV that moved onto Sonos rooms).
+        if let crossfade { engine.setCrossfade(enabled: crossfade, duration: crossfadeDuration) }
         self.serviceName = serviceName
         broadcast()
         return true
@@ -707,7 +714,17 @@ public final class PartySession {
         if wasPlaying, let current = state.current { try? await play(current) }
     }
 
+    /// Crossfade as the hub last set it (nil until it has), kept so a host's page can show it and
+    /// an engine swapped in by `replaceService` gets it too.
+    public private(set) var crossfade: Bool? {
+        didSet { if crossfade != oldValue, remote == nil { broadcast() } }
+    }
+    /// The length that goes with it; nil is the engine's default.
+    @ObservationIgnored private var crossfadeDuration: TimeInterval?
+
     public func setCrossfade(enabled: Bool, duration: TimeInterval?) {
+        crossfade = enabled
+        crossfadeDuration = duration
         engine.setCrossfade(enabled: enabled, duration: duration)
     }
 
@@ -853,12 +870,13 @@ public final class PartySession {
         return key == hostKey
     }
 
-    /// What only hosts see: an Apple TV's Apple Music access and Spotify setup, and the hub's
-    /// Sonos rooms.
+    /// What only hosts see: an Apple TV's Apple Music access and Spotify setup, the hub's Sonos
+    /// rooms, and its crossfade.
     private func addHostDetails(to snap: inout PartySnapshot) {
         snap.musicAccess = musicAccess
         snap.spotify = spotifySetup
         snap.sonos = sonosSetup
+        snap.crossfade = crossfade
     }
 
     /// Emits the current snapshot immediately, then again after every change. `includingWifi`

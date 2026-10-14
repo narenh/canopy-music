@@ -70,7 +70,7 @@ final class TVModel {
     /// Spotify: sign-in from the host's phone, the device music plays on (docs/multi-device.md).
     let spotify = TVSpotify()
     /// Sonos rooms the zone can play on instead (chosen on the host's setup page, then joined and
-    /// left from the zone settings' Speakers section): the iPad's `SonosOutputController`.
+    /// left from the party page's Devices): the iPad's `SonosOutputController`.
     let sonos: SonosOutputController
     /// Why the zone list's Resume didn't go back in (Spotify signed out, or another zone on the
     /// account). Cleared by the next attempt.
@@ -283,6 +283,9 @@ final class TVModel {
         session.screensaverWhilePlaying = defaults.bool(forKey: "screensaverWhilePlaying")
         session.wifi = WifiDetails(ssid: defaults.string(forKey: "wifiSSID") ?? "", password: defaults.string(forKey: "wifiPassword") ?? "",
                                    simpleQR: defaults.bool(forKey: "wifiSimpleQR"))
+        // Sonos's own crossfade, from the party page's Crossfade button (tvOS's player has none).
+        // Kept by the session for any engine it swaps in.
+        session.setCrossfade(enabled: defaults.bool(forKey: "crossfade"), duration: nil)
         hostControl.attach(to: session) { [weak self] _ in
             guard let self, !self.hostJoined else { return }
             self.zoneRecord.hostJoined = true // a zone not recorded yet takes it when it begins
@@ -294,6 +297,7 @@ final class TVModel {
             self.defaults.set(self.session.phonesCanReorder, forKey: "phoneReorderEnabled")
             self.defaults.set(self.session.displaysCanControl, forKey: "displaysCanControl")
             self.defaults.set(self.session.screensaverWhilePlaying, forKey: "screensaverWhilePlaying")
+            if let crossfade = self.session.crossfade { self.defaults.set(crossfade, forKey: "crossfade") }
             self.defaults.set(self.session.wifi.ssid, forKey: "wifiSSID")
             self.defaults.set(self.session.wifi.password, forKey: "wifiPassword")
             self.defaults.set(self.session.wifi.simpleQR, forKey: "wifiSimpleQR")

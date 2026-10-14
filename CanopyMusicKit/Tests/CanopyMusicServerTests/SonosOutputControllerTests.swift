@@ -378,4 +378,36 @@ import Testing
         #expect(state["sonos"] == nil)
         #expect(state["zoneName"] as? String == "Den")
     }
+
+    /// The party page's volume row: the master slider is the group's volume route, and its
+    /// Crossfade button is a host setting, carried in hosts' snapshots only.
+    @Test func theVolumeRowIsForHostsOnly() async throws {
+        let port: UInt16 = 18862
+        let controller = await makeController()
+        controller.select(rooms: [Self.bedroom, Self.move])
+        let session = try await playingSession(controller)
+        defer { session.shutdown() }
+        session.configureHub(kind: .tv, zoneName: "Den", serviceName: "Apple Music")
+        session.hostKey = "secret"
+        session.sonosHandler = controller
+        let (server, task) = try #require(await PartyServer.start(session: session, ports: [port]))
+        defer { task.cancel(); Task { await server.stop() } }
+
+        #expect(try await post(port, "/api/host/settings", ["key": "nope", "crossfade": true]) == 403)
+        #expect(session.crossfade == nil)
+        #expect(try await post(port, "/api/host/settings", ["key": "secret", "crossfade": true]) == 200)
+        #expect(session.crossfade == true)
+        #expect(session.snapshot(hostKey: "secret").crossfade == true)
+        // Sonos's own crossfade, on the group.
+        #expect(await waitFor { sim.requests.contains { $0.action == "SetCrossfadeMode" && $0.argument("CrossfadeMode") == "1" } })
+        let (data, _) = try await URLSession.shared.data(from: try #require(URL(string: "http://127.0.0.1:\(port)/api/state")))
+        let state = try #require(try JSONSerialization.jsonObject(with: data) as? [String: Any])
+        #expect(state["crossfade"] == nil)
+
+        // The master slider: begin, then the group's volume, keeping the balance (30 and 50 → 60 and 100).
+        #expect(try await post(port, "/api/host/sonos/volume", ["key": "nope", "volume": 80]) == 403)
+        #expect(try await post(port, "/api/host/sonos/volume", ["key": "secret", "begin": true]) == 204)
+        #expect(try await post(port, "/api/host/sonos/volume", ["key": "secret", "volume": 80]) == 204)
+        #expect(await waitFor { sim.room(Self.bedroom)?.volume == 60 && sim.room(Self.move)?.volume == 100 })
+    }
 }

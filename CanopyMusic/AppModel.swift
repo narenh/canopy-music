@@ -347,7 +347,7 @@ final class AppModel {
         sonosController.service = sonosService
         sonosController.onOutputChanged = { [weak self] in self?.rebuildSessionForOutput() }
         sonosController.onError = { [weak self] message in self?.errorMessage = message }
-        // A host's phone sees the rooms in the zone settings' Speakers section (hosts' snapshots).
+        // A host's phone sees the rooms in the party page's volume row and Devices (hosts' snapshots).
         sonosController.onChange = { [weak self] in self?.publishSonosSetup() }
         sonos.onRefresh = { [weak self] in self?.sonosRefreshed() }
         #if DEBUG
@@ -878,7 +878,7 @@ final class AppModel {
     func startOnLaunch() async {
         // Zones on the network: the list, and checking for another zone on this Spotify account.
         zoneBrowser.start()
-        // Sonos rooms for the Speakers section (read-only until a room is chosen and played).
+        // Sonos rooms for the output picker and the phone's Devices (read-only until a room is chosen and played).
         sonos.start()
         // A sign-in from before zones announced their account (or one made offline).
         if spotifyAuth.isSignedIn, spotifyAuth.accountFingerprint == nil {
@@ -971,7 +971,7 @@ final class AppModel {
         session.phonesCanQueue = phoneQueueEnabled
         session.wifi = WifiDetails(ssid: wifiSSID, password: wifiPassword, simpleQR: wifiSimpleQR)
         // The engine's rooms, as they join and leave, are the output; hosts' phones get the
-        // Speakers section (only rooms and volumes: moving off Sonos is the start screen's).
+        // volume row and Devices (only rooms and volumes: moving off Sonos is the start screen's).
         sonosController.connect(session)
         session.sonosHandler = sonosController
         publishSonosSetup()
@@ -1028,6 +1028,8 @@ final class AppModel {
             if self.session.phonesCanReorder != self.phoneReorderEnabled { self.phoneReorderEnabled = self.session.phonesCanReorder }
             if self.session.displaysCanControl != self.displaysCanControl { self.displaysCanControl = self.session.displaysCanControl }
             if self.session.phonesCanQueue != self.phoneQueueEnabled { self.phoneQueueEnabled = self.session.phonesCanQueue }
+            // The party page's Crossfade button (on Sonos).
+            if let crossfade = self.session.crossfade, crossfade != self.crossfade { self.crossfade = crossfade }
             let wifi = self.session.wifi
             if wifi.ssid != self.wifiSSID { self.wifiSSID = wifi.ssid }
             if wifi.password != self.wifiPassword { self.wifiPassword = wifi.password }
@@ -1154,7 +1156,13 @@ final class AppModel {
         // Set again by `onConfirmed` once the name is checked.
         localFriendlyURL = nil
         session.guestAddress = nil
+        #if DEBUG
+        // `-noLocalName`: no `.local` name, so a page opened on 127.0.0.1 (the simulator's server
+        // from the Mac) stays there rather than moving to the friendly address, as on the TV.
+        if !ProcessInfo.processInfo.arguments.contains("-noLocalName") { hostname.register(address: ip) }
+        #else
         hostname.register(address: ip)
+        #endif
         session.lanAddress = ip + (server.port == 80 ? "" : ":\(server.port)")
         advertiseZone()
     }

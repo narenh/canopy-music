@@ -219,7 +219,8 @@ public final class PartyServer: Sendable {
                 phonesCanReorder: body.phonesCanReorder,
                 displaysCanControl: body.displaysCanControl,
                 wifi: body.wifi.map { WifiDetails(ssid: String($0.ssid.prefix(32)), password: String($0.password.prefix(63)), simpleQR: $0.simpleQR) },
-                screensaverWhilePlaying: body.screensaverWhilePlaying
+                screensaverWhilePlaying: body.screensaverWhilePlaying,
+                crossfade: body.crossfade
             )
             return HTTPResponse(statusCode: .ok)
         }
@@ -348,8 +349,8 @@ public final class PartyServer: Sendable {
             return try .json(["address": address])
         }
         // The hub's Sonos rooms (docs/multi-device.md › Sonos output): where an Apple TV zone
-        // plays, chosen on its setup page, and the zone settings' Speakers section while the zone
-        // plays through Sonos. Hosts only; what the hub makes of it comes back in hosts'
+        // plays, chosen on its setup page, and the party page's volume row and Devices while the
+        // zone plays through Sonos. Hosts only; what the hub makes of it comes back in hosts'
         // snapshots (`sonos`). 409 when the hub won't (the last room while the music plays, a
         // room that doesn't answer, moving off Sonos after setup).
         func hostSonos(_ route: HTTPRoute, _ handle: @escaping @Sendable (HostSonosBody, any SonosOutputHandler) async throws -> HTTPResponse) async {
@@ -569,6 +570,8 @@ struct SettingsBody: Decodable {
     var displaysCanControl: Bool?
     /// Apple TV hubs only.
     var screensaverWhilePlaying: Bool?
+    /// The party page's Crossfade button (shown while the zone plays through Sonos).
+    var crossfade: Bool?
 }
 
 struct AddReply: Encodable {

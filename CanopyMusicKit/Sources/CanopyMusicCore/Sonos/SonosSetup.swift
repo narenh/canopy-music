@@ -1,7 +1,7 @@
 import Foundation
 
 /// A hub's Sonos rooms as a host's phone shows them: where an Apple TV zone's music plays (its
-/// setup page), and the Speakers section of the zone settings while the zone plays through Sonos.
+/// setup page), and the party page's volume row and Devices while the zone plays through Sonos.
 /// Only in hosts' snapshots (`PartySnapshot.sonos`), as `musicAccess` and `spotify` are. The
 /// wording is the iPad's (`SonosRoomStatus`), worked out on the hub so both say the same.
 public struct SonosSetup: Codable, Equatable, Sendable {

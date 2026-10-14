@@ -26,7 +26,9 @@ final class FakeEngine: PlaybackEngine {
     func skipToStaged() async throws { finishTrack() }
     func restartCurrent() { currentTime = 0 }
     func seek(to time: TimeInterval) { currentTime = time }
-    func setCrossfade(enabled: Bool, duration: TimeInterval?) {}
+    /// The last `setCrossfade`: whether it's on, and its length.
+    var crossfade: (enabled: Bool, duration: TimeInterval?)?
+    func setCrossfade(enabled: Bool, duration: TimeInterval?) { crossfade = (enabled, duration) }
 
     func finishTrack() {
         if let staged { playing = staged; self.staged = nil; onEvent?(.advancedToStaged) }
@@ -79,6 +81,46 @@ let base = PlaylistSummary(id: "p", name: "Base", kind: .library)
         ipad.applyHostSettings(zoneName: nil, phonesCanReorder: nil, displaysCanControl: nil, screensaverWhilePlaying: true)
         #expect(!ipad.screensaverWhilePlaying)
         #expect(ipad.snapshot().screensaverWhilePlaying == nil)
+    }
+
+    /// The party page's Crossfade button: hosts see the hub's crossfade, and turning it on from
+    /// there keeps the hub's length; an engine swapped in gets it too.
+    @Test func crossfadeIsForHostsAndFollowsTheEngine() async throws {
+        let engine = FakeEngine()
+        let session = PartySession(catalog: StubCatalog(ids: ["a"]), engine: engine)
+        session.configureHub(kind: .ipad, zoneName: "Kitchen", serviceName: "Demo")
+        session.hostKey = "secret"
+        #expect(session.snapshot(hostKey: "secret").crossfade == nil)
+        final class Count { var value = 0 }
+        let changes = Count()
+        session.onSettingsChanged = { changes.value += 1 }
+
+        session.setCrossfade(enabled: false, duration: 6)
+        #expect(session.snapshot(hostKey: "secret").crossfade == false)
+        session.applyHostSettings(zoneName: nil, phonesCanReorder: nil, displaysCanControl: nil, crossfade: true)
+        #expect(session.crossfade == true)
+        #expect(engine.crossfade?.enabled == true && engine.crossfade?.duration == 6)
+        #expect(changes.value == 1)
+        let sent = try JSONDecoder().decode(PartySnapshot.self, from: JSONEncoder().encode(session.snapshot(hostKey: "secret")))
+        #expect(sent.crossfade == true)
+        // Guests' snapshots don't carry it.
+        #expect(session.snapshot().crossfade == nil)
+        #expect(session.snapshot(hostKey: "wrong").crossfade == nil)
+        // Other settings leave it alone.
+        session.applyHostSettings(zoneName: "Den", phonesCanReorder: nil, displaysCanControl: nil)
+        #expect(session.crossfade == true)
+
+        let next = FakeEngine()
+        #expect(session.replaceService(catalog: StubCatalog(ids: ["a"]), engine: next, serviceName: "Demo"))
+        #expect(next.crossfade?.enabled == true && next.crossfade?.duration == 6)
+    }
+
+    /// A hub that never set crossfade leaves a swapped-in engine's own (Sonos's) alone.
+    @Test func anEngineSwappedInKeepsItsCrossfadeIfTheHubNeverSetOne() {
+        let session = PartySession(catalog: StubCatalog(ids: ["a"]), engine: FakeEngine())
+        let next = FakeEngine()
+        #expect(session.replaceService(catalog: StubCatalog(ids: ["a"]), engine: next, serviceName: "Demo"))
+        #expect(next.crossfade == nil)
     }
 
     @Test func loadingAPlaylistDoesNotPlay() async throws {

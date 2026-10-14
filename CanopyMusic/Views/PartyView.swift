@@ -664,22 +664,6 @@ struct EqualizerBars: View {
     }
 }
 
-/// A width that's never under `minimum`, even partway through an animation: the slide back at a
-/// song change is a spring, which would otherwise overshoot past the dot into a sliver.
-private struct AtLeastWidth: ViewModifier, Animatable {
-    var width: CGFloat
-    let minimum: CGFloat
-
-    nonisolated var animatableData: CGFloat {
-        get { width }
-        set { width = newValue }
-    }
-
-    func body(content: Content) -> some View {
-        content.frame(width: max(width, minimum))
-    }
-}
-
 private struct ProgressBar: View {
     let duration: TimeInterval?
     let session: PartySession
@@ -696,18 +680,18 @@ private struct ProgressBar: View {
             let total = max(duration ?? 0, 1)
             let elapsed = scrub.map { $0 * total } ?? session.position
             let thickness: CGFloat = isScrubbing ? 12 : 5
-            // Never narrower than a circle (a thinner capsule squashes into a sliver): at a song
-            // change it slides back to a dot and grows from there. With no song it's hidden, and
-            // fades in as a dot when one starts.
-            let hasSong = duration != nil
+            // Never narrower than a circle (a thinner capsule squashes into a sliver): at 0:00
+            // there's none, and from the first moment past it a dot, which grows. At once, not
+            // with the scrubbing's spring.
+            let started = duration != nil && elapsed > 0
             VStack(spacing: 6) {
                 GeometryReader { geo in
                     ZStack(alignment: .leading) {
                         Capsule().fill(.white.opacity(0.18))
                         Capsule().fill(.white)
-                            .modifier(AtLeastWidth(width: geo.size.width * min(elapsed / total, 1), minimum: thickness))
-                            .opacity(hasSong ? 1 : 0)
-                            .animation(.easeOut(duration: 0.15), value: hasSong)
+                            .frame(width: max(geo.size.width * min(elapsed / total, 1), thickness))
+                            .opacity(started ? 1 : 0)
+                            .animation(nil, value: started)
                     }
                     .frame(height: thickness)
                     .frame(maxHeight: .infinity)

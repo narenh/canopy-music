@@ -172,6 +172,10 @@ struct SpotifySetupStep: View {
     /// Advanced: the user's own sign-in page. Open from the start if one is set.
     @State private var showsAdvanced = SpotifyConfig.ownSignInPage != nil
     @State private var signInPageUsable = true
+    @FocusState private var clientIDFocused: Bool
+    @State private var signInPageFocused = false
+    /// The scroll view's bottom safe area: the docked keyboard's height while it's up.
+    @State private var bottomInset: CGFloat = 0
     let back: () -> Void
     let done: () -> Void
 
@@ -180,98 +184,132 @@ struct SpotifySetupStep: View {
         self.done = done
     }
 
+    /// What to keep above the keyboard while a field is focused: the Client ID field with Sign in
+    /// and the note under it, or Advanced's field with its check.
+    private enum KeyboardTarget: Hashable { case signIn, advanced }
+    private var keyboardTarget: KeyboardTarget? {
+        clientIDFocused ? .signIn : signInPageFocused ? .advanced : nil
+    }
+
+    /// SwiftUI's own scrolling to a focused field only brings the text line itself into view,
+    /// which leaves most of the glass capsule, and Sign in under it, behind the keyboard. So once
+    /// the keyboard's height is in the safe area (it's docked: a floating keyboard adds none, and
+    /// is left alone), the whole group is scrolled up to sit on it.
+    private func scrollAboveKeyboard(_ proxy: ScrollViewProxy) {
+        guard let keyboardTarget, bottomInset > 40 else { return }
+        withAnimation(.easeOut(duration: 0.25)) { proxy.scrollTo(keyboardTarget, anchor: .bottom) }
+    }
+
     var body: some View {
-        ScrollView {
-            VStack(alignment: .leading, spacing: 0) {
-                HStack {
-                    Button(action: back) {
-                        Image(systemName: "chevron.left")
-                            .font(.system(size: 18, weight: .semibold))
-                            .frame(width: 32, height: 32)
-                    }
-                    .buttonStyle(.glass)
-                    .tint(.primary)
-                    .buttonBorderShape(.circle)
-                    .accessibilityLabel("Back")
-                    Spacer()
-                    Image("SpotifyIcon")
-                        .resizable()
-                        .frame(width: 44, height: 44)
-                }
-                .padding(.bottom, 22)
-
-                Text("Connect Spotify")
-                    .font(.system(size: 36, weight: .bold))
-                Text("Canopy Music plays Spotify through a developer app you create. It's free, and you only do this once.")
-                    .font(.system(size: 18))
-                    .foregroundStyle(.white.opacity(0.6))
-                    .fixedSize(horizontal: false, vertical: true)
-                    .padding(.top, 6)
-                    .padding(.bottom, 28)
-
-                steps
-                    .padding(.bottom, 30)
-
-                Text("Client ID")
-                    .font(.system(size: 14, weight: .semibold))
-                    .foregroundStyle(.white.opacity(0.6))
-                    .padding(.leading, 20)
-                    .padding(.bottom, 8)
-                TextField("", text: $clientID, prompt: Text("Client ID").foregroundStyle(.white.opacity(0.4)))
-                    .font(.system(size: 20).monospaced())
-                    .textInputAutocapitalization(.never)
-                    .autocorrectionDisabled()
-                    .padding(.horizontal, 22)
-                    .frame(height: 56)
-                    .glassEffect(.regular.interactive(), in: Capsule())
-                    .accessibilityLabel("Client ID")
-
-                SpotifyRedirectNotice()
-                    .padding(.top, 16)
-
-                Button {
-                    working = true
-                    model.setSpotifyClientID(clientID)
-                    Task {
-                        await model.signInToSpotify()
-                        working = false
-                        if model.spotifyAuth.isSignedIn { done() }
-                    }
-                } label: {
-                    ZStack {
-                        Text("Sign in to Spotify").bold().opacity(working ? 0 : 1)
-                        if working { ProgressView() }
-                    }
-                    .frame(maxWidth: .infinity)
-                }
-                .buttonStyle(.glassProminent)
-                .controlSize(.large)
-                // Sign-in stays off until the sign-in page is good (or the default).
-                .disabled(clientID.trimmingCharacters(in: .whitespaces).isEmpty || working || (showsAdvanced && !signInPageUsable))
-                .padding(.top, 16)
-
-                Text("Your family can share one app if each person's email is added under User Management in the app's settings.")
-                    .font(.system(size: 15))
-                    .foregroundStyle(.white.opacity(0.55))
-                    .fixedSize(horizontal: false, vertical: true)
-                    .padding(.horizontal, 8)
-                    .padding(.top, 14)
-
-                Divider()
-                    .overlay(.white.opacity(0.15))
-                    .padding(.top, 34)
-                advanced
-            }
-            .frame(maxWidth: 600, alignment: .leading)
-            .padding(.horizontal, 40)
-            .padding(.vertical, 32)
-            .frame(maxWidth: .infinity)
+        ScrollViewReader { proxy in
+            ScrollView { page }
+                .scrollBounceBehavior(.basedOnSize)
+                // The keyboard's height, as the bottom safe area (the home indicator's alone without it).
+                .onGeometryChange(for: CGFloat.self) { $0.safeAreaInsets.bottom } action: { bottomInset = $0 }
+                .onChange(of: keyboardTarget) { scrollAboveKeyboard(proxy) }
+                .onChange(of: bottomInset) { old, new in if new > old { scrollAboveKeyboard(proxy) } }
         }
-        .scrollBounceBehavior(.basedOnSize)
         #if DEBUG
         // `-spotifyAdvanced`: opens Advanced (the simulator can't be tapped from here).
         .onAppear { if ProcessInfo.processInfo.arguments.contains("-spotifyAdvanced") { showsAdvanced = true } }
+        // `-focusClientID`: focuses the Client ID field, showing the keyboard.
+        .task {
+            if ProcessInfo.processInfo.arguments.contains("-focusClientID") {
+                try? await Task.sleep(for: .seconds(1.5))
+                clientIDFocused = true
+            }
+        }
         #endif
+    }
+
+    private var page: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            HStack {
+                Button(action: back) {
+                    Image(systemName: "chevron.left")
+                        .font(.system(size: 18, weight: .semibold))
+                        .frame(width: 32, height: 32)
+                }
+                .buttonStyle(.glass)
+                .tint(.primary)
+                .buttonBorderShape(.circle)
+                .accessibilityLabel("Back")
+                Spacer()
+                Image("SpotifyIcon")
+                    .resizable()
+                    .frame(width: 44, height: 44)
+            }
+            .padding(.bottom, 22)
+
+            Text("Connect Spotify")
+                .font(.system(size: 36, weight: .bold))
+            Text("Canopy Music plays Spotify through a developer app you create. It's free, and you only do this once.")
+                .font(.system(size: 18))
+                .foregroundStyle(.white.opacity(0.6))
+                .fixedSize(horizontal: false, vertical: true)
+                .padding(.top, 6)
+                .padding(.bottom, 28)
+
+            steps
+                .padding(.bottom, 30)
+
+            Text("Client ID")
+                .font(.system(size: 14, weight: .semibold))
+                .foregroundStyle(.white.opacity(0.6))
+                .padding(.leading, 20)
+                .padding(.bottom, 8)
+            TextField("", text: $clientID, prompt: Text("Client ID").foregroundStyle(.white.opacity(0.4)))
+                .font(.system(size: 20).monospaced())
+                .textInputAutocapitalization(.never)
+                .autocorrectionDisabled()
+                .padding(.horizontal, 22)
+                .frame(height: 56)
+                .glassEffect(.regular.interactive(), in: Capsule())
+                .accessibilityLabel("Client ID")
+                .focused($clientIDFocused)
+
+            SpotifyRedirectNotice()
+                .padding(.top, 16)
+
+            Button {
+                working = true
+                model.setSpotifyClientID(clientID)
+                Task {
+                    await model.signInToSpotify()
+                    working = false
+                    if model.spotifyAuth.isSignedIn { done() }
+                }
+            } label: {
+                ZStack {
+                    Text("Sign in to Spotify").bold().opacity(working ? 0 : 1)
+                    if working { ProgressView() }
+                }
+                .frame(maxWidth: .infinity)
+            }
+            .buttonStyle(.glassProminent)
+            .controlSize(.large)
+            // Sign-in stays off until the sign-in page is good (or the default).
+            .disabled(clientID.trimmingCharacters(in: .whitespaces).isEmpty || working || (showsAdvanced && !signInPageUsable))
+            .padding(.top, 16)
+
+            Text("Your family can share one app if each person's email is added under User Management in the app's settings.")
+                .font(.system(size: 15))
+                .foregroundStyle(.white.opacity(0.55))
+                .fixedSize(horizontal: false, vertical: true)
+                .padding(.horizontal, 8)
+                .padding(.top, 14)
+                .padding(.bottom, 12)
+                .id(KeyboardTarget.signIn)
+
+            Divider()
+                .overlay(.white.opacity(0.15))
+                .padding(.top, 22)
+            advanced
+        }
+        .frame(maxWidth: 600, alignment: .leading)
+        .padding(.horizontal, 40)
+        .padding(.vertical, 32)
+        .frame(maxWidth: .infinity)
     }
 
     /// Creating the Spotify app, step by step. Markdown: `**` bold, `[…](…)` links.
@@ -329,8 +367,10 @@ struct SpotifySetupStep: View {
                         .font(.system(size: 14, weight: .semibold))
                         .foregroundStyle(.white.opacity(0.6))
                         .padding(.leading, 20)
-                    SpotifySignInPageField(isUsable: $signInPageUsable)
+                    SpotifySignInPageField(isUsable: $signInPageUsable) { signInPageFocused = $0 }
                 }
+                .padding(.bottom, 12)
+                .id(KeyboardTarget.advanced)
                 .transition(.opacity.combined(with: .move(edge: .top)))
             }
         }

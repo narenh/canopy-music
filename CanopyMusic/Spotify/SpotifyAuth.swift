@@ -113,9 +113,6 @@ final class SpotifyAuth {
         var expiresAt: Date
         /// What the sign-in allowed, space separated. nil for sign-ins saved by earlier builds.
         var scope: String?
-        /// The sign-in page (redirect URI) it went through. nil for sign-ins from before the
-        /// relay, which went to `canopy-music://spotify-callback`.
-        var redirectURI: String?
     }
 
     private(set) var isSignedIn: Bool
@@ -133,21 +130,11 @@ final class SpotifyAuth {
     @ObservationIgnored private var tokens: Tokens?
     @ObservationIgnored private var refreshTask: Task<String, Error>?
     private static let accountDefaultsKey = "spotifyAccount"
-    /// Set once a sign-in from before the relay is seen; cleared by a sign-in through it.
-    private static let oldRedirectDefaultsKey = "spotifySignedInBeforeRelay"
 
     init() {
         tokens = Keychain.load(Tokens.self)
         isSignedIn = tokens != nil
         accountFingerprint = tokens == nil ? nil : UserDefaults.standard.string(forKey: Self.accountDefaultsKey)
-        if let tokens, tokens.redirectURI == nil { UserDefaults.standard.set(true, forKey: Self.oldRedirectDefaultsKey) }
-    }
-
-    /// This device last signed in through `canopy-music://spotify-callback`, so its Spotify app
-    /// probably has only that redirect URI registered: the next sign-in needs the sign-in page
-    /// added first. Kept after signing out, until a sign-in through the page works.
-    var registeredOldRedirect: Bool {
-        UserDefaults.standard.bool(forKey: Self.oldRedirectDefaultsKey)
     }
 
     /// The signed-in account's user id (from `GET /v1/me`); only its fingerprint is kept.
@@ -172,8 +159,7 @@ final class SpotifyAuth {
     /// Finishes a sign-in: exchanges the code Spotify sent back for tokens, with the request's
     /// verifier and the same redirect URI. A failure leaves an earlier sign-in as it was.
     func complete(_ request: SpotifySignInRequest, code: String) async throws {
-        try await exchange(request.tokenForm(code: code), redirectURI: request.redirectURI)
-        UserDefaults.standard.removeObject(forKey: Self.oldRedirectDefaultsKey)
+        try await exchange(request.tokenForm(code: code))
         // Possibly another account: fetched again for this sign-in.
         accountFingerprint = nil
     }
@@ -197,14 +183,14 @@ final class SpotifyAuth {
                 "grant_type": "refresh_token",
                 "refresh_token": tokens.refreshToken,
                 "client_id": SpotifyConfig.clientID,
-            ], redirectURI: tokens.redirectURI)
+            ])
             return self.tokens!.accessToken
         }
         refreshTask = task
         return try await task.value
     }
 
-    private func exchange(_ form: [String: String], redirectURI: String?) async throws {
+    private func exchange(_ form: [String: String]) async throws {
         var request = URLRequest(url: URL(string: "https://accounts.spotify.com/api/token")!)
         request.httpMethod = "POST"
         request.setValue("application/x-www-form-urlencoded", forHTTPHeaderField: "Content-Type")
@@ -237,8 +223,7 @@ final class SpotifyAuth {
             // Spotify may or may not rotate the refresh token.
             refreshToken: reply.refresh_token ?? tokens?.refreshToken ?? "",
             expiresAt: Date().addingTimeInterval(reply.expires_in),
-            scope: reply.scope ?? tokens?.scope,
-            redirectURI: redirectURI
+            scope: reply.scope ?? tokens?.scope
         )
         tokens = next
         Keychain.save(next)

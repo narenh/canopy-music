@@ -34,7 +34,7 @@ struct SpotifyStatusRows: View {
                 }
             }
             // Spotify's "Invalid redirect URI" page can't be seen from here: say what to check.
-            if model.spotifySignInClosed || model.spotifyAuth.registeredOldRedirect {
+            if model.spotifySignInClosed {
                 Text("Add \(model.spotifyRedirectURI) to your Spotify app's Redirect URIs.")
                     .font(.footnote)
                     .foregroundStyle(.orange)

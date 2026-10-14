@@ -64,8 +64,6 @@ Spotify only lets each developer app have **5 user accounts** in Development Mod
 6. Open the **Spotify app** on the iPad or another device in your home (TV, game console, speaker, computer). Spotify only lists devices with the app open.
 7. Choose **where music should play**. Start stays disabled until that device is available.
 
-**Upgrading from a build that used `canopy-music://spotify-callback`:** you stay signed in, but the next sign-in needs `https://music.canopysf.com/spotify` added to your Spotify app's Redirect URIs (you can then remove the old one). Without it, Spotify's page says "Invalid redirect URI".
-
 **Why a web page?** Since 2025 Spotify only accepts `https` redirect URIs. Spotify sends you to `music.canopysf.com/spotify` after you sign in, and that page sends your browser straight back to Canopy Music: to the app on an iPad or Mac, or to the Apple TV on your Wi‑Fi. It's a static page that stores nothing; the sign-in code it passes on is useless without a secret that never leaves your device (PKCE). Its source is the [canopy-music-relay](https://github.com/narenh/canopy-music-relay) repository.
 
 **Hosting your own sign-in page:** fork canopy-music-relay and publish it (GitHub Pages or Cloudflare Pages; its README has the steps), then enter its address under **Advanced → Spotify sign-in page** on the Connect Spotify page (on an iPad also **Settings → Spotify → Sign-in page**; on an Apple TV, the same page of your phone's setup). Canopy Music checks that it's `https` and is a Canopy Music sign-in page before saving it, and the Redirect URI it tells you to register follows the setting. Changing it doesn't sign you out.

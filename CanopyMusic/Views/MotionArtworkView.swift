@@ -28,13 +28,13 @@ struct MotionArtworkView: View {
 
     @Environment(AppModel.self) private var model
 
-    /// Whether the video can play without pausing the music. A display plays no music. On iOS 27
-    /// the video is cut off from the audio session (`LoopingVideoView.start`). Before that, a
-    /// hub's video interrupts the music, so the still art stays: a paused party is far worse than
-    /// art that doesn't move. A Mac lacks the cut-off; it keeps the video until it's known
-    /// whether the problem happens there.
+    /// Whether the video can play without pausing the music. A display plays no music, so it
+    /// always can. On an iPad hub on iOS 27 the video is cut off from the audio session
+    /// (`LoopingVideoView.start`); a Mac hub on macOS 27 has no cut-off but was seen not to pause.
+    /// Before 27 a hub keeps the still art: a paused party is far worse than art that doesn't move.
     private var leavesMusicAlone: Bool {
-        if model.isDisplay || ProcessInfo.processInfo.isiOSAppOnMac { return true }
+        if model.isDisplay { return true }
+        // On a Mac this is macOS 27 (an iPad app's iOS version follows the Mac's).
         if #available(iOS 27, *) { return true }
         return false
     }

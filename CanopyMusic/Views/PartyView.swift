@@ -417,12 +417,10 @@ struct NowPlayingView: View {
             let narrow = geo.size.width < 464
             let inset: CGFloat = narrow ? 20 : 32
             let width = geo.size.width - inset * 2
-            // Artwork takes whatever height is left after the title, progress and controls.
-            let reserved: CGFloat = item != nil ? 284 : startsUpNext ? 194 : 110
             let widthSide = width * 0.85
             let side = max(200, min(widthSide, geo.size.height - reserved))
             // Always in the middle of the column's height, whatever the window's shape.
-            VStack(spacing: 20) {
+            VStack(spacing: Self.spacing) {
                 ArtworkView(track: item?.track, large: true, cornerRadius: 18)
                     // Animated album artwork, where there is some (experimental: `MotionArtwork`).
                     .overlay { MotionArtworkView(track: item?.track, catalog: session.catalog, isPlaying: session.isPlaying, cornerRadius: 18) }
@@ -470,14 +468,18 @@ struct NowPlayingView: View {
                                     .foregroundStyle(.orange)
                             }
                         }
+                    if model.isDisplay { DisplayZoneLine().frame(maxWidth: side) }
                     // Displays: transport only while the hub allows it (no AirPlay or crossfade).
                     if showsTransport {
                         TransportControls(session: session, spacing: narrow ? 6 : 20)
                     }
-                } else if startsUpNext {
-                    // Nothing current but songs waiting (the queue ran dry, then a guest added
-                    // one): Play starts Up next, so the party is never stuck.
-                    StartUpNextButton()
+                } else {
+                    if model.isDisplay { DisplayZoneLine().frame(maxWidth: side) }
+                    if startsUpNext {
+                        // Nothing current but songs waiting (the queue ran dry, then a guest added
+                        // one): Play starts Up next, so the party is never stuck.
+                        StartUpNextButton()
+                    }
                 }
             }
             .padding(.horizontal, inset)
@@ -486,6 +488,24 @@ struct NowPlayingView: View {
         }
         // The right pane's 24 pt vertical padding, so a column that's full stops where Up next does.
         .padding(.bottom, 24)
+    }
+
+    /// Between the artwork, the song's text, the progress bar, the zone line and the controls.
+    private static let spacing: CGFloat = 20
+    /// The play/pause row's height: its 64 pt glass buttons, with the glass around them.
+    private static let transportHeight: CGFloat = 78
+
+    /// The column's height that isn't artwork: the song's text, then the progress bar and the
+    /// controls (or the lone Play), then on a display the zone line, each with the spacing above
+    /// it. The artwork gets the rest, so it shrinks to make room where the column is short (a
+    /// small or short window, an 11" iPad in landscape). The hub's numbers (284, 194 and 110)
+    /// include some breathing room below the controls.
+    private var reserved: CGFloat {
+        var height: CGFloat = item != nil ? 284 : startsUpNext ? 194 : 110
+        // A display the hub doesn't let control has no transport row.
+        if item != nil, !showsTransport { height -= Self.transportHeight + Self.spacing }
+        if model.isDisplay { height += DisplayZoneLine.height + Self.spacing }
+        return height
     }
 
     /// Displays get play/pause, skip and scrubbing only while the hub allows it.
@@ -782,6 +802,36 @@ struct GuestQRCard: View {
 
     static func display(_ url: URL) -> String {
         url.absoluteString.replacingOccurrences(of: "http://", with: "")
+    }
+}
+
+/// On a display, under the progress bar: the zone it's showing ("Playing from Living Room") with
+/// its hub's icon, as on the Apple TV. Plain text, not a capsule, so it can't be mistaken for a
+/// requester pill.
+private struct DisplayZoneLine: View {
+    /// Its height, which the artwork leaves room for (`NowPlayingView.reserved`).
+    static let height: CGFloat = 18
+    @Environment(AppModel.self) private var model
+
+    var body: some View {
+        // What the hub says in its snapshots (it follows renames), else what it announced when
+        // this display joined.
+        let session = model.session
+        let listing = model.displayedZone
+        let name = session.zoneName.flatMap { $0.isEmpty ? nil : $0 } ?? listing?.name
+        let kind = session.hubKind ?? listing?.kind ?? .ipad
+        let device = session.hubKind != nil ? session.hubDevice : listing?.device
+        HStack(spacing: 7) {
+            Image(systemName: kind == .tv ? "tv.fill" : DeviceSymbol.name(kind: kind, device: device))
+                .font(.system(size: 13, weight: .medium))
+            Text("Playing from \(name ?? "another device")")
+                .font(.system(size: 15, weight: .medium))
+                .lineLimit(1)
+                .truncationMode(.tail)
+        }
+        .foregroundStyle(.white.opacity(0.5))
+        .frame(height: Self.height)
+        .accessibilityElement(children: .combine)
     }
 }
 

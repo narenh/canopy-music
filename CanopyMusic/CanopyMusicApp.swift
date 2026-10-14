@@ -238,6 +238,18 @@ struct RootView: View {
             }
             print("[debug] guest URL \(model.guestURL?.absoluteString ?? "none")")
             let args = ProcessInfo.processInfo.arguments
+            // `-joinAddress 127.0.0.1:8080`: joins the hub at that address as a display, without
+            // finding it on the network first (e.g. `swift run CanopyMusicDevServer` on this Mac,
+            // which the simulator reaches at 127.0.0.1). `-joinName <name>` names the zone
+            // ("Living Room"); `-joinHub tv|ipad|MacBookAir|…` (`MacKind` raw values) says what
+            // the hub is, for its icon. Hubs that say so in their snapshots override both.
+            if let i = args.firstIndex(of: "-joinAddress"), i + 1 < args.count {
+                let name = args.firstIndex(of: "-joinName").flatMap { $0 + 1 < args.count ? args[$0 + 1] : nil } ?? "Living Room"
+                let hub = args.firstIndex(of: "-joinHub").flatMap { $0 + 1 < args.count ? args[$0 + 1] : nil } ?? "ipad"
+                let mac = ["tv", "ipad"].contains(hub) ? nil : MacKind(wire: hub)
+                model.join(ZoneListing(id: "debug-join", name: name, kind: hub == "tv" ? .tv : .ipad, device: mac?.rawValue,
+                                       address: args[i + 1], hubID: "debug-join-hub"))
+            }
             if let i = args.firstIndex(of: "-screenshotParty"), i + 1 < args.count, let scene = ScreenshotScene.all[args[i + 1]] {
                 let tracks = await scene.resolve(with: AppleMusicCatalog(cache: SongCache()))
                 let session = PartySession(catalog: FixedCatalog(tracks: tracks), engine: PosedEngine(time: scene.time))

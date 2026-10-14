@@ -347,6 +347,44 @@ public final class PartyServer: Sendable {
             guard let address = await handler.joinSpotifyConflict() else { return HTTPResponse(statusCode: .notFound) }
             return try .json(["address": address])
         }
+        // The hub's Sonos rooms (docs/multi-device.md › Sonos output): where an Apple TV zone
+        // plays, chosen on its setup page, and the zone settings' Speakers section while the zone
+        // plays through Sonos. Hosts only; what the hub makes of it comes back in hosts'
+        // snapshots (`sonos`). 409 when the hub won't (the last room while the music plays, a
+        // room that doesn't answer, moving off Sonos after setup).
+        func hostSonos(_ route: HTTPRoute, _ handle: @escaping @Sendable (HostSonosBody, any SonosOutputHandler) async throws -> HTTPResponse) async {
+            await server.appendRoute(route) { request in
+                let body = try JSONDecoder.api.decode(HostSonosBody.self, from: await request.bodyData)
+                guard await session.isHost(key: body.key) else { return HTTPResponse(statusCode: .forbidden) }
+                guard let handler = await session.sonosHandler else { return HTTPResponse(statusCode: .notImplemented) }
+                return try await handle(body, handler)
+            }
+        }
+        await hostSonos("POST /api/host/sonos/room") { body, handler in
+            guard let id = body.id, let on = body.on else { return HTTPResponse(statusCode: .badRequest) }
+            let ok = await handler.setSonosRoom(id, on: on)
+            return HTTPResponse(statusCode: ok ? .noContent : .conflict)
+        }
+        // Back to the hub's own output: the Apple TV, or the Spotify Connect device.
+        await hostSonos("POST /api/host/sonos/off") { _, handler in
+            HTTPResponse(statusCode: await handler.leaveSonos() ? .noContent : .conflict)
+        }
+        await hostSonos("POST /api/host/sonos/account") { body, handler in
+            HTTPResponse(statusCode: await handler.chooseSonosAccount(body.id ?? "") ? .noContent : .conflict)
+        }
+        // A room's volume (`id`), or the group's (no `id`; `begin` as the slider starts moving).
+        await hostSonos("POST /api/host/sonos/volume") { body, handler in
+            guard body.volume != nil || body.begin == true else { return HTTPResponse(statusCode: .badRequest) }
+            if body.begin == true, body.id == nil { await handler.beginSonosGroupVolume() }
+            if let volume = body.volume { await handler.setSonosVolume(volume, room: body.id) }
+            return HTTPResponse(statusCode: .noContent)
+        }
+        // The page asks while its room list shows (every few seconds), so changes made in the
+        // Sonos app show up. Answers once the rooms have been read.
+        await hostSonos("POST /api/host/sonos/read") { _, handler in
+            await handler.readSonosRooms()
+            return HTTPResponse(statusCode: .noContent)
+        }
         // Where the relay sends the phone back with Spotify's answer. It answers only while a
         // sign-in started from the setup page is pending (and not expired), and only the answer
         // with that sign-in's nonce; then it goes back to the setup page, which shows the result.
@@ -579,6 +617,19 @@ struct HostSetupBody: Decodable {
     var address: String?
     /// A Spotify Connect device.
     var id: String?
+}
+
+/// The hub's Sonos rooms, from a host's phone.
+struct HostSonosBody: Decodable {
+    var key: String
+    /// A room (`room`, `volume`) or an account (`account`). No room on `volume`: the group.
+    var id: String?
+    /// Tick (true) or untick the room.
+    var on: Bool?
+    /// 0–100.
+    var volume: Int?
+    /// The group's volume is about to move (`SnapshotGroupVolume` first).
+    var begin: Bool?
 }
 
 extension PartyServer {

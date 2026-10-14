@@ -113,7 +113,7 @@ struct CanvasScaled<Content: View>: View {
                 .scaleEffect(min(1, geo.size.width / size.width, geo.size.height / size.height))
                 .position(x: geo.size.width / 2, y: geo.size.height / 2)
         }
-        .background(.black)
+        .background { DuskBackground() }
     }
 }
 

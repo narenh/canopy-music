@@ -4,39 +4,57 @@
   <img src="docs/screenshots/devices.jpg" alt="Canopy Music on an Apple TV, a MacBook, an iPad, and an iPhone, with the app icon">
 </p>
 
-iPad party jukebox for Apple Music or Spotify. Pick a base playlist, lock the iPad into a now-playing screen, and guests queue songs on the iPad or from their phones (QR code; guests don't need a music account). Requests and playlist songs live in one list that anyone can drag to reorder.
+A party jukebox for Apple Music or Spotify. An iPad, Apple TV, or Mac runs the party: pick a base playlist, put it on a big screen, and guests queue songs from their phones (QR code; guests don't need an app or a music account). Requests and playlist songs live in one list that anyone can drag to reorder. Music plays on the device itself, AirPlay 2 speakers, Spotify Connect devices, or Sonos rooms.
 
-Privacy: Canopy Music has no servers, accounts or tracking. See the [privacy policy](PRIVACY.md).
+Website: [music.canopysf.com](https://music.canopysf.com/).
+
+Privacy: Canopy Music has no accounts or tracking. Spotify sign-in goes through a small static redirect page (see [Spotify](#spotify)). See the [privacy policy](PRIVACY.md).
 
 ## License
 
 The code is under the [PolyForm Noncommercial License 1.0.0](LICENSE.md): you can use, change and share it for noncommercial purposes. Commercial use needs permission. The Canopy Music name, logo and app icon aren't covered by the license, and neither are the Apple Music and Spotify marks, which belong to Apple and Spotify.
 
-## Building it for your iPad
+## Building it
 
-Requires Xcode 26+ and an iPad on iPadOS 26+.
+Requires Xcode 26+, and an iPad on iPadOS 26+, an Apple TV on tvOS 26+, or an Apple silicon Mac.
 
-1. Open `CanopyMusic.xcodeproj`. Under the CanopyMusic target's **Signing & Capabilities**, choose your team and change the bundle identifier to something you own (e.g. `com.yourname.Canopy`).
-2. Build to your iPad once so Xcode registers the App ID.
-3. **For Apple Music:** in the [developer portal](https://developer.apple.com/account/resources/identifiers/list), open your App ID → **App Services** tab → check **MusicKit** → save. Without it, Apple Music requests fail with `developerTokenRequestFailed`. It can take a few minutes to take effect.
+1. Open `CanopyMusic.xcodeproj`. Under the **CanopyMusic** target (iPad and Mac) and the **CanopyMusicTV** target (Apple TV), open **Signing & Capabilities**, choose your team, and change the bundle identifiers to something you own (e.g. `com.yourname.CanopyMusic`).
+2. Build once to each kind of device you'll use, so Xcode registers the App IDs. On a Mac, choose the **My Mac (Designed for iPad)** destination.
+3. **For Apple Music:** in the [developer portal](https://developer.apple.com/account/resources/identifiers/list), open each App ID → **App Services** tab → check **MusicKit** → save. Without it, Apple Music requests fail with `developerTokenRequestFailed`. It can take a few minutes to take effect.
 4. **For Spotify:** see [Spotify](#spotify) below.
 
-The simulator can't play Apple Music or Spotify, so use **Demo** (Settings → Music service): fake songs, 30-second tracks, no audio.
+The simulators can't play Apple Music or Spotify, so use **Demo** (Settings → Music service): fake songs, 30-second tracks, no audio.
 
 ## Running a party
 
-1. In host mode, pick the base playlist (**Choose playlist** / **Change**). The shuffle button reshuffles it.
-2. Pick speakers with the **Speakers** row (AirPlay).
-3. Press **Start**. It begins playback and locks into the party screen.
-4. Triple-click the top button to turn on Guided Access so guests can't leave the app.
-5. To get back to host mode, press and hold the logo (asks for the PIN if you set one in host mode's Zone section).
+**On an iPad or Mac:**
+
+1. Choose **Create a new zone**. The first time, a short setup picks your music service and names the zone.
+2. On the start screen, pick the base playlist (**Choose playlist** / **Change**). The shuffle button reshuffles it.
+3. Choose where music plays under **Music**: **This iPad** (with an **AirPlay** row for AirPlay 2 speakers), a Spotify Connect device, or Sonos rooms.
+4. Optionally set a PIN under **Zone**.
+5. Press **Start**. It begins playback and locks into the party screen.
+6. Triple-click the top button to turn on Guided Access so guests can't leave the app.
+7. To get back to the start screen, press and hold the logo (asks for the PIN if you set one). **End Zone** is there too.
+
+**On an Apple TV:** choose **Create a new zone** and scan the QR code with your phone. Your phone's setup page names the zone, picks the music service and where it plays, and the base playlist; then **Start the music**. The phone keeps host controls.
+
+**Displays:** any other iPad, Apple TV, or Mac can join a zone from its zone list as a display. It shows what's playing and what's next, with its own QR code for guests. The music still plays from the zone's hub.
+
+## Sonos
+
+Canopy Music can play through Sonos rooms instead of the hub itself, for Apple Music and Spotify alike: choose **Sonos** under where music plays and tick one or more rooms. Sonos streams the songs with the account linked in the Sonos app, so add the service there first.
+
+- During a party, the **Speakers** button (in AirPlay's place) adds and removes rooms without the song restarting, with a volume for each room. A host's phone gets the same controls under the transport.
+- Rooms another zone is playing on say so, and **Use** takes them over.
+- With several accounts for one service linked in Sonos, choose **Whose account plays**.
 
 ## Phones
 
-The iPad runs a small web server on your Wi-Fi so guests can search and queue from their phones. Turn it off with **Settings → Queue from phones**.
+The hub (the iPad, Apple TV, or Mac running the party) runs a small web server on your Wi-Fi so guests can search and queue from their phones. Turn it off with **Settings → Queue from phones**.
 
-- The QR code always uses the iPad's IP address, so it works on any phone.
-- The iPad also announces `music.local` over Bonjour (it follows the zone name, set in host mode's Zone section). Some Android phones don't resolve `.local` names; the QR code covers them.
+- The QR code always uses the hub's IP address, so it works on any phone.
+- The hub also announces `music.local` over Bonjour (it follows the zone name, set on the start screen). Some Android phones don't resolve `.local` names; the QR code covers them.
 - It listens on port 80 when it can, so the URL has no `:port` (falls back to 8080).
 
 Guests can add songs, drag to reorder, and remove their own requests. Names are optional. **Settings → Reorder from phones** turns off dragging for guests.
@@ -56,8 +74,8 @@ Spotify only lets each developer app have **5 user accounts** in Development Mod
 3. Open the app's **Settings** and copy the **Client ID**. No client secret is needed.
 4. Under **User Management**, add the email of each Spotify account that will sign in (yours, plus up to 4 others).
 5. In Canopy Music, choose **Spotify**: setup's first step, or the start screen's Music row (its menu offers the other service, showing "Not connected. Tap to sign in." until you've signed in); on an Apple TV, the Music bar on your phone's setup page. If Spotify isn't signed in yet, that opens the **Connect Spotify** page, which walks through these same steps with the Redirect URI to copy. Paste the **Client ID** and tap **Sign in to Spotify**. Spotify becomes the service once the sign-in works; Back leaves the service as it was.
-6. Open the **Spotify app** on the iPad or another device in your home (TV, game console, speaker, computer). Spotify only lists devices with the app open.
-7. Choose **where music should play**. Start stays disabled until that device is available.
+6. Open the **Spotify app** on the iPad or another device in your home (TV, game console, speaker, computer). Spotify only lists devices with the app open. Or play on [Sonos](#sonos) rooms instead, which needs no Spotify app.
+7. Choose **where music should play**. Start stays disabled until that device (or a Sonos room) is available.
 
 **Why a web page?** Since 2025 Spotify only accepts `https` redirect URIs. Spotify sends you to `music.canopysf.com/spotify` after you sign in, and that page sends your browser straight back to Canopy Music: to the app on an iPad or Mac, or to the Apple TV on your Wi‑Fi. It's a static page that stores nothing; the sign-in code it passes on is useless without a secret that never leaves your device (PKCE). Its source is the [canopy-music-relay](https://github.com/narenh/canopy-music-relay) repository.
 
@@ -94,7 +112,7 @@ CanopyMusicKit/                   Swift package (no MusicKit or Spotify code)
   Sources/CanopyMusicDevServer/   `swift run CanopyMusicDevServer`: phone web app + demo data on your Mac
   Tests/CanopyMusicCoreTests/     queue and session tests
   Tests/CanopyMusicServerTests/   zone and server tests
-CanopyMusic/                      iPad app (SwiftUI, iPadOS 26)
+CanopyMusic/                      iPad and Mac app (SwiftUI, iPadOS 26; Designed for iPad on Mac)
   AppleMusic/                     MusicKit catalog + ApplicationMusicPlayer engine
   Spotify/                        Spotify tokens, Web API client, catalog and Connect engine (also in the Apple TV target)
   Views/                          host, party (locked), Up Next, search, fly-in animation

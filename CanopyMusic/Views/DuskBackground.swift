@@ -4,7 +4,8 @@ import SwiftUI
 /// start screen before a playlist is loaded, Spotify's setup page): the "Dusk" violet of
 /// music.canopysf.com and the phone page's splash (`.splash` in `app.css`), drawn the same way
 /// (three elliptical glows over a 170° linear base) but darkened to a near-black with a faint
-/// violet glow. Static: drawn once, no animation.
+/// violet glow. Static: drawn once, no animation. Shared with the TV target (a symlink there),
+/// for its screens with no song (`TVZoneListView`, `TVStartView`, and others).
 struct DuskBackground: View {
     /// How much of Dusk shows: its colours are scaled by this towards black (1 is the web splash,
     /// 0 is black). Debug builds: `-duskStrength <0…1>` to compare levels.

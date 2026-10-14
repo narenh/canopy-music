@@ -28,6 +28,11 @@ struct TVRootView: View {
         model.role != .choosing && model.session.tvKeepsScreenAwake
     }
 
+    /// The zone list, or a hub's start screen (`TVStartView`).
+    private var showsDusk: Bool {
+        model.role == .choosing || model.role == .hub && model.session.isWaitingForSetup
+    }
+
     var body: some View {
         // What's actually playing (a Spotify hub's can be a track from outside its queue).
         let current = model.session.nowPlaying
@@ -44,6 +49,11 @@ struct TVRootView: View {
                 // Changes evenly to the new song's, starting with the party screen's slide and
                 // settling after it (`TVPartyView.showCurrent`).
                 .animation(.linear(duration: 2), value: backgroundItem?.id)
+            // Dusk on the screens with no song (the zone list and the start screen), as on the
+            // iPad; it fades into the song's background as the party screen comes in.
+            DuskBackground()
+                .opacity(showsDusk ? 1 : 0)
+                .animation(.easeInOut(duration: 0.5), value: showsDusk)
             switch model.role {
             case .choosing:
                 TVZoneListView()
@@ -218,6 +228,8 @@ struct TVEndZoneSheet: View {
         }
         .frame(width: 1100, alignment: .leading)
         .padding(70)
+        // The card is Dusk, as the screens with no song; the party shows around it.
+        .presentationBackground { DuskBackground() }
         // Starts on Save and End, so a quick press saves under the date and zone; the name field
         // is one swipe up.
         .defaultFocus($focus, .save)
@@ -444,7 +456,13 @@ struct TVConnectionOverlay: View {
         if let connection = model.connection, model.isWaitingForHub {
             let name = model.shownZone?.name ?? "the zone"
             ZStack {
-                Rectangle().fill(.black.opacity(connection.hasSnapshot ? 0.45 : 0.9)).ignoresSafeArea()
+                if connection.hasSnapshot {
+                    // The party shows through, blurred.
+                    Rectangle().fill(.black.opacity(0.45)).ignoresSafeArea()
+                } else {
+                    // Nothing from the hub yet: Dusk, as on the zone list.
+                    DuskBackground()
+                }
                 VStack(spacing: 22) {
                     ProgressView()
                     Text(connection.hasSnapshot ? "Lost connection to \(name)" : "Connecting to \(name)…")

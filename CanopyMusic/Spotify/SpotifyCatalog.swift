@@ -24,7 +24,8 @@ struct SpotifyCatalog: MusicCatalog {
         var summaries: [PlaylistSummary] = []
         var page = try await api.get("/me/playlists", query: ["limit": "50"], as: SpotifyPage<PlaylistObject?>.self)
         while let current = page {
-            summaries += current.items.compactMap { $0?.summary(subtitle: "Your library") }
+            // The song count says more than "Your library" in a list of your playlists.
+            summaries += current.items.compactMap { $0?.summary(subtitle: $0?.songCount == nil ? "Your library" : nil) }
             guard let next = current.next else { break }
             page = try await api.getNext(next, as: SpotifyPage<PlaylistObject?>.self)
         }
@@ -96,14 +97,31 @@ struct SpotifyCatalog: MusicCatalog {
 
     private struct PlaylistObject: Decodable, Sendable {
         struct Owner: Decodable, Sendable { var display_name: String? }
+        /// `{ href, total }`: where the entries are, and how many.
+        struct Entries: Decodable, Sendable { var total: Int? }
         var id: String
         var name: String
         var images: [SpotifyImage]?
         var owner: Owner?
+        /// How many entries the playlist has. The 2026 API renamed `tracks` to `items` (`tracks`
+        /// is deprecated); either is read, and a shape it doesn't expect just leaves it unknown.
+        var songCount: Int?
+
+        enum CodingKeys: String, CodingKey { case id, name, images, owner, items, tracks }
+
+        init(from decoder: any Decoder) throws {
+            let container = try decoder.container(keyedBy: CodingKeys.self)
+            id = try container.decode(String.self, forKey: .id)
+            name = try container.decode(String.self, forKey: .name)
+            images = try container.decodeIfPresent([SpotifyImage].self, forKey: .images)
+            owner = try container.decodeIfPresent(Owner.self, forKey: .owner)
+            songCount = (try? container.decodeIfPresent(Entries.self, forKey: .items))?.total
+                ?? (try? container.decodeIfPresent(Entries.self, forKey: .tracks))?.total
+        }
 
         func summary(subtitle: String?) -> PlaylistSummary {
             let art = images?.sorted { ($0.width ?? 0) < ($1.width ?? 0) }.first { ($0.width ?? 300) >= 200 } ?? images?.first
-            return PlaylistSummary(id: id, name: name, subtitle: subtitle, artworkURL: art?.url, kind: .library)
+            return PlaylistSummary(id: id, name: name, subtitle: subtitle, artworkURL: art?.url, songCount: songCount, kind: .library)
         }
     }
 

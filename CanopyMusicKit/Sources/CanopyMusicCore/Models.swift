@@ -109,13 +109,43 @@ public struct PlaylistSummary: Codable, Hashable, Sendable, Identifiable {
     public var name: String
     public var subtitle: String?
     public var artworkURL: URL?
+    /// How many songs the service lists in it, when the playlist list says (Spotify); nil when
+    /// it doesn't (Apple Music library playlists count one at a time, `PlaylistSongCounts`).
+    public var songCount: Int?
     public var kind: Kind
 
-    public init(id: String, name: String, subtitle: String? = nil, artworkURL: URL? = nil, kind: Kind) {
+    public init(id: String, name: String, subtitle: String? = nil, artworkURL: URL? = nil, songCount: Int? = nil, kind: Kind) {
         self.id = id
         self.name = name
         self.subtitle = subtitle
         self.artworkURL = artworkURL
+        self.songCount = songCount
         self.kind = kind
     }
+
+    /// "24 songs", "1 song", or "No songs" for a picker row.
+    public static func countText(_ count: Int) -> String {
+        switch count {
+        case 0: "No songs"
+        case 1: "1 song"
+        default: "\(count.formatted()) songs"
+        }
+    }
+}
+
+/// Loading a playlist that has nothing to play: it's empty (or emptied since it was listed), or
+/// none of its songs can play here. Thrown before anything changes, so the party is as it was.
+public enum PlaylistLoadError: LocalizedError, Equatable {
+    case noSongs(playlist: String)
+    case noPlayableSongs(playlist: String)
+
+    /// The first sentence, for an alert's title.
+    public var headline: String {
+        switch self {
+        case .noSongs(let name): "“\(name)” has no songs."
+        case .noPlayableSongs(let name): "None of the songs in “\(name)” can play here."
+        }
+    }
+
+    public var errorDescription: String? { "\(headline) Choose another playlist." }
 }

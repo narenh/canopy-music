@@ -75,21 +75,45 @@ public struct DemoCatalog: MusicCatalog {
         }
     }
 
+    /// Song counts come with the list, as Spotify's do. `-lazyCounts` leaves them out, as Apple
+    /// Music's library list does, so rows count themselves (`songCount(of:)`). `-staleCounts`
+    /// lists "New playlist" with the songs it had before they were removed, and adds "Voice
+    /// memos", whose songs all can't play, so the pickers' start path can be tried on both.
     public func libraryPlaylists() async throws -> [PlaylistSummary] {
-        [
-            PlaylistSummary(id: "demo-party", name: "House party", subtitle: "30 songs", kind: .library),
-            PlaylistSummary(id: "demo-chill", name: "Sunday chill", subtitle: "12 songs", kind: .library),
-            PlaylistSummary(id: "demo-big", name: "Big party", subtitle: "400 songs", kind: .library),
-            PlaylistSummary(id: "demo-skips", name: "Road trip", subtitle: "34 songs, 4 can't play", kind: .library),
-        ] + DemoSavedPlaylists.all().map { saved in
-            PlaylistSummary(id: saved.id, name: saved.name, subtitle: saved.description, kind: .library)
-        } + (ProcessInfo.processInfo.arguments.contains("-manyPlaylists") ? Self.manyPlaylists : [])
+        let args = ProcessInfo.processInfo.arguments
+        let stale = args.contains("-staleCounts")
+        let playlists = [
+            PlaylistSummary(id: "demo-party", name: "House party", songCount: 30, kind: .library),
+            PlaylistSummary(id: "demo-chill", name: "Sunday chill", songCount: 12, kind: .library),
+            PlaylistSummary(id: "demo-empty", name: "New playlist", songCount: stale ? 3 : 0, kind: .library),
+            PlaylistSummary(id: "demo-big", name: "Big party", songCount: 400, kind: .library),
+            PlaylistSummary(id: "demo-skips", name: "Road trip", subtitle: "4 can't play", songCount: 34, kind: .library),
+        ] + (stale ? [PlaylistSummary(id: "demo-unplayable", name: "Voice memos", songCount: Self.unplayable.count, kind: .library)] : [])
+        + DemoSavedPlaylists.all().map { saved in
+            PlaylistSummary(id: saved.id, name: saved.name, subtitle: saved.description, songCount: saved.tracks.count, kind: .library)
+        } + (args.contains("-manyPlaylists") ? Self.manyPlaylists : [])
+        guard args.contains("-lazyCounts") else { return playlists }
+        return playlists.map { var playlist = $0; playlist.songCount = nil; return playlist }
     }
 
     /// `-manyPlaylists`: a library the size of a big real one, for the web page's picker.
     static let manyPlaylists: [PlaylistSummary] = (1...520).map { index in
         let names = ["Café", "Road trip", "Dinner", "Workout", "Sunday", "Après-ski", "Late night", "Focus"]
-        return PlaylistSummary(id: "demo-many-\(index)", name: "\(names[index % names.count]) \(index)", subtitle: "30 songs", kind: .library)
+        return PlaylistSummary(id: "demo-many-\(index)", name: "\(names[index % names.count]) \(index)", songCount: 30, kind: .library)
+    }
+
+    /// `-lazyCounts`: each count takes a moment, as a request per playlist would.
+    public func songCount(of playlist: PlaylistSummary) async throws -> Int? {
+        try await Task.sleep(for: .milliseconds(Int.random(in: 300...900)))
+        if let saved = DemoSavedPlaylists.all().first(where: { $0.id == playlist.id }) { return saved.tracks.count }
+        return switch playlist.id {
+        case "demo-empty": 0
+        case "demo-chill": 12
+        case "demo-big": 400
+        case "demo-skips": 34
+        case "demo-unplayable": Self.unplayable.count
+        default: Self.allTracks.count
+        }
     }
 
     public func searchPlaylists(_ term: String) async throws -> [PlaylistSummary] {
@@ -101,6 +125,7 @@ public struct DemoCatalog: MusicCatalog {
         return switch playlist.id {
         case "demo-chill": Array(Self.allTracks.suffix(12))
         case "demo-big": Self.bigTracks
+        case "demo-empty", "demo-unplayable": []
         default: Self.allTracks
         }
     }
@@ -116,12 +141,12 @@ public struct DemoCatalog: MusicCatalog {
     }
 
     /// "Road trip" leaves out songs as a library playlist with uploads does, so the "not on
-    /// Apple Music" note can be seen in the simulator.
+    /// Apple Music" note can be seen in the simulator. "Voice memos" (`-staleCounts`) is nothing else.
     public func loadReport(for playlist: PlaylistSummary) async -> PlaylistLoadReport? {
-        guard playlist.id == "demo-skips" else { return nil }
+        guard playlist.id == "demo-skips" || playlist.id == "demo-unplayable" else { return nil }
         var report = PlaylistLoadReport(playlistID: playlist.id)
         report.skipped = Self.unplayable
-        report.loaded = Self.allTracks.count
+        report.loaded = playlist.id == "demo-skips" ? Self.allTracks.count : 0
         report.total = report.loaded + report.skipped.count
         return report
     }

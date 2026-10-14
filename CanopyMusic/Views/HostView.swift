@@ -1033,11 +1033,17 @@ struct PlaylistPickerView: View {
     @State private var loading = false
     @State private var errorText: String?
     @State private var starting: PlaylistSummary?
+    /// Song counts the list came without (Apple Music), fetched as rows appear, and counts a
+    /// load found (an empty playlist refused).
+    @State private var counts: [String: Int] = [:]
+    /// The playlist chosen had nothing to play: said in an alert, and the picker stays open.
+    @State private var refusal: PlaylistLoadError?
 
     var body: some View {
         NavigationStack {
             List {
                 ForEach(source == .library ? filteredLibrary : catalogResults) { playlist in
+                    let count = counts[playlist.id] ?? playlist.songCount
                     Button {
                         choose(playlist)
                     } label: {
@@ -1047,8 +1053,10 @@ struct PlaylistPickerView: View {
                                 .clipShape(RoundedRectangle(cornerRadius: 6))
                             VStack(alignment: .leading) {
                                 Text(playlist.name).foregroundStyle(.primary)
-                                if let subtitle = playlist.subtitle {
-                                    Text(subtitle).font(.footnote).foregroundStyle(.secondary)
+                                // "24 songs · Updated yesterday"; no count until it's known.
+                                let details = [count.map(PlaylistSummary.countText), playlist.subtitle].compactMap { $0 }
+                                if !details.isEmpty {
+                                    Text(details.joined(separator: " · ")).font(.footnote).foregroundStyle(.secondary)
                                 }
                             }
                             Spacer()
@@ -1058,7 +1066,13 @@ struct PlaylistPickerView: View {
                     }
                     // Plain, so names and subtitles aren't tinted like buttons.
                     .buttonStyle(.plain)
-                    .disabled(starting != nil)
+                    // Empty playlists are shown, dimmed, so nobody thinks they're missing.
+                    .disabled(starting != nil || count == 0)
+                    .opacity(count == 0 ? 0.4 : 1)
+                    .task(id: playlist.id) {
+                        guard count == nil, let found = await PlaylistSongCounts.shared.count(of: playlist, in: model.session.catalog) else { return }
+                        counts[playlist.id] = found
+                    }
                 }
             }
             // Our own field rather than `.searchable`, whose spacing can't be adjusted.
@@ -1089,8 +1103,24 @@ struct PlaylistPickerView: View {
                 }
                 ToolbarItem(placement: .cancellationAction) { Button("Cancel") { dismiss() }.tint(.primary) }
             }
-            .task { await loadLibrary() }
+            .task {
+                await loadLibrary()
+                #if DEBUG
+                // `-autoPick <id>` (with `-showPicker`): taps that playlist's row 2 s in, as the
+                // simulator can't be tapped from here (`-staleCounts`' "demo-empty" is refused).
+                let args = ProcessInfo.processInfo.arguments
+                if let i = args.firstIndex(of: "-autoPick"), i + 1 < args.count, let playlist = library.first(where: { $0.id == args[i + 1] }) {
+                    try? await Task.sleep(for: .seconds(2))
+                    choose(playlist)
+                }
+                #endif
+            }
             .task(id: "\(source)-\(query)") { await searchCatalog() }
+            .alert(refusal?.headline ?? "", isPresented: Binding(get: { refusal != nil }, set: { if !$0 { refusal = nil } })) {
+                Button("OK", role: .cancel) {}
+            } message: {
+                Text("Choose another playlist.")
+            }
         }
     }
 
@@ -1125,9 +1155,12 @@ struct PlaylistPickerView: View {
     private func choose(_ playlist: PlaylistSummary) {
         starting = playlist
         Task {
-            await model.load(playlist)
+            let refused = await model.load(playlist)
             starting = nil
-            dismiss()
+            guard let refused else { return dismiss() }
+            // Nothing changed: say why and stay, with the row dimmed if it's empty.
+            if case .noSongs = refused { counts[playlist.id] = 0 }
+            refusal = refused
         }
     }
 }

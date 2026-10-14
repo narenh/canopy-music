@@ -6,11 +6,21 @@ import Foundation
 // Runs the phone web app against the demo catalog on this Mac, for working on the web UI
 // without an iPad. `swift run CanopyMusicDevServer` then open http://localhost:8080.
 
+// `-hostKey <key>`: open http://localhost:8080/?host=<key> for the host pages (the pickers).
+// `-tvSetup`: a new Apple TV zone, before its first host has chosen a playlist (the setup sheet).
+// The demo catalog's flags work here too (`-lazyCounts`, `-staleCounts`, `-manyPlaylists`).
+let args = ProcessInfo.processInfo.arguments
 let session = PartySession(catalog: DemoCatalog(), engine: DemoPlaybackEngine())
-try await session.load(playlist: PlaylistSummary(id: "demo-party", name: "House party", kind: .library))
-try await session.play()
-session.add(DemoCatalog.track(9), by: Requester(name: "Jamie", clientID: "demo-jamie", origin: .phone))
-session.add(DemoCatalog.track(16), by: Requester(name: nil, clientID: nil, origin: .ipad))
+if let i = args.firstIndex(of: "-hostKey"), i + 1 < args.count { session.hostKey = args[i + 1] }
+if args.contains("-tvSetup") {
+    session.configureHub(kind: .tv, zoneName: "Living Room", serviceName: "Apple Music")
+    session.musicAccess = .ok
+} else {
+    try await session.load(playlist: PlaylistSummary(id: "demo-party", name: "House party", kind: .library))
+    try await session.play()
+    session.add(DemoCatalog.track(9), by: Requester(name: "Jamie", clientID: "demo-jamie", origin: .phone))
+    session.add(DemoCatalog.track(16), by: Requester(name: nil, clientID: nil, origin: .ipad))
+}
 
 guard let (server, task) = await PartyServer.start(session: session) else { fatalError("No port available") }
 let hostname = FriendlyHostname(name: "music-dev")

@@ -576,10 +576,18 @@ public final class PartySession {
     ///   only the old playlist's songs are replaced (`QueueState.replacePlaylist`). A next song
     ///   already handed to a player that can't take it back (Spotify) stays first, locked; an
     ///   engine that can swap its staged song (Apple Music) is restaged with the new next song.
+    ///
+    /// A playlist with nothing to play (empty, or none of its songs can play here) throws a
+    /// `PlaylistLoadError` and changes nothing: no half-started party, and a live one plays on.
     public func load(playlist: PlaylistSummary, shuffled: Bool = false) async throws {
         guard remote == nil else { return }
         let tracks = try await catalog.tracks(in: playlist)
         let skipped = await catalog.loadReport(for: playlist)?.skipped ?? []
+        // The pickers show the count it was found to have (and an empty one dimmed).
+        await PlaylistSongCounts.shared.record(tracks.count + skipped.count, for: playlist.id)
+        guard !tracks.isEmpty else {
+            throw skipped.isEmpty ? PlaylistLoadError.noSongs(playlist: playlist.name) : .noPlayableSongs(playlist: playlist.name)
+        }
         if isUnderWay {
             // Not a new session: nothing in flight (a song change, follow mode's staging) is
             // called off, and `mutate` restages behind the current song.

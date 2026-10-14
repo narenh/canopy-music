@@ -95,6 +95,7 @@ public struct SonosFakeCatalog: MusicCatalog {
         try await demo.tracks(in: playlist).map(sonosTrack)
     }
 
+    public func songCount(of playlist: PlaylistSummary) async throws -> Int? { try await demo.songCount(of: playlist) }
     public func loadReport(for playlist: PlaylistSummary) async -> PlaylistLoadReport? { await demo.loadReport(for: playlist) }
     public var playlistDestination: String? { demo.playlistDestination }
 

@@ -615,12 +615,18 @@ final class AppModel {
 
     // MARK: Party
 
-    func load(_ playlist: PlaylistSummary) async {
+    /// Loads the base playlist. One with nothing to play changes nothing and is returned, for
+    /// the picker to say so and stay open; other failures show the error alert.
+    @discardableResult
+    func load(_ playlist: PlaylistSummary) async -> PlaylistLoadError? {
         do {
             try await session.load(playlist: playlist)
+        } catch let refusal as PlaylistLoadError {
+            return refusal
         } catch {
             errorMessage = "Couldn't load “\(playlist.name)”. \(error.localizedDescription)"
         }
+        return nil
     }
 
     func play() async {

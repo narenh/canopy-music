@@ -161,6 +161,35 @@ struct AppleMusicCatalog: MusicCatalog {
         return songs.map(QueueTrack.init)
     }
 
+    /// The library playlist list has no track count (nor does any library playlist attribute),
+    /// and its tracks relationship comes only with one playlist by id, so each is counted on its
+    /// own, as its row appears (`PlaylistSongCounts`): its tracks, without their catalog songs,
+    /// 100 a page. A `meta.total` answers at once if the API sends one; an empty playlist's tracks
+    /// are a 404. Catalog playlists (search results) aren't counted: they aren't empty.
+    func songCount(of playlist: PlaylistSummary) async throws -> Int? {
+        guard playlist.kind == .library else { return nil }
+        struct Entry: Decodable {}
+        var count = 0
+        var path: String? = "/v1/me/library/playlists/\(playlist.id)/tracks?limit=100"
+        while let next = path {
+            let page: APIPage<Entry>
+            do {
+                page = try await fetch(next)
+            } catch where count == 0 && Self.isNotFound(error) {
+                return 0
+            }
+            if let total = page.meta?.total { return total }
+            count += page.data.count
+            path = page.next
+        }
+        return count
+    }
+
+    /// Apple Music's answer for the tracks of a library playlist that has none.
+    private static func isNotFound(_ error: Error) -> Bool {
+        (error as? MusicDataRequest.Error)?.status == 404
+    }
+
     // MARK: Playlist loading
 
     private func catalogPlaylistSongs(id: String) async throws -> [Song] {
@@ -180,7 +209,13 @@ struct AppleMusicCatalog: MusicCatalog {
         var resources: [LibrarySongResource] = []
         var path: String? = "/v1/me/library/playlists/\(id)/tracks?limit=100&include=catalog"
         while let next = path {
-            let page: APIPage<LibrarySongResource> = try await fetch(next)
+            let page: APIPage<LibrarySongResource>
+            do {
+                page = try await fetch(next)
+            } catch where resources.isEmpty && Self.isNotFound(error) {
+                // An empty playlist has no tracks to find: it loads empty (`PlaylistLoadError`).
+                break
+            }
             resources += page.data
             path = page.next
         }

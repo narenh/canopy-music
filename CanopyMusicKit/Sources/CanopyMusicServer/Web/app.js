@@ -766,8 +766,14 @@
       headers: body ? { "Content-Type": "application/json" } : {},
       body: body ? JSON.stringify(body) : undefined,
     });
-    // The hub's reason (debug hubs describe the error in full), for the debug log.
-    if (!res.ok) throw new Error(`${path} ${res.status} ${(await res.text().catch(() => "")).slice(0, 600)}`);
+    // The hub's reason (debug hubs describe the error in full), for the debug log. A refusal the
+    // page can show (409, {error}) comes with it as `reason`.
+    if (!res.ok) {
+      const text = await res.text().catch(() => "");
+      const error = new Error(`${path} ${res.status} ${text.slice(0, 600)}`);
+      if (res.status === 409) { try { error.reason = JSON.parse(text); } catch {} }
+      throw error;
+    }
     const text = await res.text();
     return text ? JSON.parse(text) : null;
   }
@@ -1174,6 +1180,20 @@
   // playlists, shown below. Rows are built once per load; filtering only hides them.
   const fold = (text) => (text || "").normalize("NFD").replace(/\p{Diacritic}/gu, "").toLowerCase();
 
+  /** Song counts the playlist list came without (Apple Music), fetched as rows scroll into view,
+   * and counts the hub found on a load (an empty playlist refused). By playlist ID. */
+  const songCounts = new Map();
+  const countText = (n) => n === 0 ? "No songs" : n === 1 ? "1 song" : `${n.toLocaleString()} songs`;
+
+  /** "24 songs · Updated yesterday" (no count until it's known); an empty playlist is dimmed and
+   * can't be picked, but stays listed so nobody thinks it's missing. */
+  function showCount(li, p) {
+    const count = songCounts.get(p.id) ?? p.songCount;
+    li.querySelector(".row-sub").textContent = [count == null ? null : countText(count), p.subtitle].filter(Boolean).join(" · ");
+    li.classList.toggle("no-songs", count === 0);
+    li.setAttribute("aria-disabled", count === 0 ? "true" : "false");
+  }
+
   function playlistRow(p, onPick) {
     const li = document.createElement("li");
     li.className = "playlist-row";
@@ -1186,16 +1206,53 @@
     title.textContent = p.name;
     const sub = document.createElement("p");
     sub.className = "row-sub";
-    sub.textContent = p.subtitle || "";
     meta.append(title, sub);
     li.append(art, meta);
-    li.addEventListener("click", () => onPick(p));
+    li.playlist = p;
+    showCount(li, p);
+    li.addEventListener("click", () => { if (!li.classList.contains("no-songs")) onPick(p); });
     return li;
+  }
+
+  /** Counts library rows that came without one as they scroll into view, a batch at a time
+   * (`/api/host/playlists/counts`; the hub counts a few playlists at once). */
+  function rowCounter(scroll) {
+    const waiting = new Map();
+    let timer = null;
+    const observer = new IntersectionObserver((entries) => {
+      for (const entry of entries) {
+        if (!entry.isIntersecting) continue;
+        observer.unobserve(entry.target);
+        waiting.set(entry.target.dataset.id, entry.target);
+      }
+      clearTimeout(timer);
+      if (waiting.size) timer = setTimeout(flush, 120);
+    }, { root: scroll, rootMargin: "200px 0px" });
+    async function flush() {
+      const rows = [...waiting.values()].slice(0, 20);
+      for (const li of rows) waiting.delete(li.dataset.id);
+      try {
+        const counts = await api(`/api/host/playlists/counts?${keyQuery()}&ids=${rows.map((li) => encodeURIComponent(li.dataset.id)).join(",")}`);
+        for (const li of rows) {
+          if (counts[li.dataset.id] == null) continue;
+          songCounts.set(li.dataset.id, counts[li.dataset.id]);
+          showCount(li, li.playlist);
+        }
+      } catch {}
+      if (waiting.size) flush();
+    }
+    return {
+      watch(li) {
+        if (li.playlist.kind === "library" && li.playlist.songCount == null && !songCounts.has(li.dataset.id)) observer.observe(li);
+      },
+      reset() { observer.disconnect(); waiting.clear(); clearTimeout(timer); },
+    };
   }
 
   function playlistPicker(prefix, listId, emptyId, onPick) {
     const list = $(listId), empty = $(emptyId), search = $(`${prefix}-search`);
     const catalogList = $(`${prefix}-catalog`), catalogHead = $(`${prefix}-catalog-head`);
+    const counter = rowCounter($(`${prefix}-scroll`));
     let rows = [], loaded = false, timer = null, generation = 0;
 
     function showEmpty(text, spinning = false) {
@@ -1257,6 +1314,7 @@
               return li;
             });
             list.append(...rows);
+            for (const li of rows) counter.watch(li);
             loaded = true;
           }
           filter();
@@ -1266,11 +1324,18 @@
       },
       /** Forgets the loaded playlists (the hub changed service): the next open loads them again. */
       reset() {
+        counter.reset();
         loaded = false;
         rows = [];
         list.innerHTML = "";
         catalogList.innerHTML = "";
         catalogHead.hidden = true;
+      },
+      /** The hub refused `p` (nothing to play in it): unchecked, and dimmed if it's empty. */
+      refused(p, reason) {
+        if (reason.empty) songCounts.set(p.id, 0);
+        for (const li of [...rows, ...catalogList.children]) if (li.dataset.id === p.id) showCount(li, li.playlist);
+        this.select(null);
       },
       /** Checks the chosen row (none for null). */
       select(id) {
@@ -1340,7 +1405,16 @@
       });
       sheet.hidden = true;
       toastSkipped(reply);
-    } catch { toast("Couldn't change the playlist"); }
+    } catch (error) {
+      // Nothing to play in it (and nothing changed): say so, and stay to choose another.
+      if (error.reason) {
+        changePick = null;
+        changePicker.refused(p, error.reason);
+        toast(error.reason.error, 5000);
+      } else {
+        toast("Couldn't change the playlist");
+      }
+    }
     finally { pickerBusy("playlists", button, false, "Use this playlist"); button.disabled = !changePick; }
   });
   $("settings-playlist-change").addEventListener("click", () => {
@@ -2424,6 +2498,14 @@
     } catch (error) {
       debugLog(`setup start failed: ${error.message}`);
       setupBusy(false);
+      // Nothing to play in it, and nothing started: say so, and stay to choose another.
+      if (error.reason) {
+        setupPicker.refused(setupPick, error.reason);
+        setupPick = null;
+        $("setup-start").disabled = true;
+        toast(error.reason.error, 5000);
+        return;
+      }
       toast("Couldn't start. Try again.");
       // In case it's Apple Music: if the TV can't play it now, the zone page comes back to say why.
       api("/api/host/music-check", { key: hostKey }).catch(() => {});

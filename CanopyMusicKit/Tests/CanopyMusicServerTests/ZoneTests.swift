@@ -407,6 +407,30 @@ struct HostSettingsTests {
         #expect(hub.state.upNext.prefix(5).map(\.track.id) == Array(original.filter { $0 != playing.track.id }.prefix(5)))
     }
 
+    /// Starting an empty playlist from a web picker (a TV's setup) is refused with the sentence
+    /// to show, and nothing starts; the counts endpoint then has it as empty.
+    @Test func anEmptyPlaylistIsRefused() async throws {
+        let hub = PartySession(catalog: DemoCatalog(), engine: DemoPlaybackEngine())
+        hub.hostKey = "secret"
+        let (server, task) = try #require(await PartyServer.start(session: hub, ports: [18841]))
+        defer { task.cancel(); Task { await server.stop() } }
+        // Listed with songs, as if they were removed since.
+        let empty = PlaylistSummary(id: "demo-empty", name: "New playlist", songCount: 3, kind: .library)
+        let json = try #require(try JSONSerialization.jsonObject(with: JSONEncoder.api.encode(empty)))
+
+        let (code, data) = try await post(18841, "/api/host/playlist", ["key": "secret", "playlist": json, "play": true])
+        #expect(code == 409)
+        let refused = try JSONDecoder().decode(PlaylistRefused.self, from: data)
+        #expect(refused.error == "“New playlist” has no songs. Choose another playlist.")
+        #expect(refused.empty)
+        #expect(hub.state.playlistName == nil)
+        #expect(hub.state.current == nil)
+        #expect(!hub.isPlaying)
+
+        let counts = try await URLSession.shared.data(from: URL(string: "http://127.0.0.1:18841/api/host/playlists/counts?key=secret&ids=demo-empty,demo-chill")!).0
+        #expect(try JSONDecoder().decode([String: Int].self, from: counts) == ["demo-empty": 0, "demo-chill": 12])
+    }
+
     @Test func localNamePreview() async throws {
         let hub = PartySession(catalog: DemoCatalog(), engine: DemoPlaybackEngine())
         let (server, task) = try #require(await PartyServer.start(session: hub, ports: [18800]))

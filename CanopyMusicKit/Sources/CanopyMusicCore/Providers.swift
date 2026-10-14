@@ -6,6 +6,10 @@ public protocol MusicCatalog: Sendable {
     func libraryPlaylists() async throws -> [PlaylistSummary]
     func searchPlaylists(_ term: String) async throws -> [PlaylistSummary]
     func tracks(in playlist: PlaylistSummary) async throws -> [QueueTrack]
+    /// How many songs `playlist` has, for a list that doesn't say (`PlaylistSummary.songCount`
+    /// nil): one request or a few, cheaper than `tracks(in:)`. nil when it can't be counted here.
+    /// Call it through `PlaylistSongCounts`, which remembers counts and limits how many run at once.
+    func songCount(of playlist: PlaylistSummary) async throws -> Int?
     /// How the latest `tracks(in:)` for `playlist` went, including the songs it left out because
     /// they can't be played. nil when there's nothing to report.
     func loadReport(for playlist: PlaylistSummary) async -> PlaylistLoadReport?
@@ -21,6 +25,7 @@ public protocol MusicCatalog: Sendable {
 
 public extension MusicCatalog {
     var motionArtwork: MotionArtworkLookup? { nil }
+    func songCount(of playlist: PlaylistSummary) async throws -> Int? { playlist.songCount }
     func loadReport(for playlist: PlaylistSummary) async -> PlaylistLoadReport? { nil }
     var playlistDestination: String? { nil }
     func savePlaylist(name: String, description: String, tracks: [QueueTrack]) async throws {

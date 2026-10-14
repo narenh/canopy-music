@@ -211,6 +211,25 @@ public final class PartyServer: Sendable {
             let term = request.query["q"]?.trimmingCharacters(in: .whitespaces) ?? ""
             return term.isEmpty ? [] : try await catalog.searchPlaylists(String(term.prefix(100)))
         }
+        // Counts for the library rows the list came without (Apple Music), as they scroll into
+        // view: `ids` comma-separated, a few at a time (`PlaylistSongCounts`). Only the counts
+        // that are known come back, as {id: count}.
+        await server.appendRoute("GET /api/host/playlists/counts") { request in
+            guard await session.isHost(key: request.query["key"]) else { return HTTPResponse(statusCode: .forbidden) }
+            let ids = (request.query["ids"] ?? "").split(separator: ",").prefix(50).map(String.init)
+            let catalog = await session.catalog
+            let counts = await withTaskGroup(of: (String, Int?).self) { group in
+                for id in ids {
+                    group.addTask {
+                        (id, await PlaylistSongCounts.shared.count(of: PlaylistSummary(id: id, name: "", kind: .library), in: catalog))
+                    }
+                }
+                var counts: [String: Int] = [:]
+                for await (id, count) in group { counts[id] = count }
+                return counts
+            }
+            return try .json(counts)
+        }
 
         await server.appendRoute("POST /api/host/playlist") { request in
             let body = try JSONDecoder.api.decode(PlaylistBody.self, from: await request.bodyData)
@@ -221,6 +240,11 @@ public final class PartyServer: Sendable {
                 // the new playlist follows it (`PartySession.load`), so there's nothing to start.
                 try await session.load(playlist: body.playlist, shuffled: body.shuffle == true)
                 if body.play == true, await !session.isPlaying { try await session.play() }
+            } catch let error as PlaylistLoadError {
+                // Nothing to play in it, and nothing changed: the page says so and its picker
+                // stays open, the row dimmed if it's empty.
+                return HTTPResponse(statusCode: .conflict, headers: [.contentType: "application/json"],
+                                    body: (try? JSONEncoder().encode(PlaylistRefused(error))) ?? Data())
             } catch {
                 return .serviceFailed(error)
             }
@@ -571,6 +595,18 @@ struct PlaylistBody: Decodable {
 struct PlaylistLoaded: Codable {
     var skippedOnLoad: Int
     var skippedTitles: [String]
+}
+
+/// A playlist with nothing to play (`PlaylistLoadError`): the sentence to show, and whether
+/// it's empty (its row is then dimmed) rather than all unplayable.
+struct PlaylistRefused: Codable {
+    var error: String
+    var empty: Bool
+
+    init(_ refusal: PlaylistLoadError) {
+        error = refusal.errorDescription ?? ""
+        if case .noSongs = refusal { empty = true } else { empty = false }
+    }
 }
 
 struct HostDetails: Encodable {

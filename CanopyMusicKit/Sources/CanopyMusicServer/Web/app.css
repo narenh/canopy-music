@@ -230,6 +230,8 @@ html.sheet-open, html.sheet-open body { overflow: hidden; }
 .playlist-row p { margin: 0; }
 .playlist-row .row-sub { font-size: 13px; color: var(--text-2); }
 .playlist-row.selected { background: var(--surface-2); }
+/* Empty playlists are listed, dimmed, so nobody thinks they're missing. */
+.playlist-row.no-songs { opacity: .4; cursor: default; }
 .playlist-row .check { margin-left: auto; color: var(--accent); }
 .primary-btn.wide { width: 100%; padding: 14px; font-size: 16px; display: flex; align-items: center; justify-content: center; gap: 10px; }
 /* Solid even when disabled, so it reads clearly. */

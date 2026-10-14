@@ -315,6 +315,8 @@ final class TVModel {
         session.onSongStarted = { [weak self] in
             guard let self else { return }
             self.zoneRecord.songStarted(hostJoined: self.hostJoined)
+            // On Sonos, the rooms are playing it now ("Playing Canopy Music").
+            self.pushSonosSetup()
         }
         role = .hub
         // Zones on the account (Spotify plays one stream per account).
@@ -345,7 +347,7 @@ final class TVModel {
             #if DEBUG
             // Spotify's engine can't replace a staged song, so neither does this one.
             if spotify.isFake {
-                let catalog: any MusicCatalog = Self.isSonosFake ? SonosFakeCatalog() : DemoCatalog()
+                let catalog: any MusicCatalog = Self.isSonosFake ? SonosFakeCatalog(service: .spotify) : DemoCatalog()
                 return (catalog, sonosEngine ?? DemoPlaybackEngine(canReplaceStaged: false), "Spotify")
             }
             #endif
@@ -397,8 +399,7 @@ final class TVModel {
     /// Tells the host's page (hosts' snapshots) about the Sonos rooms.
     private func pushSonosSetup() {
         guard role == .hub else { return }
-        session.sonosSetup = sonos.setup()
-    }
+        session.sonosSetup = sonos.setup()    }
 
     /// The service's readiness for the host's setup page: Apple Music access, or Spotify's
     /// sign-in and devices (read again, at most every 3 s).
@@ -680,7 +681,14 @@ final class TVModel {
             self.friendlyURL = server.url(host: name)
             self.session.guestAddress = name + (server.port == 80 ? "" : ":\(server.port)")
         }
-        hostname.register(address: ip)
+        #if DEBUG
+        // `-noLocalName`: no `.local` name, so a page opened on 127.0.0.1 (the simulator's server
+        // from the Mac) stays there rather than moving to the friendly address.
+        let registers = !ProcessInfo.processInfo.arguments.contains("-noLocalName")
+        #else
+        let registers = true
+        #endif
+        if registers { hostname.register(address: ip) }
         session.lanAddress = ip + (server.port == 80 ? "" : ":\(server.port)")
         #if DEBUG
         print("[tv] host \(hostURL?.absoluteString ?? "-")")

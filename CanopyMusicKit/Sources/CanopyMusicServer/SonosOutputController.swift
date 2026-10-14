@@ -299,7 +299,8 @@ public final class SonosOutputController {
     /// Reads volumes, groups and what each room is playing (while a speaker list shows). One at a
     /// time: a reading asked for while one is under way is skipped.
     public func readRooms() async {
-        guard !isReading else { return }
+        // What's known now still goes out (the music may have started since the last reading).
+        guard !isReading else { return changed() }
         isReading = true
         defer { isReading = false }
         await household.readRooms(ourCoordinatorID: isLive ? engine?.target.coordinator.id : nil)

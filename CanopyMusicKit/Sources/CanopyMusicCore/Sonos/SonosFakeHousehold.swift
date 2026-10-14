@@ -40,35 +40,39 @@ public enum SonosFakeHousehold {
     }()
 }
 
-/// The demo catalog with ids Sonos can carry (`SonosTrackReference` takes only Apple Music
-/// catalog ids, all digits, and Spotify's letters-and-digits ids): "demo-12" is "2000000012".
-/// For a simulator hub playing through the fake household (`-sonosFake`), which has no real
-/// catalog.
+/// The demo catalog with ids as the service's own catalog gives them, so Sonos can carry them
+/// and read them back: "demo-12" is "2000000012" (Apple Music: catalog ids are all digits) or
+/// "spotify:track:2000000012". For a simulator hub playing through the fake household
+/// (`-sonosFake`), which has no real catalog.
 public struct SonosFakeCatalog: MusicCatalog {
     private let demo = DemoCatalog()
+    private let service: SonosMusicService
 
-    public init() {}
-
-    static func sonosID(_ id: String) -> String {
-        guard id.hasPrefix("demo-"), let number = Int(id.split(separator: "-").last ?? "") else { return id }
-        return String(2_000_000_000 + number)
+    public init(service: SonosMusicService = .appleMusic) {
+        self.service = service
     }
 
-    static func sonosTrack(_ track: QueueTrack) -> QueueTrack {
+    func sonosID(_ id: String) -> String {
+        guard id.hasPrefix("demo-"), let number = Int(id.split(separator: "-").last ?? "") else { return id }
+        let digits = String(2_000_000_000 + number)
+        return service == .spotify ? "spotify:track:\(digits)" : digits
+    }
+
+    func sonosTrack(_ track: QueueTrack) -> QueueTrack {
         var track = track
         track.id = sonosID(track.id)
         return track
     }
 
     public func searchSongs(_ term: String) async throws -> [QueueTrack] {
-        try await demo.searchSongs(term).map(Self.sonosTrack)
+        try await demo.searchSongs(term).map(sonosTrack)
     }
 
     public func libraryPlaylists() async throws -> [PlaylistSummary] { try await demo.libraryPlaylists() }
     public func searchPlaylists(_ term: String) async throws -> [PlaylistSummary] { try await demo.searchPlaylists(term) }
 
     public func tracks(in playlist: PlaylistSummary) async throws -> [QueueTrack] {
-        try await demo.tracks(in: playlist).map(Self.sonosTrack)
+        try await demo.tracks(in: playlist).map(sonosTrack)
     }
 
     public func loadReport(for playlist: PlaylistSummary) async -> PlaylistLoadReport? { await demo.loadReport(for: playlist) }

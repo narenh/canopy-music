@@ -279,7 +279,7 @@
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 5;
+				CURRENT_PROJECT_VERSION = 6;
 				DEVELOPMENT_TEAM = UC3Y84QJ83;
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
@@ -313,12 +313,12 @@
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 5;
+				CURRENT_PROJECT_VERSION = 6;
 				DEVELOPMENT_TEAM = UC3Y84QJ83;
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_FILE = "CanopyMusic-Info.plist";
-				INFOPLIST_KEY_CFBundleDisplayName = "Canopy Music d";
+				INFOPLIST_KEY_CFBundleDisplayName = "Canopy Music";
 				INFOPLIST_KEY_ITSAppUsesNonExemptEncryption = NO;
 				INFOPLIST_KEY_NSAppleMusicUsageDescription = "Canopy Music plays your Apple Music playlists and lets guests search Apple Music to queue songs.";
 				INFOPLIST_KEY_NSLocalNetworkUsageDescription = "Canopy Music runs a small local web server so guests on your Wi‑Fi can queue songs, and finds Sonos speakers to play on.";
@@ -383,7 +383,7 @@
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_FILE = "CanopyMusicTV-Info.plist";
-				INFOPLIST_KEY_CFBundleDisplayName = "Canopy Music d";
+				INFOPLIST_KEY_CFBundleDisplayName = "Canopy Music";
 				INFOPLIST_KEY_ITSAppUsesNonExemptEncryption = NO;
 				INFOPLIST_KEY_NSAppleMusicUsageDescription = "Canopy Music plays your Apple Music playlists and lets guests search Apple Music to queue songs.";
 				INFOPLIST_KEY_NSLocalNetworkUsageDescription = "Canopy Music finds other Canopy Music devices and Sonos speakers to play on, and runs a small local web server so guests on your Wi‑Fi can queue songs.";

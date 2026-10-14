@@ -1969,6 +1969,11 @@
   const average = (values) => Math.round(values.reduce((a, b) => a + b, 0) / values.length);
   const roomSlider = (id) => [...$("speakers-rooms").children].find((li) => li.dataset.id === id)?.querySelector("input");
 
+  /** The group's volume, twice: the volume row's slider and the same one atop Devices. */
+  const masterSliders = [$("master-volume"), $("devices-volume")];
+  $("devices-volume-quiet").innerHTML = outputIcons.quiet;
+  $("devices-volume-loud").innerHTML = outputIcons.loud;
+
   /** The volume row: under the transport (so for hosts, as it is), while the zone plays through
    * Sonos. The slider is the group's volume, shown as the ticked rooms' average. */
   function renderVolumeBar() {
@@ -1976,9 +1981,10 @@
     $("volume-bar").hidden = !shown;
     if (!shown) { $("devices-modal").hidden = true; return; }
     const volumes = tickedRooms().map((r) => r.volume).filter((v) => v != null);
-    const master = $("master-volume");
-    master.disabled = !volumes.length && !sliderHeld(master);
-    if (!sliderHeld(master)) showVolume(master, volumes.length ? average(volumes) : 0);
+    for (const master of masterSliders) {
+      master.disabled = !volumes.length && !sliderHeld(master);
+      if (!sliderHeld(master)) showVolume(master, volumes.length ? average(volumes) : 0);
+    }
     const on = crossfadeWanted ?? snap.crossfade === true;
     $("crossfade-btn").setAttribute("aria-pressed", String(on));
     if (!$("devices-modal").hidden) renderSpeakers();
@@ -1986,14 +1992,20 @@
   }
 
   // The group's volume: Sonos snapshots each room's volume as the drag starts, then the group
-  // moves, keeping their balance. The rooms' sliders (in Devices) show it at once.
+  // moves, keeping their balance. The rooms' sliders (in Devices) show it at once, and so does
+  // the group's other slider.
   let groupStart = null;
-  volumeSlider($("master-volume"), {
+  for (const master of masterSliders) volumeSlider(master, {
     begin() {
       groupStart = new Map(tickedRooms().filter((r) => r.volume != null).map((r) => [r.id, r.volume]));
       api("/api/host/sonos/volume", { key: hostKey, begin: true }).catch(() => {});
     },
     move(value) {
+      for (const other of masterSliders) {
+        if (other === master) continue;
+        holdSlider(other);
+        showVolume(other, value);
+      }
       if (!groupStart || !groupStart.size) return;
       const base = average([...groupStart.values()]);
       for (const [id, start] of groupStart) {
@@ -2006,17 +2018,18 @@
     send: (value) => sendVolume(null, value),
   });
 
-  /** A room's slider moved: the group's shows the new average at once. */
+  /** A room's slider moved: the group's show the new average at once. */
   function masterFollowsRooms() {
-    const master = $("master-volume");
-    if (master.classList.contains("dragging")) return;
+    if (masterSliders.some((master) => master.classList.contains("dragging"))) return;
     const values = tickedRooms().map((r) => {
       const slider = roomSlider(r.id);
       return slider && sliderHeld(slider) ? Number(slider.value) : r.volume;
     }).filter((v) => v != null);
     if (!values.length) return;
-    holdSlider(master);
-    showVolume(master, average(values));
+    for (const master of masterSliders) {
+      holdSlider(master);
+      showVolume(master, average(values));
+    }
   }
 
   // Crossfade: the hub's own setting (on Sonos, Sonos's crossfade). The button shows what was

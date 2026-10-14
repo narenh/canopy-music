@@ -289,10 +289,14 @@
 <!-- Host, from the party page's Devices button while the zone plays through Sonos: its rooms,
      ticked to play there (they join and leave without the song restarting; the last one stays),
      each with its status line and, while ticked, its volume. The iPad party screen's Speakers
-     panel. -->
+     panel. Above the rooms, the group's volume: the volume row's slider again, kept in step. -->
 <div id="devices-modal" class="modal" hidden>
   <div class="modal-card devices-card">
     <div class="card-head"><h2>Devices</h2><button type="button" class="close-btn" id="devices-close" aria-label="Close"><span><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6l12 12M18 6 6 18"/></svg></span></button></div>
+    <div class="devices-volume">
+      <div class="devices-volume-label" id="devices-volume-label">Volume</div>
+      <div class="volume-row"><span class="volume-icon" id="devices-volume-quiet"></span><input type="range" class="volume" id="devices-volume" min="0" max="100" step="1" aria-labelledby="devices-volume-label"><span class="volume-icon" id="devices-volume-loud"></span></div>
+    </div>
     <ul class="output-list speakers" id="speakers-rooms"></ul>
   </div>
 </div>

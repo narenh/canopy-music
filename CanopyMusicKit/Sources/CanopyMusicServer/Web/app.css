@@ -394,6 +394,10 @@ html.sheet-open, html.sheet-open body { overflow: hidden; }
 .devices-card .card-head { margin-bottom: 14px; }
 .modal-card .output-list { background: var(--surface); }
 .speaker-head { list-style: none; margin: 0; padding: 0; }
+/* Devices' group volume, above the rooms (the iPad panel's All Speakers): the row's slider again. */
+.devices-volume { background: var(--surface); border-radius: 12px; padding: 10px 0 0; margin-bottom: 12px; }
+.devices-volume-label { padding: 0 14px; font-size: 13px; font-weight: 600; color: var(--text-2); }
+.devices-volume .volume-row { padding: 4px 14px 8px; }
 .volume-row { display: flex; align-items: center; gap: 8px; padding: 0 14px 10px 52px; }
 .volume-icon { flex: none; display: grid; place-items: center; color: var(--text-2); }
 .volume-icon svg { width: 17px; height: 17px; stroke-width: 1.8; }

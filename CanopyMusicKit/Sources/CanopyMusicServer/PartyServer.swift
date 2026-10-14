@@ -98,6 +98,16 @@ public final class PartyServer: Sendable {
             try .json(ZoneCheck(hub: await session.hubID, spotify: await session.announcedSpotifyAccount))
         }
 
+        // Another hub without an account for a service asks what this one knows of its Sonos
+        // household (`SonosAccountExchange`): service ids, serials and a song each played. Not
+        // secrets: any queue on the household shows the same. Only that household's; 501 on a
+        // hub without Sonos.
+        await server.appendRoute("GET /api/sonos/accounts") { request in
+            guard let household = request.query["household"], !household.isEmpty else { return HTTPResponse(statusCode: .badRequest) }
+            guard let handler = await session.sonosHandler else { return HTTPResponse(statusCode: .notImplemented) }
+            return try .json(await handler.sonosAccounts(household: household))
+        }
+
         // The `.local` address a zone name would get (as `address` in snapshots, before mDNS may
         // move it to `name-2`), shown under the zone name as a host types it. null if the name
         // has no letters or digits.

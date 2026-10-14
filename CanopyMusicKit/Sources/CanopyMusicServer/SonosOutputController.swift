@@ -58,6 +58,20 @@ public final class SonosOutputController {
             changed()
         }
     }
+    /// Every linked account each Sonos household has shown this hub, or another hub told it of
+    /// (`SonosAccountMemory`), kept under `knownAccountsKey`.
+    public private(set) var memory: SonosAccountMemory {
+        didSet {
+            guard memory != oldValue else { return }
+            if let defaults { defaults.set(try? JSONEncoder().encode(memory), forKey: Self.knownAccountsKey) }
+        }
+    }
+    /// Services Sonos refused to play from in a household this launch ("household|sid"): the
+    /// play with the assumed account (or the last known one) failed, so the service isn't linked
+    /// there. No account is assumed for them until one is found.
+    public private(set) var unlinked: Set<String> = [] {
+        didSet { if unlinked != oldValue { changed() } }
+    }
     /// Rooms on their way into the group (a spinner, "Joining…"), until Sonos has them in it.
     public private(set) var joining: Set<String> = [] {
         didSet { if joining != oldValue { changed() } }
@@ -84,16 +98,33 @@ public final class SonosOutputController {
     @ObservationIgnored private let defaults: UserDefaults?
     /// A host's phone asked for a reading while one was under way: it's skipped.
     @ObservationIgnored private var isReading = false
+    /// Other hubs to ask for accounts (`GET /api/sonos/accounts`): the zones on the network
+    /// other than this device's own. Set by the app.
+    @ObservationIgnored public var peers: @MainActor () -> [ZoneListing] = { [] }
+    @ObservationIgnored private let exchange: SonosAccountExchange
+    /// The last time other hubs were asked, and which (the same ones aren't asked again sooner
+    /// than `askInterval`; a new zone is asked at once).
+    @ObservationIgnored private var lastAsked: (key: String, at: Date)?
+    @ObservationIgnored private var isAsking = false
 
     public static let outputKey = "sonosOutput"
     public static let accountsKey = "sonosAccounts"
+    public static let knownAccountsKey = "sonosKnownAccounts"
+    /// The serial assumed when no account for the service has been seen. A real S2 household
+    /// played a linked service's songs with any serial (1–8) or none: with one account per
+    /// service, the serial doesn't matter. It does with several ("Whose account plays").
+    public static let assumedSerial = 1
+    static let askInterval: TimeInterval = 60
 
     /// `defaults`: where the rooms and accounts are kept (nil keeps nothing, for a simulated household).
-    public init(household: SonosHousehold, defaults: UserDefaults? = .standard) {
+    /// `exchange`: how other hubs are asked for accounts (tests replace the network).
+    public init(household: SonosHousehold, defaults: UserDefaults? = .standard, exchange: SonosAccountExchange = SonosAccountExchange()) {
         self.household = household
         self.defaults = defaults
+        self.exchange = exchange
         output = defaults?.data(forKey: Self.outputKey).flatMap { try? JSONDecoder().decode(SonosOutput.self, from: $0) }
         chosenAccounts = defaults?.data(forKey: Self.accountsKey).flatMap { try? JSONDecoder().decode([String: SonosAccount].self, from: $0) } ?? [:]
+        memory = defaults?.data(forKey: Self.knownAccountsKey).flatMap { try? JSONDecoder().decode(SonosAccountMemory.self, from: $0) } ?? SonosAccountMemory()
     }
 
     private func changed() {
@@ -102,17 +133,49 @@ public final class SonosOutputController {
 
     // MARK: What plays
 
-    /// Linked accounts found for the zone's service.
-    public var accounts: [SonosAccount] {
-        service.map(household.accounts(for:)) ?? []
+    /// The household accounts are kept under: the one discovery read, else the one this hub last read.
+    public var householdKey: String? { household.householdID ?? memory.lastHousehold }
+
+    /// Sonos's id for a service in this household (`ListAvailableServices`, else the usual one).
+    func serviceID(_ service: SonosMusicService) -> Int {
+        SonosParse.serviceID(for: service, in: household.services)
     }
 
-    /// The account that streams the zone's songs: the one chosen for the service, else the first found.
+    /// Linked accounts known for a service: found live, merged with those remembered for this
+    /// household (seen here before, or told by another hub). Live readings win.
+    public func knownAccounts(for service: SonosMusicService) -> [SonosAccount] {
+        let sid = serviceID(service)
+        return SonosParse.merge([household.accounts, memory.accounts(in: householdKey)]).filter { $0.serviceID == sid }
+    }
+
+    /// Linked accounts known for the zone's service (never the assumed one).
+    public var accounts: [SonosAccount] {
+        service.map(knownAccounts(for:)) ?? []
+    }
+
+    /// Sonos refused the service in this household this launch.
+    public func isUnlinked(_ service: SonosMusicService) -> Bool {
+        unlinked.contains(Self.unlinkedKey(householdKey, serviceID(service)))
+    }
+
+    static func unlinkedKey(_ household: String?, _ sid: Int) -> String { "\(household ?? "")|\(sid)" }
+
+    /// What streams when no account for the service is known: serial `assumedSerial`, which plays
+    /// from the household's account as long as the service is linked there. None once Sonos has
+    /// refused the service (`unlinked`): the "Add … in the Sonos app" note shows instead.
+    public var assumedAccount: SonosAccount? {
+        guard let service, !isUnlinked(service) else { return nil }
+        return SonosAccount(serviceID: serviceID(service), serialNumber: Self.assumedSerial)
+    }
+
+    /// The account that streams the zone's songs: the one chosen for the service, else the first
+    /// known, else the assumed one (so the rooms can be chosen before any account has been seen).
     public var account: SonosAccount? {
         guard let service else { return nil }
-        guard let pick = chosenAccounts[service.rawValue] else { return accounts.first }
+        let known = accounts
+        guard let pick = chosenAccounts[service.rawValue] else { return known.first ?? assumedAccount }
         // A newer reading of the same account (its token) wins.
-        return accounts.first { $0.id == pick.id } ?? pick
+        return known.first { $0.id == pick.id } ?? pick
     }
 
     /// Rooms and an account to stream from: the session plays through Sonos.
@@ -136,6 +199,7 @@ public final class SonosOutputController {
         guard let playback else { return nil }
         let engine = SonosEngine(target: playback.target, reference: playback.reference, transport: household.transport)
         engine.log = engineLog
+        engine.onAccountRejected = { [weak self] reference in self?.accountRejected(reference) }
         return engine
     }
 
@@ -305,6 +369,8 @@ public final class SonosOutputController {
         defer { isReading = false }
         await household.readRooms(ourCoordinatorID: isLive ? engine?.target.coordinator.id : nil)
         changed()
+        // While a room list shows: other hubs may know an account this one hasn't seen.
+        Task { await askPeersIfMissing() }
     }
 
     // MARK: Discovery
@@ -314,7 +380,16 @@ public final class SonosOutputController {
     /// rebuilt (`onOutputChanged`) if the account it streams from changed, unless it's playing
     /// right now.
     public func householdRefreshed() {
-        defer { changed() }
+        defer {
+            changed()
+            Task { await askPeersIfMissing() }
+        }
+        // Every account discovery shows is remembered for this household, so it stays usable
+        // once the queue (or favourite, or song playing) that showed it is gone.
+        if let id = household.householdID {
+            memory.lastHousehold = id
+            if !household.accounts.isEmpty { memory.remember(household.accounts, in: id) }
+        }
         if let output {
             var target = output.target
             target.coordinator.host = household.player(target.coordinator.id)?.host ?? target.coordinator.host
@@ -331,9 +406,59 @@ public final class SonosOutputController {
                 if let engine, !engine.isGrouped { engine.retarget(target) }
             }
         }
+        rebuildIfAccountChanged()
+    }
+
+    /// The account the session should stream from changed (found, learned, or refused): the
+    /// session is rebuilt (`onOutputChanged`), unless it's playing right now.
+    private func rebuildIfAccountChanged() {
         let current = engine.map { SonosPlayback(target: $0.target, reference: $0.reference) }
         guard current != playback, session?.isPlaying != true else { return }
         onOutputChanged?()
+    }
+
+    /// Sonos refused the first song from `reference`'s account (`SonosEngine.onAccountRejected`):
+    /// the account is forgotten (here, in what discovery holds, and as the choice). With no other
+    /// account known for the service, the service counts as not linked in this household: no
+    /// account is assumed, and the "Add … in the Sonos app" note shows (`setup().hasAccount`).
+    func accountRejected(_ reference: SonosTrackReference) {
+        let sid = serviceID(reference.service)
+        let id = SonosAccount(serviceID: sid, serialNumber: reference.accountSerial).id
+        household.forgetAccount(id)
+        if let key = householdKey { memory.forget(id, in: key) }
+        if chosenAccounts[reference.service.rawValue]?.id == id { chosenAccounts[reference.service.rawValue] = nil }
+        if knownAccounts(for: reference.service).isEmpty { unlinked.insert(Self.unlinkedKey(householdKey, sid)) }
+        engineLog?("Sonos refused account \(id): forgotten\(isUnlinked(reference.service) ? "; \(reference.service.sonosName) isn't linked here" : "")")
+        changed()
+        // After the engine's play has finished failing, not under it.
+        Task { self.rebuildIfAccountChanged() }
+    }
+
+    // MARK: Other hubs
+
+    /// No account known for the zone's service: asks the other hubs on the network
+    /// (`peers`) what they know for this household, and remembers what they say. Only with
+    /// rooms listed and the household's id read; the same hubs at most every `askInterval`
+    /// (a new zone at once); each answers within the exchange's timeout or adds nothing.
+    func askPeersIfMissing(now: Date = Date()) async {
+        guard let service, let householdID = household.householdID, !household.rooms.isEmpty,
+              knownAccounts(for: service).isEmpty, !isAsking else { return }
+        let zones = peers()
+        guard !zones.isEmpty else { return }
+        let key = "\(householdID)|\(service.rawValue)|" + zones.map(\.address).sorted().joined(separator: ",")
+        if let lastAsked, lastAsked.key == key, now.timeIntervalSince(lastAsked.at) < Self.askInterval { return }
+        lastAsked = (key, now)
+        isAsking = true
+        defer { isAsking = false }
+        let before = Set(memory.accounts(in: householdID).map(\.id))
+        for answer in await exchange.ask(zones, household: householdID) {
+            memory.remember(answer.accounts.map(\.account), in: householdID, learnedFrom: answer.zone.name)
+        }
+        let learned = memory.accounts(in: householdID).filter { !before.contains($0.id) }
+        guard !learned.isEmpty else { return }
+        engineLog?("learned from other hubs: \(learned.map(\.id).joined(separator: ", "))")
+        changed()
+        rebuildIfAccountChanged()
     }
 
     // MARK: What a host's phone sees
@@ -403,5 +528,11 @@ extension SonosOutputController: SonosOutputHandler {
 
     public func readSonosRooms() async {
         await readRooms()
+    }
+
+    /// What this hub knows of `id`'s accounts, live and remembered (never the assumed one).
+    public func sonosAccounts(household id: String) -> [SonosSharedAccount] {
+        let live = household.householdID == id ? household.accounts : []
+        return SonosParse.merge([live, memory.accounts(in: id)]).map(SonosSharedAccount.init)
     }
 }

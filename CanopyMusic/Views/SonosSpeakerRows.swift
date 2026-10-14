@@ -39,10 +39,12 @@ struct SonosPickerSection: View {
                         row(room)
                     }
                 }
+                // Only once Sonos has refused to play the service here: until then the rooms play
+                // from the household's account without it having been seen.
                 if !household.rooms.isEmpty, !hasAccount {
                     VStack(alignment: .leading, spacing: 4) {
                         StatusDot(color: .orange, text: "Add \(service.sonosName) in the Sonos app")
-                        Text("Already added? Play any \(service.sonosName) song on a Sonos speaker from the Sonos app once, so Canopy Music can find the account.")
+                        Text("Sonos couldn't play \(service.sonosName). Already added? Play any \(service.sonosName) song from the Sonos app once, so Canopy Music can find it.")
                             .font(.footnote)
                             .foregroundStyle(.secondary)
                     }

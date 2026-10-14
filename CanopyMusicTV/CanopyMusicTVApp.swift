@@ -136,6 +136,11 @@ final class TVModel {
         #endif
         sonos.household.onRefresh = { [weak self] in self?.sonos.householdRefreshed() }
         sonos.onOutputChanged = { [weak self] in self?.sonosOutputChanged() }
+        // Other hubs' zones, asked for Sonos accounts this one hasn't seen.
+        sonos.peers = { [weak self] in
+            guard let self else { return [] }
+            return self.browser.zones.filter { $0.hubID != self.deviceID }
+        }
         sonos.onChange = { [weak self] in self?.pushSonosSetup() }
         sonos.onError = { [weak self] message in self?.debugLog("sonos: \(message)") }
         // Moving the music on or off Sonos (or to another account) only while the host sets the

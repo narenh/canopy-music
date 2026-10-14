@@ -28,6 +28,15 @@ struct SonosTrackURITests {
         #expect(SonosURI.serviceAndAccount(of: uri)?.serviceID == 204)
     }
 
+    /// What a real S2 household's queue held for an Apple Music song Canopy Music played: Sonos's
+    /// own streaming form. It must still read as the same song.
+    @Test func appleMusicAsSonosKeepsIt() {
+        let uri = "x-sonosapi-hls-static:song%3a1466310464?sid=204&flags=8232&sn=3"
+        #expect(SonosURI.canopyTrackID(of: uri) == "1466310464")
+        #expect(SonosURI.serviceAndAccount(of: uri)?.serviceID == 204)
+        #expect(SonosURI.canopyTrackID(of: "x-sonosapi-hls:song%3a1466310464?sid=204&flags=8232&sn=3") == "1466310464")
+    }
+
     @Test func tracksSonosCantPlay() {
         #expect(throws: SonosTrackReference.Failure.self) { try appleMusic.uri(for: "i.ABC123") }
         #expect(throws: SonosTrackReference.Failure.self) { try appleMusic.uri(for: "") }

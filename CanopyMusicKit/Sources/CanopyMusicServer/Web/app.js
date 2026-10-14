@@ -179,6 +179,8 @@
   let musicAccess;
   /** An Apple TV hub's Spotify setup (sign-in, devices, sign-in page), also from hosts' snapshots. */
   let spotify;
+  /** The hub's Sonos rooms (where a TV zone plays, and the Speakers section), hosts' snapshots too. */
+  let sonosSetup;
   let firstRender = true;
   let dragging = null;
   let pendingSnap = null;
@@ -290,6 +292,7 @@
       musicAccess = next.musicAccess;
     }
     if (next.spotify !== undefined) spotify = next.spotify;
+    if (next.sonos !== undefined) sonosSetup = next.sonos;
     render();
     openSettingsFromLink();
     hideSplash();
@@ -1436,6 +1439,8 @@
     if (now || isSpotify() || musicAccess !== "ok") {
       api("/api/host/music-check", { key: hostKey }).catch((error) => debugLog(`music check failed: ${error.message}`));
     }
+    // The Sonos rooms too: which are busy or don't answer, and an account linked meanwhile.
+    if (sonosSetup) api("/api/host/sonos/read", { key: hostKey }).catch(() => {});
     musicCheckTimer = setTimeout(checkMusicAccess, 4000);
   }
 
@@ -1455,6 +1460,8 @@
       return { state: "problem", what: "Not connected.", todo: "" };
     }
     const who = s.displayName ? `Signed in as ${s.displayName}` : "Signed in";
+    // On Sonos rooms, Spotify Connect isn't used: the rooms' own readiness shows under Plays on.
+    if (sonosChosen()) return { state: "ok", what: "", todo: who, ready: true };
     if (!s.devices) return { state: "checking", what: `${who}.`, todo: "Looking for devices…" };
     const chosen = s.deviceID && s.devices.find((d) => d.id === s.deviceID);
     if (chosen) return { state: "ok", what: "", todo: who, ready: true };
@@ -1469,9 +1476,14 @@
 
   /** Spotify is signed in and its chosen device is there (as the TV's `SpotifySetup.isReady`). */
   const spotifyReady = (s) => !!(s && s.account === "signedIn" && s.devices && s.devices.some((d) => d.id === s.deviceID));
-  /** The zone's music can play: Apple Music ready, or Spotify signed in with its device there.
+  /** Sonos rooms are chosen as where the music plays. */
+  const sonosChosen = () => !!(sonosSetup && sonosSetup.chosen && sonosSetup.chosen.length);
+  /** Where music plays can play: Sonos rooms found with an account to stream from, or (Spotify)
+   * the chosen Connect device listed; this Apple TV always can. */
+  const outputReady = () => sonosChosen() ? !!sonosSetup.ready : !isSpotify() || spotifyReady(spotify);
+  /** The zone's music can play: Apple Music ready, or Spotify signed in, and where it plays ready.
    * Another zone on the Spotify account doesn't count here: Continue asks about it. */
-  const setupReady = () => isSpotify() ? spotifyReady(spotify) : musicAccess === "ok";
+  const setupReady = () => (isSpotify() ? spotifySignedIn(spotify) : musicAccess === "ok") && outputReady();
   document.addEventListener("visibilitychange", () => { if (!document.hidden) checkMusicAccess(true); });
 
   // What the Music bar says when the TV can't play Apple Music: what's wrong, then what to do.
@@ -1525,10 +1537,15 @@
     renderServiceOption();
     // Spotify can't play on the TV itself (its tvOS app is only a Connect device while it's on
     // screen, and Canopy Music is), so the music plays wherever the host chooses.
+    // With Sonos speakers on the Wi‑Fi, they're a choice too.
+    const sonos = sonosShown();
     $("setup-sub").textContent = spotifyZone
-      ? "Music plays from a speaker, phone, or computer with Spotify open, chosen below."
-      : "Music will play from your Apple TV. Use Control Center to change audio output.";
+      ? sonos ? "Music plays on Sonos speakers, or on a speaker, phone, or computer with Spotify open, chosen below."
+        : "Music plays from a speaker, phone, or computer with Spotify open, chosen below."
+      : sonos ? "Music plays from your Apple TV or on Sonos speakers, chosen below."
+        : "Music will play from your Apple TV. Use Control Center to change audio output.";
     renderSpotifySetup();
+    renderOutput();
     returnFromSpotify();
     const ready = setupReady();
     $("setup-continue").disabled = checkingConflict || !ready || !setupNameValid();
@@ -1624,9 +1641,7 @@
     const signedIn = spotifySignedIn(s);
     $("spotify-open").hidden = !chosen || signedIn || !!s.signingIn;
     $("spotify-change").hidden = !chosen || !signedIn;
-    $("setup-spotify-device").hidden = !chosen || !signedIn;
     if (!s) return;
-    if (chosen && signedIn) renderSpotifyDevices(s);
     $("spotify-uri").textContent = s.signInPage;
     if (!spotifyFieldsFilled) {
       spotifyFieldsFilled = true;
@@ -1649,33 +1664,6 @@
     button.querySelector(".label").textContent = signedIn ? "Sign in again" : "Sign in to Spotify";
   }
 
-  /** Where music plays: Spotify's devices now, in a native picker under the bar. */
-  function renderSpotifyDevices(s) {
-    const select = $("spotify-device"), name = $("spotify-device-name");
-    const devices = s.devices || [];
-    const chosen = devices.find((d) => d.id === s.deviceID);
-    const options = [];
-    if (!chosen) options.push({ id: "", label: s.deviceID ? `${s.deviceName || "Chosen device"} (not available)` : "Choose a device" });
-    for (const d of devices) options.push({ id: d.id, label: `${d.name} · ${deviceLabel(d.type)}` });
-    const signature = JSON.stringify(options) + s.deviceID;
-    if (select.dataset.signature !== signature) {
-      select.dataset.signature = signature;
-      select.innerHTML = "";
-      for (const o of options) {
-        const option = document.createElement("option");
-        option.value = o.id;
-        option.textContent = o.label;
-        select.append(option);
-      }
-      select.value = chosen ? chosen.id : "";
-    }
-    name.textContent = chosen ? chosen.name : s.deviceID ? `${s.deviceName || "Chosen device"} (not available)` : "Choose where music plays";
-    name.classList.toggle("placeholder", !chosen);
-    $("spotify-device-note").textContent = devices.length
-      ? "Only devices with Spotify open show here. Spotify on this Apple TV can't play while Canopy Music is on screen."
-      : "It shows here once Spotify is open on it. Spotify on this Apple TV can't play while Canopy Music is on screen.";
-  }
-
   /** Spotify's device types, as the iPad's picker says them. */
   function deviceLabel(type) {
     const labels = { tablet: "Tablet", smartphone: "Phone", computer: "Computer", tv: "TV", castvideo: "Chromecast", stb: "TV box",
@@ -1683,11 +1671,330 @@
     return labels[(type || "").toLowerCase()] || type || "Device";
   }
 
-  $("spotify-device").addEventListener("change", async (event) => {
-    const id = event.target.value;
-    if (!id) return;
-    try { await api("/api/host/spotify/device", { key: hostKey, id }); } catch { toast("Couldn't choose that device"); }
+  // MARK: Where music plays (setup), and the Speakers section (settings)
+
+  /** The Sonos section has something to show: rooms found, or rooms chosen before. */
+  const sonosShown = () => !!(sonosSetup && ((sonosSetup.rooms || []).length || sonosChosen()));
+
+  const outputIcons = {
+    speaker: '<svg viewBox="0 0 24 24" aria-hidden="true"><rect x="6" y="2.5" width="12" height="19" rx="3"/><circle cx="12" cy="14.5" r="3.2"/><path d="M12 7h.01" stroke-width="2.6"/></svg>',
+    soundbar: '<svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="3.5" width="18" height="10" rx="1.5"/><path d="M9 16.5h6"/><rect x="2" y="18" width="20" height="3.5" rx="1.5"/></svg>',
+    amp: '<svg viewBox="0 0 24 24" aria-hidden="true"><rect x="2.5" y="7" width="19" height="10" rx="2"/><circle cx="16.5" cy="12" r="2.2"/><path d="M6 11h5M6 13.5h3"/></svg>',
+    phone: '<svg viewBox="0 0 24 24" aria-hidden="true"><rect x="7" y="2.5" width="10" height="19" rx="2.5"/><path d="M11 18.5h2"/></svg>',
+    quiet: '<svg viewBox="0 0 24 24" aria-hidden="true" stroke-linejoin="round"><path d="M4 9.5h3.5L12 6v12l-4.5-3.5H4z" fill="currentColor"/></svg>',
+    loud: '<svg viewBox="0 0 24 24" aria-hidden="true" stroke-linejoin="round"><path d="M3 9.5h3.5L11 6v12l-4.5-3.5H3z" fill="currentColor"/><path d="M14.5 9.2a4 4 0 0 1 0 5.6M17.3 6.8a7.5 7.5 0 0 1 0 10.4"/></svg>',
+  };
+  /** A Sonos room's icon by its model's first word, as the iPad's (`SonosRoomIcon`). */
+  function roomIcon(model) {
+    const first = (model || "").toLowerCase().split(/[^a-z0-9]+/)[0];
+    if (["arc", "beam", "ray", "playbar", "playbase"].includes(first)) return outputIcons.soundbar;
+    if (["amp", "port", "connect"].includes(first)) return outputIcons.amp;
+    return outputIcons.speaker;
+  }
+  /** A Spotify Connect device's icon by its type. */
+  function spotifyDeviceIcon(type) {
+    switch ((type || "").toLowerCase()) {
+      case "smartphone": return outputIcons.phone;
+      case "tablet": return icons.ipad;
+      case "computer": return icons.laptop;
+      case "tv": case "castvideo": case "stb": return icons.tv;
+      case "avr": return outputIcons.amp;
+      default: return outputIcons.speaker;
+    }
+  }
+
+  /** The mark at a row's end: a check for the one chosen (devices, This Apple TV), a ring or a
+   * ticked ring for rooms (several at once), or a spinner while a room changes. */
+  function outputMark(mark) {
+    switch (mark) {
+      case "check": return `<span class="output-mark check">${icons.check}</span>`;
+      case "on": return `<span class="output-mark tick on">${icons.check}</span>`;
+      case "off": return '<span class="output-mark tick"></span>';
+      case "spin": return '<span class="output-mark"><span class="spinner"></span></span>';
+      default: return '<span class="output-mark"></span>';
+    }
+  }
+
+  /** Fills a list of output rows, rebuilt only when what it shows changed (so a tap's highlight
+   * isn't lost to a snapshot). Each row: `action`/`id` for the tap, `icon`, `name`, `sub`,
+   * `tone` ("busy" orange, "warn"), `mark`, `dim` and `disabled`. */
+  function fillOutputList(list, rows) {
+    const signature = JSON.stringify(rows);
+    if (list.dataset.signature === signature) return;
+    list.dataset.signature = signature;
+    list.innerHTML = "";
+    for (const row of rows) {
+      const li = document.createElement("li");
+      const button = document.createElement("button");
+      button.type = "button";
+      button.className = "output-row" + (row.dim ? " dim" : "");
+      button.dataset.action = row.action;
+      if (row.id) button.dataset.id = row.id;
+      button.disabled = !!row.disabled;
+      if (row.mark === "on" || row.mark === "check") button.setAttribute("aria-pressed", "true");
+      button.innerHTML = `<span class="output-icon">${row.icon}</span><span class="output-text"><span class="output-name"></span><span class="output-sub"></span></span>${outputMark(row.mark)}`;
+      button.querySelector(".output-name").textContent = row.name;
+      const sub = button.querySelector(".output-sub");
+      sub.textContent = row.sub || "";
+      sub.hidden = !row.sub;
+      if (row.tone) sub.classList.add(row.tone);
+      li.append(button);
+      list.append(li);
+    }
+  }
+
+  /** Rooms whose tick was just tapped: a spinner until the hub has answered. */
+  const roomsChanging = new Set();
+
+  /** A Sonos room's row. `live`: in the Speakers section (rooms join and leave as the music plays). */
+  function roomRow(room, s) {
+    const changing = roomsChanging.has(room.id) || room.state === "joining";
+    return {
+      action: "room", id: room.id, icon: roomIcon(room.model), name: room.name, sub: room.status,
+      tone: room.state === "busy" ? "busy" : "", mark: changing ? "spin" : room.ticked ? "on" : "off",
+      dim: room.state === "notResponding" || !s.hasAccount,
+      disabled: !s.hasAccount || room.state === "joining" || (!room.canTick && !room.ticked),
+    };
+  }
+
+  /** Under the Music bar: where music plays. Spotify's Connect devices (signed in) or This Apple
+   * TV, then the Sonos rooms, "Whose account plays" with several accounts, and what to do when
+   * the service isn't linked in the Sonos app. */
+  function renderOutput() {
+    const spotifyZone = isSpotify(), s = sonosSetup, onSonos = sonosChosen();
+    const signedIn = spotifyZone && spotifySignedIn(spotify);
+    const sonos = sonosShown();
+    $("setup-output").hidden = spotifyZone ? !signedIn : !sonos;
+    if ($("setup-output").hidden) return;
+
+    const own = [];
+    if (spotifyZone) {
+      const devices = spotify.devices || [];
+      for (const d of devices) {
+        own.push({ action: "device", id: d.id, icon: spotifyDeviceIcon(d.type), name: d.name, sub: deviceLabel(d.type),
+                   mark: !onSonos && d.id === spotify.deviceID ? "check" : "" });
+      }
+      // Chosen before, not listed now (asleep, or Spotify closed on it).
+      if (spotify.deviceID && !devices.some((d) => d.id === spotify.deviceID) && !onSonos) {
+        own.push({ action: "device", id: spotify.deviceID, icon: outputIcons.speaker, name: spotify.deviceName || "Chosen device",
+                   sub: "Not available. Open Spotify on it.", tone: "warn", mark: "check", dim: true, disabled: true });
+      }
+      if (!spotify.devices) own.push({ action: "none", icon: outputIcons.speaker, name: "Looking for devices…", dim: true, disabled: true });
+      const note = $("spotify-device-note");
+      note.hidden = false;
+      note.textContent = devices.length
+        ? "Only devices with Spotify open show here. Spotify on this Apple TV can't play while Canopy Music is on screen."
+        : "Devices show here once Spotify is open on them. Spotify on this Apple TV can't play while Canopy Music is on screen.";
+    } else {
+      own.push({ action: "tv", icon: icons.tv, name: "This Apple TV", sub: "Use Control Center to change audio output.", mark: onSonos ? "" : "check" });
+      $("spotify-device-note").hidden = true;
+    }
+    fillOutputList($("output-own"), own);
+
+    $("output-sonos").hidden = !sonos;
+    if (!sonos) return;
+    const rooms = s.rooms || [];
+    const rows = rooms.length ? rooms.map((room) => roomRow(room, s))
+      // Chosen before, not found now (asleep, unplugged, another Wi‑Fi): tapping it plays here instead.
+      : [{ action: "off", icon: outputIcons.speaker, name: s.chosenName || "Sonos", sub: s.searched ? "Not found on this Wi‑Fi" : "Looking…",
+           tone: "warn", mark: "on" }];
+    fillOutputList($("output-rooms"), rows);
+    // The service isn't linked in the Sonos app (or nothing from it has played there yet).
+    const noAccount = rooms.length > 0 && !s.hasAccount;
+    $("output-sonos-note").hidden = !noAccount;
+    if (noAccount) {
+      $("output-sonos-what").textContent = `Add ${s.service} in the Sonos app`;
+      $("output-sonos-todo").textContent = `Already added? Play any ${s.service} song on a Sonos speaker from the Sonos app once, so Canopy Music can find the account.`;
+    }
+    renderAccounts(s, onSonos);
+  }
+
+  /** "Whose account plays": with Sonos rooms chosen and several accounts for the service. */
+  function renderAccounts(s, onSonos) {
+    const accounts = s.accounts || [];
+    $("output-account").hidden = !onSonos || accounts.length < 2;
+    if ($("output-account").hidden) return;
+    const select = $("output-account-select");
+    const signature = JSON.stringify(accounts) + s.accountID;
+    if (select.dataset.signature !== signature) {
+      select.dataset.signature = signature;
+      select.innerHTML = "";
+      for (const a of accounts) {
+        const option = document.createElement("option");
+        option.value = a.id;
+        option.textContent = a.label;
+        select.append(option);
+      }
+      select.value = s.accountID || "";
+    }
+    const chosen = accounts.find((a) => a.id === s.accountID);
+    $("output-account-name").textContent = chosen ? chosen.label : "Choose an account";
+  }
+  $("output-account-select").addEventListener("change", async (event) => {
+    try { await api("/api/host/sonos/account", { key: hostKey, id: event.target.value }); } catch { toast("Couldn't choose that account"); }
   });
+
+  /** Ticks or unticks a room on the hub; the spinner shows until it answers. */
+  async function tickRoom(id, on) {
+    roomsChanging.add(id);
+    render();
+    try {
+      await api("/api/host/sonos/room", { key: hostKey, id, on });
+    } catch (error) {
+      debugLog(`sonos room failed: ${error.message}`);
+      toast(on ? "Couldn't add that speaker" : "Couldn't take that speaker out");
+    }
+    roomsChanging.delete(id);
+    render();
+  }
+
+  $("output-own").addEventListener("click", async (event) => {
+    const row = event.target.closest(".output-row");
+    if (!row || row.disabled) return;
+    if (row.dataset.action === "tv") {
+      try { await api("/api/host/sonos/off", { key: hostKey }); } catch { toast("Couldn't change where music plays"); }
+    } else if (row.dataset.action === "device") {
+      try { await api("/api/host/spotify/device", { key: hostKey, id: row.dataset.id }); } catch { toast("Couldn't choose that device"); }
+    }
+  });
+  $("output-rooms").addEventListener("click", async (event) => {
+    const row = event.target.closest(".output-row");
+    if (!row || row.disabled) return;
+    if (row.dataset.action === "off") {
+      try { await api("/api/host/sonos/off", { key: hostKey }); } catch { toast("Couldn't change where music plays"); }
+      return;
+    }
+    const room = sonosSetup && (sonosSetup.rooms || []).find((r) => r.id === row.dataset.id);
+    if (room && !roomsChanging.has(room.id)) tickRoom(room.id, !room.ticked);
+  });
+
+  // MARK: Settings › Speakers
+
+  /** Sends the latest value at most every 150 ms while a slider moves, and the last one on release. */
+  function throttle(send, interval = 150) {
+    let last = 0, timer = null, pending = null;
+    return {
+      submit(value) {
+        const now = Date.now();
+        if (now - last >= interval && !timer) { last = now; send(value); return; }
+        pending = value;
+        if (!timer) timer = setTimeout(() => { timer = null; last = Date.now(); if (pending != null) { send(pending); pending = null; } }, interval - (now - last));
+      },
+      finish(value) { clearTimeout(timer); timer = null; pending = null; last = Date.now(); send(value); },
+    };
+  }
+
+  /** Sets a volume slider (if `value` is given) and its filled part, drawn as the system's
+   * volume sliders are. */
+  function showVolume(slider, value) {
+    if (value != null) slider.value = value;
+    slider.style.setProperty("--fill", `${slider.value}%`);
+  }
+
+  /** A slider being dragged ("all", or a room's id): snapshots don't move sliders meanwhile. */
+  let volumeDrag = null;
+  const sendVolume = (id, volume) => api("/api/host/sonos/volume", id ? { key: hostKey, id, volume } : { key: hostKey, volume }).catch(() => {});
+  const roomThrottles = new Map();
+  function roomThrottle(id) {
+    if (!roomThrottles.has(id)) roomThrottles.set(id, throttle((v) => sendVolume(id, v)));
+    return roomThrottles.get(id);
+  }
+
+  /** One room in Speakers: its row (as setup's), and its volume while ticked. Built once per room,
+   * then updated in place, so a slider being dragged isn't replaced. */
+  function speakerItem(id) {
+    const li = document.createElement("li");
+    li.className = "speaker";
+    li.dataset.id = id;
+    li.innerHTML = '<ul class="speaker-head"></ul><div class="volume-row" hidden>'
+      + `<span class="volume-icon">${outputIcons.quiet}</span><input type="range" class="volume" min="0" max="100" step="1">`
+      + `<span class="volume-icon">${outputIcons.loud}</span></div>`;
+    const slider = li.querySelector("input");
+    slider.addEventListener("input", () => { volumeDrag = id; showVolume(slider); roomThrottle(id).submit(Number(slider.value)); });
+    slider.addEventListener("change", () => { roomThrottle(id).finish(Number(slider.value)); volumeDrag = null; });
+    return li;
+  }
+
+  /** Settings' Speakers section: while the zone plays through Sonos. Same rules as the iPad's
+   * Speakers panel: the last ticked room stays, and All Speakers shows with two or more. */
+  function renderSpeakers() {
+    const s = sonosSetup, shown = hosting() && !!(s && s.active);
+    $("settings-speakers").hidden = !shown;
+    if (!shown) return;
+    const rooms = s.rooms || [];
+    const ticked = rooms.filter((r) => r.ticked);
+    const volumes = ticked.map((r) => r.volume).filter((v) => v != null);
+    $("speakers-all").hidden = ticked.length < 2 || !volumes.length;
+    if (volumeDrag === null && volumes.length) {
+      showVolume($("speakers-all-volume"), Math.round(volumes.reduce((a, b) => a + b, 0) / volumes.length));
+    }
+    const list = $("speakers-rooms");
+    for (const li of [...list.children]) if (!rooms.some((r) => r.id === li.dataset.id)) li.remove();
+    rooms.forEach((room, index) => {
+      let li = [...list.children].find((each) => each.dataset.id === room.id);
+      if (!li) li = speakerItem(room.id);
+      if (list.children[index] !== li) list.insertBefore(li, list.children[index] || null);
+      const row = roomRow(room, s);
+      // The only ticked room stays: its tick is dimmed (leaving Sonos isn't offered mid-party).
+      const only = room.ticked && ticked.length === 1;
+      fillOutputList(li.querySelector(".speaker-head"), [row]);
+      const button = li.querySelector(".output-row");
+      button.classList.toggle("last", only);
+      const volume = li.querySelector(".volume-row"), slider = volume.querySelector("input");
+      volume.hidden = !room.ticked || room.volume == null;
+      slider.setAttribute("aria-label", `${room.name} volume`);
+      if (volumeDrag === null && room.volume != null) showVolume(slider, room.volume);
+    });
+  }
+
+  $("speakers-rooms").addEventListener("click", (event) => {
+    const row = event.target.closest(".output-row");
+    if (!row || row.disabled || !sonosSetup) return;
+    const room = (sonosSetup.rooms || []).find((r) => r.id === row.dataset.id);
+    if (!room || roomsChanging.has(room.id)) return;
+    if (room.ticked && sonosSetup.rooms.filter((r) => r.ticked).length === 1) {
+      toast("The last speaker stays while the music plays.");
+      return;
+    }
+    if (!room.canTick && !room.ticked) return;
+    tickRoom(room.id, !room.ticked);
+  });
+
+  // All Speakers: Sonos snapshots each room's volume as the drag starts, then the group moves,
+  // keeping their balance. The rooms' sliders show it at once.
+  let groupStart = null;
+  const groupThrottle = throttle((v) => sendVolume(null, v));
+  $("speakers-all-volume").addEventListener("input", (event) => {
+    const value = Number(event.target.value);
+    if (volumeDrag !== "all") {
+      volumeDrag = "all";
+      groupStart = new Map((sonosSetup.rooms || []).filter((r) => r.ticked && r.volume != null).map((r) => [r.id, r.volume]));
+      api("/api/host/sonos/volume", { key: hostKey, begin: true }).catch(() => {});
+    }
+    const base = [...groupStart.values()].reduce((a, b) => a + b, 0) / Math.max(1, groupStart.size);
+    for (const [id, start] of groupStart) {
+      const slider = [...$("speakers-rooms").children].find((li) => li.dataset.id === id)?.querySelector("input");
+      if (slider) showVolume(slider, Math.min(100, Math.max(0, base > 0 ? Math.round(start * value / base) : value)));
+    }
+    showVolume(event.target);
+    groupThrottle.submit(value);
+  });
+  $("speakers-all-volume").addEventListener("change", (event) => {
+    groupThrottle.finish(Number(event.target.value));
+    volumeDrag = null;
+    groupStart = null;
+  });
+
+  // While the Speakers section shows: the rooms read again every 2 s, so changes made in the
+  // Sonos app (volumes, groups, what other rooms play) show up.
+  let speakersTimer = null;
+  function pollSpeakers() {
+    clearTimeout(speakersTimer);
+    speakersTimer = null;
+    if (!settingsOpen() || $("settings-speakers").hidden) return;
+    api("/api/host/sonos/read", { key: hostKey }).catch(() => {});
+    speakersTimer = setTimeout(pollSpeakers, 2000);
+  }
 
   function setAdvanced(open) {
     $("spotify-advanced").hidden = !open;
@@ -1939,6 +2246,8 @@
     $("settings-stop").textContent = `End ${snap.zoneName || "this zone"}`;
     fillWifi();
     fillPartyRow();
+    renderSpeakers();
+    if (!$("settings-speakers").hidden && !speakersTimer) pollSpeakers();
   }
 
   /** Saving is offered once someone has added a song (played or still in Up next); until then the

@@ -101,6 +101,9 @@ public struct PartySnapshot: Codable, Equatable, Sendable {
     /// Apple TV hubs: Spotify's setup (sign-in, devices, the sign-in page). Hosts only, as
     /// `musicAccess`.
     public var spotify: SpotifySetup?
+    /// The hub's Sonos rooms: where an Apple TV zone plays (setup), and the zone settings'
+    /// Speakers section while it plays through Sonos. Hosts only, as `musicAccess`.
+    public var sonos: SonosSetup?
 }
 
 /// Owns the queue and keeps the player in step with it. Both the iPad UI and the phone server
@@ -187,6 +190,12 @@ public final class PartySession {
     @ObservationIgnored public var spotifySignIn: SpotifyHubSignIn?
     /// Apple TV hubs: the music service and Spotify's settings, for the host's setup page.
     @ObservationIgnored public weak var setupHandler: (any HubSetupHandler)?
+    /// The hub's Sonos rooms, for hosts' snapshots (set by the app).
+    public var sonosSetup: SonosSetup? {
+        didSet { if sonosSetup != oldValue, remote == nil { broadcast() } }
+    }
+    /// Chooses Sonos rooms, and sets their volumes, for a host's phone (set by the app).
+    @ObservationIgnored public weak var sonosHandler: (any SonosOutputHandler)?
     /// A host revoked every other phone's Host Control; returns the new key for that host.
     @ObservationIgnored public var onForgetHostPhones: (@MainActor () -> String?)?
     /// The hub's guest address by IP, from the hub (display) or set by the app (hub).
@@ -844,10 +853,12 @@ public final class PartySession {
         return key == hostKey
     }
 
-    /// What only hosts see: an Apple TV's Apple Music access and Spotify setup.
+    /// What only hosts see: an Apple TV's Apple Music access and Spotify setup, and the hub's
+    /// Sonos rooms.
     private func addHostDetails(to snap: inout PartySnapshot) {
         snap.musicAccess = musicAccess
         snap.spotify = spotifySetup
+        snap.sonos = sonosSetup
     }
 
     /// Emits the current snapshot immediately, then again after every change. `includingWifi`

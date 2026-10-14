@@ -98,15 +98,10 @@ struct SonosPickerSection: View {
             set: { id in if let account = accounts.first(where: { $0.id == id }) { model.chooseSonosAccount(account) } }
         )) {
             ForEach(Array(accounts.enumerated()), id: \.element.id) { index, account in
-                Text(Self.label(account, index: index)).tag(account.id)
+                Text(account.label(index: index)).tag(account.id)
             }
         }
         .pickerStyle(.menu)
-    }
-
-    static func label(_ account: SonosAccount, index: Int) -> String {
-        guard let example = account.example else { return "Account \(index + 1)" }
-        return "Account \(index + 1), played “\(example)”"
     }
 }
 

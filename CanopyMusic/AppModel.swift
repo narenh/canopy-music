@@ -107,7 +107,10 @@ final class AppModel {
         provider != .spotify || (spotifyDeviceID != nil && spotifyPlaysOnThisDevice)
     }
 
-    private(set) var provider: Provider
+    private(set) var provider: Provider {
+        // Sonos streams the zone's service (not during init: set there by hand).
+        didSet { sonosController.service = sonosService }
+    }
     private(set) var session: PartySession
     /// Last fetched "Your playlists", so reopening the picker shows them at once while it refreshes.
     @ObservationIgnored var libraryPlaylistsCache: [PlaylistSummary] = []
@@ -210,10 +213,13 @@ final class AppModel {
         self.spotifyDisplayName = UserDefaults.standard.string(forKey: "spotifyDisplayName")
         let household = Self.makeHousehold()
         sonos = household
-        let sonosOutput = Self.loadSonosOutput()
-        let sonosAccounts = Self.loadSonosAccounts()
-        self.sonosOutput = sonosOutput
-        self.sonosChosenAccounts = sonosAccounts
+        // The rooms and account Sonos plays from, kept between launches (not the simulated household's).
+        let sonosController = SonosOutputController(household: household, defaults: Self.isSonosFake ? nil : .standard)
+        sonosController.service = Self.sonosService(for: provider ?? .none)
+        #if DEBUG
+        sonosController.engineLog = { print("[sonos-engine] \($0)") }
+        #endif
+        self.sonosController = sonosController
         // A zone is recorded only once its music has started (`startZone`). Older builds recorded
         // it at Create: one of theirs where music never started isn't one to come back to, so
         // it's ended, as End does (before its saved queue loads), and the list has nothing to resume.
@@ -223,9 +229,7 @@ final class AppModel {
             for each in Self.allProviders { try? FileManager.default.removeItem(at: Self.storeURL(each)) }
             record.ended()
         }
-        self.session = Self.makeSession(provider ?? .none, spotify: spotifyAPI,
-                                        sonos: Self.makeSonosPlayback(provider ?? .none, output: sonosOutput, accounts: sonosAccounts, found: []),
-                                        sonosTransport: household.transport)
+        self.session = Self.makeSession(provider ?? .none, spotify: spotifyAPI, sonos: sonosController.makeEngine())
         hostPIN = defaults.string(forKey: "hostPIN") ?? ""
         if let id = UserDefaults.standard.string(forKey: "deviceID") {
             deviceID = id
@@ -339,6 +343,12 @@ final class AppModel {
         }
         #endif
         spotifyAuth.onAccountChanged = { [weak self] in self?.advertiseZone() }
+        // Debug launches above may have changed the service.
+        sonosController.service = sonosService
+        sonosController.onOutputChanged = { [weak self] in self?.rebuildSessionForOutput() }
+        sonosController.onError = { [weak self] message in self?.errorMessage = message }
+        // A host's phone sees the rooms in the zone settings' Speakers section (hosts' snapshots).
+        sonosController.onChange = { [weak self] in self?.publishSonosSetup() }
         sonos.onRefresh = { [weak self] in self?.sonosRefreshed() }
         #if DEBUG
         sonos.log = { print("[sonos] \($0)") }
@@ -389,19 +399,13 @@ final class AppModel {
         #endif
     }
 
-    /// `sonos` set: the zone's songs play on those Sonos rooms, streamed from that account, instead
-    /// of on this device (or, for Spotify, a Spotify Connect device).
-    private static func makeSession(_ provider: Provider, spotify: SpotifyAPI, sonos: SonosPlayback? = nil, sonosTransport: any SonosTransport) -> PartySession {
+    /// `sonosEngine` set: the zone's songs play on its Sonos rooms, streamed from the account
+    /// linked there, instead of on this device (or, for Spotify, a Spotify Connect device).
+    /// `SonosOutputController.makeEngine` makes it, on the household's transport (with
+    /// `-sonosFake`, the simulated household's).
+    private static func makeSession(_ provider: Provider, spotify: SpotifyAPI, sonos sonosEngine: SonosEngine? = nil) -> PartySession {
         let store = storeURL(provider)
         try? FileManager.default.createDirectory(at: .applicationSupportDirectory, withIntermediateDirectories: true)
-        let sonosEngine = sonos.map { playback in
-            // The household's transport: with `-sonosFake`, the simulated household's.
-            let engine = SonosEngine(target: playback.target, reference: playback.reference, transport: sonosTransport)
-            #if DEBUG
-            engine.log = { print("[sonos-engine] \($0)") }
-            #endif
-            return engine
-        }
         switch provider {
         case .none:
             return PartySession(catalog: NoServiceCatalog(), engine: NoServiceEngine())
@@ -462,7 +466,7 @@ final class AppModel {
         session.shutdown()
         provider = next
         defaults.set(next.rawValue, forKey: "provider")
-        session = Self.makeSession(next, spotify: spotifyAPI, sonos: sonosPlayback, sonosTransport: sonos.transport)
+        session = Self.makeSession(next, spotify: spotifyAPI, sonos: sonosController.makeEngine())
         session.phonesCanReorder = phoneReorderEnabled
         // The new session gets this zone's settings, host control and web-page hooks, as at launch.
         configureHubSession()
@@ -553,8 +557,7 @@ final class AppModel {
         // rebuild pauses the Sonos rooms and carries a song that was playing over to the device.
         let leftSonos = sonosOutput != nil
         if leftSonos {
-            sonosOutput = nil
-            rebuildSessionForOutput()
+            sonosController.leave() // rebuilds (`onOutputChanged`)
         }
         // Start found nowhere to play: it goes on, on this device.
         if startsWhenDeviceChosen {
@@ -937,6 +940,7 @@ final class AppModel {
         let connection = ZoneConnection(baseURL: url, clientID: deviceID, name: DeviceKind.name, kind: .ipad, device: DeviceKind.device)
         let mirror = PartySession(remote: connection)
         session = mirror
+        sonosController.connect(mirror) // no Sonos engine on a display
         connection.start(session: mirror)
         displayConnection = connection
         displayedZone = zone
@@ -951,7 +955,7 @@ final class AppModel {
         displayConnection = nil
         displayedZone = nil
         session.shutdown()
-        session = Self.makeSession(provider, spotify: spotifyAPI, sonos: sonosPlayback, sonosTransport: sonos.transport)
+        session = Self.makeSession(provider, spotify: spotifyAPI, sonos: sonosController.makeEngine())
         session.phonesCanReorder = phoneReorderEnabled
         configureHubSession()
         connectHostControl()
@@ -966,7 +970,11 @@ final class AppModel {
         session.displaysCanControl = displaysCanControl
         session.phonesCanQueue = phoneQueueEnabled
         session.wifi = WifiDetails(ssid: wifiSSID, password: wifiPassword, simpleQR: wifiSimpleQR)
-        wireSonosEngine()
+        // The engine's rooms, as they join and leave, are the output; hosts' phones get the
+        // Speakers section (only rooms and volumes: moving off Sonos is the start screen's).
+        sonosController.connect(session)
+        session.sonosHandler = sonosController
+        publishSonosSetup()
     }
 
     /// Announces this zone (or refreshes what's playing in the announcement). Only a live zone.
@@ -1217,41 +1225,18 @@ final class AppModel {
 
     // MARK: Sonos output
 
-    /// Rooms chosen as the output, and how to reach them (kept, so a relaunch plays there before
-    /// discovery has run again).
-    struct SonosOutput: Codable, Equatable {
-        /// The first leads the group.
-        var roomIDs: [String]
-        var target: SonosTarget
-    }
-
-    /// What a `SonosEngine` needs.
-    struct SonosPlayback: Equatable {
-        var target: SonosTarget
-        var reference: SonosTrackReference
-    }
-
     let sonos: SonosHousehold
+    /// The rooms and account Sonos plays from, their joining and leaving, and their volumes
+    /// (`SonosOutputController`, shared with the Apple TV app). What follows forwards to it.
+    let sonosController: SonosOutputController
     #if DEBUG
     @ObservationIgnored private var debugSelectedSonos = false
     #endif
     /// nil: music plays on this device (AirPlay) or, for Spotify, the chosen Spotify Connect device.
     /// Kept in step with the engine's rooms as they join and leave, so a relaunch plays there.
-    private(set) var sonosOutput: SonosOutput? {
-        didSet {
-            guard !Self.isSonosFake else { return }
-            defaults.set(try? JSONEncoder().encode(sonosOutput), forKey: "sonosOutput")
-        }
-    }
-    /// The account Sonos streams from, per service (`SonosMusicService.rawValue`), as chosen.
-    private(set) var sonosChosenAccounts: [String: SonosAccount] {
-        didSet {
-            guard !Self.isSonosFake else { return }
-            defaults.set(try? JSONEncoder().encode(sonosChosenAccounts), forKey: "sonosAccounts")
-        }
-    }
+    var sonosOutput: SonosOutput? { sonosController.output }
     /// Rooms on their way into the group (a spinner, "Joining…"), until Sonos has them in it.
-    private(set) var sonosJoining: Set<String> = []
+    var sonosJoining: Set<String> { sonosController.joining }
 
     /// `-sonosFake`: a simulated household (`SonosFakeHousehold`) instead of the real speakers.
     static var isSonosFake: Bool {
@@ -1272,16 +1257,6 @@ final class AppModel {
         return SonosHousehold()
     }
 
-    private static func loadSonosOutput() -> SonosOutput? {
-        if isSonosFake { return nil }
-        return UserDefaults.standard.data(forKey: "sonosOutput").flatMap { try? JSONDecoder().decode(SonosOutput.self, from: $0) }
-    }
-
-    private static func loadSonosAccounts() -> [String: SonosAccount] {
-        if isSonosFake { return [:] }
-        return UserDefaults.standard.data(forKey: "sonosAccounts").flatMap { try? JSONDecoder().decode([String: SonosAccount].self, from: $0) } ?? [:]
-    }
-
     /// The zone's service as Sonos knows it; nil for no service (and the demo).
     var sonosService: SonosMusicService? { Self.sonosService(for: provider) }
 
@@ -1294,34 +1269,13 @@ final class AppModel {
     }
 
     /// Linked accounts found for the zone's service.
-    var sonosAccountsForZone: [SonosAccount] {
-        sonosService.map(sonos.accounts(for:)) ?? []
-    }
+    var sonosAccountsForZone: [SonosAccount] { sonosController.accounts }
 
     /// The account that streams the zone's songs: the one chosen for the service, else the first found.
-    var sonosAccount: SonosAccount? {
-        guard let service = sonosService else { return nil }
-        return Self.account(for: service, chosen: sonosChosenAccounts, found: sonosAccountsForZone)
-    }
-
-    private static func account(for service: SonosMusicService, chosen: [String: SonosAccount], found: [SonosAccount]) -> SonosAccount? {
-        guard let pick = chosen[service.rawValue] else { return found.first }
-        // A newer reading of the same account (its token) wins.
-        return found.first { $0.id == pick.id } ?? pick
-    }
-
-    private var sonosPlayback: SonosPlayback? {
-        Self.makeSonosPlayback(provider, output: sonosOutput, accounts: sonosChosenAccounts, found: sonosAccountsForZone)
-    }
-
-    private static func makeSonosPlayback(_ provider: Provider, output: SonosOutput?, accounts: [String: SonosAccount], found: [SonosAccount]) -> SonosPlayback? {
-        guard let output, let service = sonosService(for: provider),
-              let account = account(for: service, chosen: accounts, found: found) else { return nil }
-        return SonosPlayback(target: output.target, reference: SonosTrackReference(service: service, accountSerial: account.serialNumber, token: account.token))
-    }
+    var sonosAccount: SonosAccount? { sonosController.account }
 
     /// The zone's songs play on Sonos rooms.
-    var usesSonos: Bool { sonosPlayback != nil }
+    var usesSonos: Bool { sonosController.usesSonos }
 
     /// The session's engine when it plays through Sonos.
     var sonosEngine: SonosEngine? { session.engine as? SonosEngine }
@@ -1330,140 +1284,65 @@ final class AppModel {
     /// so ticked rooms say "Playing Canopy Music".
     var sonosIsLive: Bool { sonosEngine?.isGrouped == true }
 
-    /// The engine's rooms as they change (joining, leaving, a new coordinator) are the output.
-    private func wireSonosEngine() {
-        guard let engine = sonosEngine else { return }
-        engine.restoredTrackID = session.state.current?.track.id
-        engine.onTargetChanged = { [weak self, weak engine] target in
-            guard let self, let engine, self.sonosEngine === engine else { return }
-            self.sonosOutput = SonosOutput(roomIDs: target.rooms.map(\.id), target: target)
-            self.sonos.preferredHost = target.coordinator.host
-        }
-        sonos.preferredHost = engine.target.coordinator.host
-    }
-
     /// Switches the zone's music to these rooms (the first leads; the others join its group when
     /// music starts), from this device or a Spotify Connect device: the session is rebuilt, with
     /// a gap. Picks the first account found for the service if none is chosen yet.
     func selectSonos(rooms roomIDs: [String]) {
-        guard !roomIDs.isEmpty, let target = sonos.target(rooms: roomIDs) else { return useThisDevice() }
-        if let service = sonosService, sonosChosenAccounts[service.rawValue] == nil, let first = sonosAccountsForZone.first {
-            sonosChosenAccounts[service.rawValue] = first
-        }
-        sonosOutput = SonosOutput(roomIDs: target.rooms.map(\.id), target: target)
-        rebuildSessionForOutput()
+        sonosController.select(rooms: roomIDs)
     }
 
     /// Back to this device (AirPlay), or for Spotify its Spotify Connect device. Start screen only.
     func useThisDevice() {
-        guard sonosOutput != nil else { return }
-        sonosOutput = nil
-        rebuildSessionForOutput()
+        sonosController.leave()
     }
 
     func isSonosRoomTicked(_ roomID: String) -> Bool {
-        sonosOutput?.roomIDs.contains(roomID) == true
+        sonosController.isTicked(roomID)
     }
 
-    /// A room's row was tapped (start screen picker or the party screen's Speakers panel).
+    /// A room's row was tapped (start screen picker or the party screen's Speakers panel). On
+    /// Sonos and playing, it joins or leaves the group without a restart; the last room on the
+    /// start screen goes back to this device (the Speakers panel doesn't offer that).
     func toggleSonosRoom(_ roomID: String) {
-        if isSonosRoomTicked(roomID) { removeSonosRoom(roomID) } else { addSonosRoom(roomID) }
-    }
-
-    /// Adds a room. Not on Sonos yet: the music moves there (a rebuild, with a gap). On Sonos and
-    /// playing: it joins the group without a restart, and shows "Joining…" until it's in it.
-    /// Before the music has started there: it's just added to the rooms.
-    func addSonosRoom(_ roomID: String) {
-        guard let player = sonos.player(roomID), !sonosJoining.contains(roomID) else { return }
-        guard let output = sonosOutput else { return selectSonos(rooms: [roomID]) }
-        guard let engine = sonosEngine else {
-            // No account to stream from yet: only the choice changes.
-            if let target = sonos.target(rooms: output.roomIDs + [roomID]) { sonosOutput = SonosOutput(roomIDs: target.rooms.map(\.id), target: target) }
-            return
-        }
-        let room = SonosHousehold.room(player)
-        guard engine.isGrouped else {
-            if let target = sonos.target(rooms: output.roomIDs + [roomID]) { engine.retarget(target) }
-            return
-        }
-        sonosJoining.insert(roomID)
-        let session = session
-        Task {
-            defer { sonosJoining.remove(roomID) }
-            do {
-                try await session.withEngine { try await engine.addRoom(room) }
-                if !(await engine.waitUntilGrouped(roomID)) {
-                    errorMessage = "\(room.name) didn't join. Check it's on and on this Wi\u{2011}Fi."
-                }
-            } catch {
-                errorMessage = "Couldn't add \(room.name). \(error.localizedDescription)"
-            }
-            await sonos.readRooms(ourCoordinatorID: engine.target.coordinator.id)
-        }
-    }
-
-    /// Takes a room out, the music playing on in the others without a restart (the coordinator
-    /// first hands the group to another room). The last room on the start screen goes back to this
-    /// device (or the Spotify Connect device); the Speakers panel doesn't offer that.
-    func removeSonosRoom(_ roomID: String) {
-        guard let output = sonosOutput, output.roomIDs.contains(roomID) else { return }
-        guard output.roomIDs.count > 1 else { return useThisDevice() }
-        guard let engine = sonosEngine else {
-            let rest = output.roomIDs.filter { $0 != roomID }
-            if let target = sonos.target(rooms: rest) { sonosOutput = SonosOutput(roomIDs: rest, target: target) }
-            return
-        }
-        let session = session
-        Task {
-            do {
-                try await session.withEngine { try await engine.removeRoom(roomID) }
-            } catch {
-                errorMessage = "Couldn't take \(sonos.player(roomID)?.roomName ?? "the room") out. \(error.localizedDescription)"
-            }
-            await sonos.readRooms(ourCoordinatorID: engine.target.coordinator.id)
-        }
+        sonosController.toggle(roomID)
     }
 
     /// "Whose account plays".
     func chooseSonosAccount(_ account: SonosAccount) {
-        guard let service = sonosService else { return }
-        sonosChosenAccounts[service.rawValue] = account
-        rebuildSessionForOutput()
+        sonosController.chooseAccount(account)
     }
 
     // MARK: Sonos volume
 
     /// Sets one room's volume (the Speakers panel's sliders send at most every ~150 ms).
     func setSonosVolume(_ volume: Int, room roomID: String) {
-        guard let player = sonos.player(roomID) else { return }
-        sonos.noteVolume(volume, for: roomID)
-        let client = SonosClient(transport: sonos.transport, host: player.host)
-        Task { try? await client.setVolume(volume) }
+        sonosController.setVolume(volume, room: roomID)
     }
 
     /// Before the All Speakers slider moves: Sonos remembers each room's volume, so the group
     /// volume keeps their balance.
     func beginSonosGroupVolume() {
-        guard let engine = sonosEngine else { return }
-        let client = SonosClient(transport: sonos.transport, host: engine.target.coordinator.host)
-        Task { try? await client.snapshotGroupVolume() }
+        sonosController.beginGroupVolume()
     }
 
     /// The group's volume (the average of its rooms'), each room moved in proportion.
     func setSonosGroupVolume(_ volume: Int) {
-        guard let engine = sonosEngine else { return }
-        let client = SonosClient(transport: sonos.transport, host: engine.target.coordinator.host)
-        Task { try? await client.setGroupVolume(volume) }
+        sonosController.setGroupVolume(volume)
     }
 
     /// Reads volumes, groups and what each room is playing (while a speaker list shows).
     func readSonosRooms() async {
-        await sonos.readRooms(ourCoordinatorID: sonosIsLive ? sonosEngine?.target.coordinator.id : nil)
+        await sonosController.readRooms()
     }
 
-    /// Discovery has news: rooms may have new addresses, accounts may have turned up. New
-    /// addresses go into the output (and an engine that hasn't played yet); the session is
-    /// rebuilt if the account it streams from changed, unless it's playing right now.
+    /// What a host's phone shows of the rooms (hosts' snapshots). Not on a display.
+    private func publishSonosSetup() {
+        guard zoneRole != .display else { return }
+        session.sonosSetup = sonosController.setup()
+    }
+
+    /// Discovery has news: rooms may have new addresses, accounts may have turned up
+    /// (`SonosOutputController.householdRefreshed`).
     private func sonosRefreshed() {
         #if DEBUG
         // `-sonosSelect <room name>`: chooses that room once it's found, as tapping it would
@@ -1476,25 +1355,7 @@ final class AppModel {
             return
         }
         #endif
-        if let output = sonosOutput {
-            var target = output.target
-            target.coordinator.host = sonos.player(target.coordinator.id)?.host ?? target.coordinator.host
-            for index in target.joining.indices {
-                target.joining[index].host = sonos.player(target.joining[index].id)?.host ?? target.joining[index].host
-            }
-            // The fallback for a first play that can't read the layout (it's read live then),
-            // kept current rather than as saved. Not once the engine has grouped: it owns that.
-            if sonosEngine?.isGrouped != true, let group = sonos.group(containing: target.coordinator.id) {
-                target.leavesGroup = group.coordinatorID != target.coordinator.id
-            }
-            if target != output.target {
-                sonosOutput = SonosOutput(roomIDs: target.rooms.map(\.id), target: target)
-                if let engine = sonosEngine, !engine.isGrouped { engine.retarget(target) }
-            }
-        }
-        let current = sonosEngine.map { SonosPlayback(target: $0.target, reference: $0.reference) }
-        guard current != sonosPlayback, !session.isPlaying else { return }
-        rebuildSessionForOutput()
+        sonosController.householdRefreshed()
     }
 
     /// Swaps the session for one that plays through the current output: moving between this
@@ -1510,7 +1371,7 @@ final class AppModel {
         let position = session.engine.currentTime
         let hadSong = session.state.current != nil
         session.shutdown()
-        session = Self.makeSession(provider, spotify: spotifyAPI, sonos: sonosPlayback, sonosTransport: sonos.transport)
+        session = Self.makeSession(provider, spotify: spotifyAPI, sonos: sonosController.makeEngine())
         session.phonesCanReorder = phoneReorderEnabled
         configureHubSession()
         connectHostControl()
@@ -1537,8 +1398,7 @@ final class AppModel {
         provider = .appleMusic
         authorization = .authorized
         needsOnboarding = false
-        sonosChosenAccounts[SonosMusicService.appleMusic.rawValue] = account
-        sonosOutput = SonosOutput(roomIDs: ids, target: target)
+        sonosController.use(SonosOutput(roomIDs: ids, target: target), account: account, for: .appleMusic)
         session.shutdown()
         let engine = SonosEngine(target: target, reference: SonosTrackReference(service: .appleMusic, accountSerial: account.serialNumber),
                                  transport: sonos.transport)

@@ -53,12 +53,25 @@ struct CanopyMusicTVApp: App {
 final class TVModel {
     enum Role: Equatable { case choosing, hub, display }
     /// The hub's music service, chosen on the host's setup page (saved as the iPad saves its own).
-    enum Service: String { case appleMusic, spotify }
+    enum Service: String {
+        case appleMusic, spotify
+
+        /// The service as Sonos streams it (from the account linked in the Sonos app).
+        var sonos: SonosMusicService {
+            switch self {
+            case .appleMusic: .appleMusic
+            case .spotify: .spotify
+            }
+        }
+    }
 
     private(set) var role: Role = .choosing
     private(set) var service: Service
     /// Spotify: sign-in from the host's phone, the device music plays on (docs/multi-device.md).
     let spotify = TVSpotify()
+    /// Sonos rooms the zone can play on instead (chosen on the host's setup page, then joined and
+    /// left from the zone settings' Speakers section): the iPad's `SonosOutputController`.
+    let sonos: SonosOutputController
     /// Why the zone list's Resume didn't go back in (Spotify signed out, or another zone on the
     /// account). Cleared by the next attempt.
     private(set) var resumeProblem: String?
@@ -115,6 +128,19 @@ final class TVModel {
         #if DEBUG
         if spotify.fake != nil { service = .spotify }
         #endif
+        sonos = SonosOutputController(household: Self.makeSonosHousehold(), defaults: Self.isSonosFake ? nil : .standard)
+        sonos.service = service.sonos
+        #if DEBUG
+        sonos.engineLog = { [weak self] line in self?.debugLog("[sonos-engine] \(line)") }
+        sonos.household.log = { [weak self] line in self?.debugLog("[sonos] \(line)") }
+        #endif
+        sonos.household.onRefresh = { [weak self] in self?.sonos.householdRefreshed() }
+        sonos.onOutputChanged = { [weak self] in self?.sonosOutputChanged() }
+        sonos.onChange = { [weak self] in self?.pushSonosSetup() }
+        sonos.onError = { [weak self] message in self?.debugLog("sonos: \(message)") }
+        // Moving the music on or off Sonos (or to another account) only while the host sets the
+        // zone up; once it plays, rooms join and leave.
+        sonos.canChangeOutput = { [weak self] in self.map { $0.role == .hub && $0.session.isWaitingForSetup } ?? false }
         spotify.onChange = { [weak self] in self?.pushSpotifySetup() }
         // The app's own audio is only the motion artwork's silent video; the music plays in the
         // Apple Music player's own session. Left at the default (not mixable), the music starting
@@ -280,6 +306,10 @@ final class TVModel {
         session.onMusicAccessCheck = { [weak self] in self?.checkService(asking: true) }
         session.spotifySignIn = spotify.signIn
         session.setupHandler = self
+        // Sonos: the rooms for the host's page, and a Sonos engine's rooms kept as the output.
+        session.sonosHandler = sonos
+        sonos.connect(session)
+        sonos.household.start()
         // The zone becomes real when its music starts (a phone's "Start the music"): only then is
         // it recorded, so only then does it come back after a crash or offer Resume.
         session.onSongStarted = { [weak self] in
@@ -290,6 +320,7 @@ final class TVModel {
         // Zones on the account (Spotify plays one stream per account).
         browser.start()
         pushSpotifySetup()
+        pushSonosSetup()
         // Known before the host's page connects (without asking: that waits for the page).
         checkService(asking: false)
     }
@@ -297,21 +328,76 @@ final class TVModel {
     /// The catalog, engine and service title for this TV's service. The simulator can't play
     /// Apple Music or sign in to Spotify: debug builds there use the demo player (and
     /// `-spotifyFake` stands in for Spotify).
+    /// With Sonos rooms chosen (and an account linked there), the engine is a `SonosEngine` and
+    /// the catalog the service's own.
     private func serviceParts() -> (any MusicCatalog, any PlaybackEngine, String) {
+        let sonosEngine = sonos.makeEngine()
         switch service {
         case .appleMusic:
             #if DEBUG
+            // `-sonosFake`: the demo songs with ids Sonos can carry, on the simulated household.
+            if usesDemo, Self.isSonosFake { return (SonosFakeCatalog(), sonosEngine ?? DemoPlaybackEngine(), "Demo") }
             if usesDemo { return (DemoCatalog(), DemoPlaybackEngine(), "Demo") }
             #endif
             let cache = SongCache()
-            return (AppleMusicCatalog(cache: cache), AppleMusicEngine(cache: cache), "Apple Music")
+            return (AppleMusicCatalog(cache: cache), sonosEngine ?? AppleMusicEngine(cache: cache), "Apple Music")
         case .spotify:
             #if DEBUG
             // Spotify's engine can't replace a staged song, so neither does this one.
-            if spotify.isFake { return (DemoCatalog(), DemoPlaybackEngine(canReplaceStaged: false), "Spotify") }
+            if spotify.isFake {
+                let catalog: any MusicCatalog = Self.isSonosFake ? SonosFakeCatalog() : DemoCatalog()
+                return (catalog, sonosEngine ?? DemoPlaybackEngine(canReplaceStaged: false), "Spotify")
+            }
             #endif
-            return (SpotifyCatalog(api: spotify.api), SpotifyEngine(api: spotify.api), "Spotify")
+            return (SpotifyCatalog(api: spotify.api), sonosEngine ?? SpotifyEngine(api: spotify.api), "Spotify")
         }
+    }
+
+    // MARK: Sonos
+
+    /// `-sonosFake` (debug builds): a simulated household (`SonosFakeHousehold`) instead of the
+    /// real speakers. Nothing is sent to any device.
+    static var isSonosFake: Bool {
+        #if DEBUG
+        ProcessInfo.processInfo.arguments.contains("-sonosFake")
+        #else
+        false
+        #endif
+    }
+
+    private static func makeSonosHousehold() -> SonosHousehold {
+        #if DEBUG
+        if isSonosFake {
+            let simulator = SonosFakeHousehold.make()
+            return SonosHousehold(transport: simulator, fixedHosts: simulator.rooms.map(\.host))
+        }
+        #endif
+        return SonosHousehold()
+    }
+
+    /// The music moved between this TV (or the Spotify Connect device) and Sonos rooms, or to
+    /// another Sonos account: the session's engine is replaced, under the same session so the
+    /// host's page stays connected. Only while the zone waits for setup (the routes refuse it
+    /// after); a live zone keeps its engine (discovery finding a newer reading of the account
+    /// doesn't restart the party).
+    private func sonosOutputChanged() {
+        guard role == .hub else { return }
+        guard session.isWaitingForSetup else {
+            debugLog("sonos: the output changed mid-party; the engine stays")
+            return
+        }
+        let old = session.engine
+        let (catalog, engine, title) = serviceParts()
+        guard session.replaceService(catalog: catalog, engine: engine, serviceName: title) else { return }
+        old.shutDown()
+        sonos.connect(session)
+        debugLog("sonos: plays on \(sonos.output?.target.name ?? "this TV")")
+    }
+
+    /// Tells the host's page (hosts' snapshots) about the Sonos rooms.
+    private func pushSonosSetup() {
+        guard role == .hub else { return }
+        session.sonosSetup = sonos.setup()
     }
 
     /// The service's readiness for the host's setup page: Apple Music access, or Spotify's
@@ -697,11 +783,15 @@ extension TVModel: HubSetupHandler {
         guard next != service else { return true }
         let previous = service
         service = next
+        // Sonos streams the new service too, from its own linked account.
+        sonos.service = next.sonos
         let (catalog, engine, title) = serviceParts()
         guard session.replaceService(catalog: catalog, engine: engine, serviceName: title) else {
             service = previous
+            sonos.service = previous.sonos
             return false
         }
+        sonos.connect(session)
         defaults.set(next.rawValue, forKey: "provider")
         debugLog("service: \(next.rawValue)")
         checkService(asking: false)
@@ -716,8 +806,11 @@ extension TVModel: HubSetupHandler {
         await spotify.setSignInPage(typed)
     }
 
+    /// A Spotify Connect device plays the music: not Sonos rooms any more.
     func chooseSpotifyDevice(id: String) -> Bool {
-        spotify.chooseDevice(id: id)
+        guard spotify.chooseDevice(id: id) else { return false }
+        if role == .hub, session.isWaitingForSetup { sonos.leave() }
+        return true
     }
 
     /// Continue and Start the music on the setup page: the zone that's really on this Spotify

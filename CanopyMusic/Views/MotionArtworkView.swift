@@ -12,8 +12,13 @@ struct MotionArtworkView: View {
     /// The music's play/pause: the video eases to a stop with it, and back up (as Apple Music's,
     /// and the TV's `TVMotionArtworkView`).
     var isPlaying: Bool
+    /// Holds the video back while true: Now Playing's page is sliding in, or isn't the song playing
+    /// (`NowPlayingView`), so only one player runs. One that's showing stays (paused, as it leaves).
+    var waits = false
     var cornerRadius: CGFloat
 
+    /// The video found for the song, until it can start (`waits`).
+    @State private var found: URL?
     @State private var url: URL?
     @State private var isShowing = false
     /// Whether the app is in the background (the video stops there). Not `scenePhase`: under this
@@ -37,6 +42,7 @@ struct MotionArtworkView: View {
         .onReceive(NotificationCenter.default.publisher(for: UIScene.didEnterBackgroundNotification)) { _ in inBackground = true }
         .onReceive(NotificationCenter.default.publisher(for: UIScene.willEnterForegroundNotification)) { _ in inBackground = false }
         .task(id: track?.id) {
+            found = nil
             url = nil
             isShowing = false
             guard MotionArtwork.isEnabled, let track else { return }
@@ -45,15 +51,22 @@ struct MotionArtworkView: View {
             // simulator (which can't reach Apple Music) or with any service.
             let args = ProcessInfo.processInfo.arguments
             if let i = args.firstIndex(of: "-motionArtworkTestURL"), i + 1 < args.count {
-                url = URL(string: args[i + 1])
+                found = URL(string: args[i + 1])
+                startIfReady()
                 return
             }
             #endif
             guard let lookup = catalog.motionArtwork else { return }
-            let found = await lookup.videoURL(for: track)
+            let video = await lookup.videoURL(for: track)
             guard !Task.isCancelled else { return }
-            url = found
+            found = video
+            startIfReady()
         }
+        .onChange(of: waits) { startIfReady() }
+    }
+
+    private func startIfReady() {
+        if !waits, url == nil { url = found }
     }
 }
 

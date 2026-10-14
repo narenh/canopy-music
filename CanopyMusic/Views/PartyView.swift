@@ -27,6 +27,9 @@ struct PartyView: View {
     @State private var toast: Announcement?
     @State private var toastTask: Task<Void, Never>?
     @State private var showUnlock = false
+    /// Now Playing's song change (`NowPlayingView`); the background changes evenly from the
+    /// moment its slide starts, settling after it, as on the TV.
+    @State private var slider = SongSlider()
 
     /// What the search field says it searches: the hub's service on a display.
     private var searchServiceName: String {
@@ -37,13 +40,13 @@ struct PartyView: View {
     @State private var autoAddTrackID: String?
 
     private var session: PartySession { model.session }
-    /// What's playing: in a Spotify zone it can be a track from outside the queue
-    /// (`PartySession.externalCurrent`).
-    private var current: QueueItem? { session.nowPlaying }
     private var searchActive: Bool { searchFocused || !query.isEmpty }
 
     var body: some View {
-        let theme = ArtworkTheme(current?.track.colors)
+        // What's playing (in a Spotify zone it can be a track from outside the queue,
+        // `PartySession.externalCurrent`), once it has slid in.
+        let shown = slider.current(in: session)
+        let theme = ArtworkTheme(shown?.track.colors)
         ContentCap {
             GeometryReader { geo in
                 // Within the Mac cap (ContentCap), windows wider than 16:10 (short Mac windows) keep
@@ -66,7 +69,7 @@ struct PartyView: View {
                 .frame(maxWidth: .infinity)
             }
         }
-        .background { ThemedBackground(track: current?.track, theme: theme) }
+        .background { ThemedBackground(track: shown?.track, theme: theme) }
         .overlay { FlightLayer(flights: flights, destinations: rowFrames, fallback: fallbackDestination) }
         .environment(\.artworkTheme, theme)
         // The song's colours change with the background, over the same 2 s.
@@ -116,7 +119,7 @@ struct PartyView: View {
             .padding(.bottom, 12)
 
             ZStack {
-                NowPlayingView(item: current, session: session)
+                NowPlayingView(session: session, slider: slider)
                     .opacity(searchActive ? 0 : 1)
                     .scaleEffect(searchActive ? 0.96 : 1)
                 if searchActive {
@@ -406,9 +409,15 @@ struct PartyView: View {
 // MARK: - Now playing
 
 struct NowPlayingView: View {
-    let item: QueueItem?
     let session: PartySession
+    /// The song change: the art, text and progress slide to the next song's, as on the Apple TV;
+    /// the controls below stay where they are. `PartyView`'s, so the background goes with it.
+    let slider: SongSlider
     @Environment(AppModel.self) private var model
+    @Environment(\.displayScale) private var displayScale
+
+    /// The song shown: the one playing, once it has slid in.
+    private var item: QueueItem? { slider.current(in: session) }
 
     var body: some View {
         GeometryReader { geo in
@@ -421,53 +430,13 @@ struct NowPlayingView: View {
             let side = max(200, min(widthSide, geo.size.height - reserved))
             // Always in the middle of the column's height, whatever the window's shape.
             VStack(spacing: Self.spacing) {
-                ArtworkView(track: item?.track, large: true, cornerRadius: 18)
-                    // Animated album artwork, where there is some (experimental: `MotionArtwork`).
-                    .overlay { MotionArtworkView(track: item?.track, catalog: session.catalog, isPlaying: session.isPlaying, cornerRadius: 18) }
-                    .frame(width: side, height: side)
-                    .shadow(color: .black.opacity(0.5), radius: 40, y: 20)
-                    .id(item?.id)
-                    .transition(.asymmetric(insertion: .scale(scale: 0.9).combined(with: .opacity), removal: .opacity))
-                VStack(spacing: 6) {
-                    HStack(alignment: .firstTextBaseline, spacing: 12) {
-                        if item != nil {
-                            EqualizerBars(isAnimating: session.isPlaying)
-                                .foregroundStyle(.white)
-                                .frame(width: 24, height: 24)
-                        }
-                        Text(item?.track.title ?? "Nothing playing yet")
-                            .font(.system(size: 36, weight: .bold))
-                    }
-                    // The requester badge shares the artist line so it never adds height.
-                    HStack(spacing: 10) {
-                        Text(item?.track.artist ?? (startsUpNext ? "Press play to start Up next" : "Search for a song to get things going"))
-                            .font(.system(size: 22, weight: .medium))
-                            .foregroundStyle(.white.opacity(0.65))
-                        if let requester = item?.requester {
-                            RequesterPill(requester: requester)
-                        } else if let item, item.id == session.externalCurrent?.id {
-                            // Not from this queue: someone else on the Spotify account chose it.
-                            FromServiceLabel(service: session.serviceName)
-                        }
-                    }
+                SongPages(
+                    slider: slider, session: session, columnWidth: geo.size.width,
+                    artBucket: ArtworkSizing.bucket(points: Double(side), scale: Double(displayScale))
+                ) { item in
+                    page(item, side: side, width: width)
                 }
-                .foregroundStyle(.white)
-                .lineLimit(1)
-                .multilineTextAlignment(.center)
-                .frame(maxWidth: min(side + 120, width))
-                if let item {
-                    // While disconnected the bar means nothing; say why the controls are off instead.
-                    ProgressBar(duration: item.track.duration, session: session)
-                        .frame(width: side)
-                        .opacity(model.spotifyDisconnected ? 0 : 1)
-                        .allowsHitTesting(!model.spotifyDisconnected && (!model.isDisplay || session.displaysCanControl))
-                        .overlay {
-                            if model.spotifyDisconnected {
-                                Label("Playback device disconnected", systemImage: "exclamationmark.triangle.fill")
-                                    .font(.subheadline.weight(.medium))
-                                    .foregroundStyle(.orange)
-                            }
-                        }
+                if item != nil {
                     if model.isDisplay { DisplayZoneLine().frame(maxWidth: side) }
                     // Displays: transport only while the hub allows it (no AirPlay or crossfade).
                     if showsTransport {
@@ -484,10 +453,78 @@ struct NowPlayingView: View {
             }
             .padding(.horizontal, inset)
             .frame(maxWidth: .infinity, maxHeight: .infinity)
-            .animation(.spring(duration: 0.6, bounce: 0.15), value: item?.id)
+            // The slide's timing, not the background's 2 s (`PartyView`), which changes with it;
+            // also for what moves with the song (the controls arriving with the first one).
+            .animation(SongSlider.animation, value: item?.id)
+            // The slide shows from the screen's left edge to the edge of Up next.
+            .mask {
+                Rectangle()
+                    .padding(.leading, -2000)
+                    .padding(.vertical, -300)
+            }
         }
         // The right pane's 24 pt vertical padding, so a column that's full stops where Up next does.
         .padding(.bottom, 24)
+    }
+
+    /// The song's art, title, artist line and progress: one page of the slide.
+    private func page(_ item: QueueItem?, side: CGFloat, width: CGFloat) -> some View {
+        // Only the song playing has its video playing; the page going out stops its own (easing
+        // to a stop as it leaves), and the one coming in starts its video once it's in place.
+        let live = item != nil && item?.id == session.nowPlaying?.id
+        return VStack(spacing: Self.spacing) {
+            ArtworkView(track: item?.track, large: true, cornerRadius: 18)
+                // Animated album artwork, where there is some (experimental: `MotionArtwork`).
+                .overlay {
+                    MotionArtworkView(
+                        track: item?.track, catalog: session.catalog, isPlaying: session.isPlaying && live,
+                        waits: !live || slider.isSliding, cornerRadius: 18
+                    )
+                }
+                .frame(width: side, height: side)
+                .shadow(color: .black.opacity(0.5), radius: 40, y: 20)
+            VStack(spacing: 6) {
+                HStack(alignment: .firstTextBaseline, spacing: 12) {
+                    if item != nil {
+                        EqualizerBars(isAnimating: session.isPlaying)
+                            .foregroundStyle(.white)
+                            .frame(width: 24, height: 24)
+                    }
+                    Text(item?.track.title ?? "Nothing playing yet")
+                        .font(.system(size: 36, weight: .bold))
+                }
+                // The requester badge shares the artist line so it never adds height.
+                HStack(spacing: 10) {
+                    Text(item?.track.artist ?? (startsUpNext ? "Press play to start Up next" : "Search for a song to get things going"))
+                        .font(.system(size: 22, weight: .medium))
+                        .foregroundStyle(.white.opacity(0.65))
+                    if let requester = item?.requester {
+                        RequesterPill(requester: requester)
+                    } else if let item, item.id == session.externalCurrent?.id {
+                        // Not from this queue: someone else on the Spotify account chose it.
+                        FromServiceLabel(service: session.serviceName)
+                    }
+                }
+            }
+            .foregroundStyle(.white)
+            .lineLimit(1)
+            .multilineTextAlignment(.center)
+            .frame(maxWidth: min(side + 120, width))
+            if let item {
+                // While disconnected the bar means nothing; say why the controls are off instead.
+                ProgressBar(itemID: item.id, duration: item.track.duration, session: session)
+                    .frame(width: side)
+                    .opacity(model.spotifyDisconnected ? 0 : 1)
+                    .allowsHitTesting(!model.spotifyDisconnected && (!model.isDisplay || session.displaysCanControl))
+                    .overlay {
+                        if model.spotifyDisconnected {
+                            Label("Playback device disconnected", systemImage: "exclamationmark.triangle.fill")
+                                .font(.subheadline.weight(.medium))
+                                .foregroundStyle(.orange)
+                        }
+                    }
+            }
+        }
     }
 
     /// Between the artwork, the song's text, the progress bar, the zone line and the controls.
@@ -665,8 +702,12 @@ struct EqualizerBars: View {
 }
 
 private struct ProgressBar: View {
+    /// The page's song, which can still be the last one while it slides out (the engine has
+    /// moved on): its bar holds where it was (`HeldSongTime`).
+    let itemID: QueueItem.ID
     let duration: TimeInterval?
     let session: PartySession
+    @State private var held = HeldSongTime()
 
     /// Where the finger is while scrubbing (0...1); nil when not dragging.
     @State private var scrub: Double?
@@ -678,7 +719,8 @@ private struct ProgressBar: View {
         // while paused, to catch seeks.
         TimelineView(.animation(minimumInterval: session.isPlaying ? nil : 0.5)) { _ in
             let total = max(duration ?? 0, 1)
-            let elapsed = scrub.map { $0 * total } ?? session.position
+            let live = itemID == session.nowPlaying?.id
+            let elapsed = scrub.map { $0 * total } ?? held.show(live ? session.position : nil)
             let thickness: CGFloat = isScrubbing ? 12 : 5
             // Never narrower than a circle (a thinner capsule squashes into a sliver): at 0:00
             // there's none, and from the first moment past it a dot, which grows. At once, not

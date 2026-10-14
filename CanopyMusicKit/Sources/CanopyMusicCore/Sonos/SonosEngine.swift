@@ -125,9 +125,13 @@ public enum SonosPlaybackRules {
         /// Our current song has been seen playing (so a stop afterwards is its end, not the
         /// moment before it starts).
         public var sawPlaying: Bool
+        /// Every song the engine has put in the group's queue since it last emptied it; nil when
+        /// that isn't known (a queue found after a relaunch that couldn't be read). A song that
+        /// isn't one of them is someone else's queue, never "further on in ours".
+        public var queued: Set<String>?
 
         public init(currentID: String?, currentNumber: Int?, stagedID: String? = nil, stagedNumber: Int? = nil,
-                    pausedByUs: Bool = false, reportedEnd: Bool = false, sawPlaying: Bool = false) {
+                    pausedByUs: Bool = false, reportedEnd: Bool = false, sawPlaying: Bool = false, queued: Set<String>? = nil) {
             self.currentID = currentID
             self.currentNumber = currentNumber
             self.stagedID = stagedID
@@ -135,6 +139,7 @@ public enum SonosPlaybackRules {
             self.pausedByUs = pausedByUs
             self.reportedEnd = reportedEnd
             self.sawPlaying = sawPlaying
+            self.queued = queued
         }
     }
 
@@ -171,6 +176,10 @@ public enum SonosPlaybackRules {
             if o.state == .stopped, c.sawPlaying, !c.pausedByUs, !c.reportedEnd { return .reachedEnd }
             return .nothing
         }
+        // A song the engine never queued: someone else replaced the queue (another Canopy Music
+        // zone took the room, or the Sonos app), playing or about to. Not the end of ours: the
+        // session mustn't play its next song over it.
+        if let queued = c.queued, !queued.contains(trackID) { return .lostControl }
         // A service track that's neither ours nor staged.
         guard !c.reportedEnd else { return .nothing }
         // Stopped there: the queue ran out (Sonos goes back to its first entry and stops).
@@ -240,6 +249,9 @@ public final class SonosEngine: PlaybackEngine {
     private var sawPlaying = false
     /// Another source took the room over; the next play or resume starts our song again.
     private var lostControl = false
+    /// The songs put in the group's queue since it was last emptied (`SonosPlaybackRules.Context.queued`);
+    /// nil when a queue found after a relaunch couldn't be read.
+    private var queued: Set<String>? = []
     /// No pause or setting is sent before this engine has played something: the room may be
     /// playing someone else's music, and dropping an unused engine pauses it.
     public private(set) var hasStarted = false
@@ -310,6 +322,7 @@ public final class SonosEngine: PlaybackEngine {
         do {
             try await groupRoomsIfNeeded(retaking: retaking)
             try await reporting("RemoveAllTracksFromQueue") { try await client.clearQueue() }
+            queued = [track.id]
             accountStep = true
             let number = try await reporting("AddURIToQueue") { try await client.addToQueue(uri: uri, metadata: metadata, position: 0, asNext: false) }
             accountStep = false
@@ -413,6 +426,14 @@ public final class SonosEngine: PlaybackEngine {
         // The player may already be on the staged song (a restage as a song ends): take that
         // first. This stage is then stale; the session stages again behind the new song.
         if try await applyLatestObservation() { throw CancellationError() }
+        // Another source has the rooms (another zone took them over, say): its queue isn't ours
+        // to add to. The next play starts our song again; what follows is staged then.
+        guard !lostControl else {
+            stagedTrack = nil
+            stagedNumber = nil
+            log?("not staging \(track?.title ?? "nothing"): another source has the rooms")
+            return
+        }
         // Read after the observation, which may have followed the group to a new coordinator.
         guard let current = currentNumber else { throw CancellationError() }
         let previous = stagedNumber
@@ -426,6 +447,7 @@ public final class SonosEngine: PlaybackEngine {
             }
             stagedTrack = track
             stagedNumber = number
+            queued?.insert(track.id)
             if previous != nil {
                 do {
                     try await client.removeFromQueue(trackNumber: number + 1)
@@ -577,6 +599,11 @@ public final class SonosEngine: PlaybackEngine {
     /// real from now on. Before that, they only change `target`.
     public var isGrouped: Bool { hasGrouped }
 
+    /// Another source has the rooms now (the Sonos app, the TV, another Canopy Music zone that
+    /// took them over): the engine leaves them alone, shows paused, and only a play from this
+    /// zone (or a resume) takes them back.
+    public var hasLostControl: Bool { lostControl }
+
     /// Before anything has played: a new target outright (the rooms are grouped at the first play).
     public func retarget(_ next: SonosTarget) {
         guard !hasGrouped else { return }
@@ -589,7 +616,9 @@ public final class SonosEngine: PlaybackEngine {
     /// `waitUntilGrouped` says when Sonos has it in the group.
     public func addRoom(_ room: SonosTarget.Room) async throws {
         guard !target.rooms.contains(where: { $0.id == room.id }) else { return }
-        if hasGrouped {
+        // Not after another source took the rooms: the coordinator's group is someone else's
+        // now. It's only noted; the next play takes the rooms (this one too) back.
+        if hasGrouped, !lostControl {
             busy += 1
             defer { busy -= 1 }
             try await SonosClient(transport: transport, host: room.host).setTransportURI(SonosURI.joinGroup(of: target.coordinator.id))
@@ -622,8 +651,9 @@ public final class SonosEngine: PlaybackEngine {
     /// it plays on by itself. The last room can't be removed.
     public func removeRoom(_ roomID: String) async throws {
         guard target.rooms.count > 1, let room = target.rooms.first(where: { $0.id == roomID }) else { throw SonosError.lastRoom }
-        guard hasGrouped else {
-            // Nothing set up on the speakers yet.
+        guard hasGrouped, !lostControl else {
+            // Nothing set up on the speakers yet, or another source has them now (another
+            // zone's group isn't ours to take rooms out of).
             if roomID == target.coordinator.id {
                 target = SonosTarget(coordinator: target.joining[0], joining: Array(target.joining.dropFirst()))
             } else {
@@ -776,6 +806,8 @@ public final class SonosEngine: PlaybackEngine {
         currentTrack = current
         currentNumber = info.track
         let following = queue?.first { $0.id == "Q:0/\(info.track + 1)" }?.uri.flatMap(SonosURI.canopyTrackID(of:))
+        // The queue as it is, all ours (it's the restored song's); unread, unknown.
+        queued = queue.map { Set($0.compactMap { $0.uri.flatMap(SonosURI.canopyTrackID(of:)) } + [current.id]) }
         if let next, following == next.id {
             stagedTrack = next
             stagedNumber = info.track + 1
@@ -875,7 +907,7 @@ public final class SonosEngine: PlaybackEngine {
         let context = SonosPlaybackRules.Context(
             currentID: currentTrack?.id, currentNumber: currentNumber,
             stagedID: stagedTrack?.id, stagedNumber: stagedNumber,
-            pausedByUs: pausedByUs, reportedEnd: reportedEnd, sawPlaying: sawPlaying
+            pausedByUs: pausedByUs, reportedEnd: reportedEnd, sawPlaying: sawPlaying, queued: queued
         )
         let step = SonosPlaybackRules.step(observation, context)
         let ours = observation.trackID != nil && (observation.trackID == currentTrack?.id || observation.trackID == stagedTrack?.id)

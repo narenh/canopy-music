@@ -225,6 +225,9 @@ public final class SonosSimulator: SonosTransport {
         case "RemoveAllTracksFromQueue":
             groups[g].queue = []
             groups[g].track = 1
+            // Playing from the queue, there's nothing left to play (assumed: a real player is
+            // taken to stop; not seen).
+            if groups[g].elsewhere == nil { groups[g].state = .stopped }
         case "AddURIToQueue":
             let uri = request.argument("EnqueuedURI") ?? ""
             if let sid = SonosURI.serviceAndAccount(of: uri)?.serviceID, unlinkedServices.contains(sid) {

@@ -66,7 +66,16 @@ struct HostView: View {
                 .frame(maxWidth: .infinity)
             }
         }
-        .background { ThemedBackground(track: session.nowPlaying?.track, theme: theme) }
+        .background {
+            // The song's colours once there's a song (a playlist loaded, or playing); Dusk on the
+            // empty start screen, cross-fading as the song's background does.
+            ZStack {
+                ThemedBackground(track: session.nowPlaying?.track, theme: theme)
+                DuskBackground()
+                    .opacity(session.nowPlaying == nil ? 1 : 0)
+                    .animation(.linear(duration: 2), value: session.nowPlaying == nil)
+            }
+        }
         .environment(\.artworkTheme, theme)
         .preferredColorScheme(.dark)
         // Presented views get the model explicitly: on a Mac, a sheet's view was seen without it
@@ -93,8 +102,7 @@ struct HostView: View {
             }
         }) {
             ZStack {
-                LinearGradient(colors: [Color(white: 0.11), Color(white: 0.04)], startPoint: .top, endPoint: .bottom)
-                    .ignoresSafeArea()
+                DuskBackground()
                 SpotifySetupStep(back: { signingInToSpotify = false }) {
                     signedInToSpotify = true
                     signingInToSpotify = false

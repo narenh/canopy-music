@@ -15,8 +15,7 @@ struct OnboardingView: View {
 
     var body: some View {
         ZStack {
-            LinearGradient(colors: [Color(white: 0.11), Color(white: 0.04)], startPoint: .top, endPoint: .bottom)
-                .ignoresSafeArea()
+            DuskBackground()
             ContentCap {
                 switch step {
                 case .chooser:

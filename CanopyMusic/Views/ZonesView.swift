@@ -14,8 +14,7 @@ struct ZoneListView: View {
     var body: some View {
         let zones = model.otherZones
         ZStack {
-            LinearGradient(colors: [Color(white: 0.13), Color(white: 0.06)], startPoint: .top, endPoint: .bottom)
-                .ignoresSafeArea()
+            DuskBackground()
             ContentCap {
                 VStack(spacing: 0) {
                     Spacer(minLength: 24)
@@ -171,8 +170,7 @@ struct CreateZoneView: View {
 
     var body: some View {
         ZStack {
-            LinearGradient(colors: [Color(white: 0.13), Color(white: 0.06)], startPoint: .top, endPoint: .bottom)
-                .ignoresSafeArea()
+            DuskBackground()
             ContentCap {
                 VStack(spacing: 22) {
                     LogoView(height: 40)

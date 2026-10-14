@@ -266,6 +266,37 @@ import Testing
         #expect(rebuilds.count == 1)
     }
 
+    /// Seen on a real iPad: no Apple Music account found, so the rooms couldn't be ticked; the
+    /// host played an Apple Music song from the Sonos app, the rows showed it, but the rooms
+    /// stayed unselectable until a relaunch (accounts were read only by a full refresh).
+    @Test func anAccountSeenPlayingMakesTheRoomsSelectableWithoutARelaunch() async throws {
+        sim.accounts = []
+        let controller = await makeController()
+        controller.canChangeOutput = { true }
+        controller.select(rooms: [Self.bedroom])
+        #expect(controller.setup()?.hasAccount == false)
+        #expect(!controller.usesSonos)
+        let rebuilds = Counter()
+        controller.onOutputChanged = { rebuilds.count += 1 }
+
+        // Played from the Sonos app, on Move: an Apple Music song (account 5).
+        sim.play(.init(uri: "x-sonos-http:song%3a1440857781.mp4?sid=204&flags=8224&sn=5", title: "Ribs", artist: "Lorde"), in: Self.move)
+        await controller.readRooms()
+        let setup = try #require(controller.setup())
+        #expect(room(setup, Self.move)?.status == "Playing Ribs – Lorde")
+        #expect(setup.hasAccount)
+        #expect(controller.account?.serialNumber == 5)
+        // The chosen room now plays from it: the session is rebuilt with a Sonos engine.
+        #expect(controller.usesSonos)
+        #expect(rebuilds.count == 1)
+        #expect(controller.setSonosRoom(Self.move, on: true))
+        // A reading with nothing new doesn't read the household again.
+        let before = sim.requests.filter { $0.action == "Browse" }.count
+        await controller.readRooms()
+        #expect(sim.requests.filter { $0.action == "Browse" }.count == before)
+        #expect(sim.changes.isEmpty)
+    }
+
     // MARK: The phone
 
     @Test func snapshotsCarryTheRoomsForHostsOnly() async throws {

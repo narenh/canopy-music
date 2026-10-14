@@ -176,6 +176,9 @@ public final class SonosHousehold {
         var readings: [String: SonosRoomReading] = [:]
         // What each group plays, from its coordinator.
         var playing: [String: String?] = [:]
+        // Accounts its song comes from: one the household hadn't shown before (the host just
+        // played something from it in the Sonos app) is how a newly linked service turns up.
+        var nowPlaying: [SonosAccount] = []
         for group in groups {
             guard let host = group.coordinator?.host else { continue }
             let client = SonosClient(transport: transport, host: host)
@@ -187,6 +190,10 @@ public final class SonosHousehold {
                 let mediaTitle = media?["CurrentURIMetaData"].flatMap { SonosParse.didlItems($0).first?.title }
                 description = SonosNowPlaying.describe(state: state, position: position, mediaURI: media?["CurrentURI"], mediaTitle: mediaTitle,
                                                        coordinatorID: group.coordinatorID, ourCoordinatorID: ourCoordinatorID)
+                if let position, let uri = position.trackURI {
+                    let item = SonosItem(id: "now", title: position.item?.title, uri: uri, desc: position.item?.desc)
+                    nowPlaying += SonosParse.accounts(in: [item], seenIn: group.name)
+                }
             }
             playing[group.coordinatorID] = description
         }
@@ -210,6 +217,18 @@ public final class SonosHousehold {
                                                  elsewhere: coordinator.flatMap { playing[$0] ?? nil })
         }
         self.readings = readings
+        // Accounts used to be read only by a full refresh (launch, or Bonjour news), so a service
+        // linked (or first played) while the app ran stayed unusable until a relaunch. A new one
+        // seen playing reads them all again (favourites, queues, now playing), and the refresh
+        // hook runs as after a full refresh: the rows become selectable, and a session waiting
+        // for an account gets one.
+        let known = Set(accounts.map(\.id))
+        if nowPlaying.contains(where: { !known.contains($0.id) }) {
+            let found = await findAccounts()
+            accounts = SonosParse.merge([found, nowPlaying, accounts])
+            log?("new account seen playing: \(accounts.map(\.id).joined(separator: ", "))")
+            onRefresh?()
+        }
     }
 
     /// A volume just set here, shown at once rather than at the next reading.

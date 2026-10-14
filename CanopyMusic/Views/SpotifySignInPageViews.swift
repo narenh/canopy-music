@@ -63,9 +63,12 @@ struct SpotifySignInPageField: View {
     @Environment(AppModel.self) private var model
     @Binding var isUsable: Bool
     var showsHelp = true
+    /// The field gained or lost focus (the setup page keeps it above the keyboard).
+    var onFocusChange: (Bool) -> Void = { _ in }
     @State private var text = ""
     @State private var result: SpotifyRelay.PageCheck?
     @State private var checking = false
+    @FocusState private var focused: Bool
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
@@ -79,11 +82,22 @@ struct SpotifySignInPageField: View {
                 .frame(height: 48)
                 .glassEffect(.regular.interactive(), in: Capsule())
                 .accessibilityLabel("Spotify sign-in page")
+                .focused($focused)
             status
                 .font(.system(size: 14))
                 .padding(.horizontal, 8)
         }
         .onAppear { text = model.spotifyOwnSignInPage ?? "" }
+        .onChange(of: focused) { onFocusChange(focused) }
+        #if DEBUG
+        // `-focusSignInPage`: focuses the field, showing the keyboard (the simulator can't be tapped from here).
+        .task {
+            if ProcessInfo.processInfo.arguments.contains("-focusSignInPage") {
+                try? await Task.sleep(for: .seconds(1.5))
+                focused = true
+            }
+        }
+        #endif
         .task(id: text) {
             // Checked once typing pauses.
             let typed = text

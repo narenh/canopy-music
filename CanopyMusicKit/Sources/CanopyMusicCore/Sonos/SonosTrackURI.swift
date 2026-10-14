@@ -142,8 +142,11 @@ public enum SonosURI {
             let rest = decoded.dropFirst("x-sonos-spotify:".count)
             return rest.hasPrefix("spotify:track:") ? String(rest) : nil
         }
-        if decoded.hasPrefix("x-sonos-http:song:") {
-            var id = decoded.dropFirst("x-sonos-http:song:".count)
+        // Apple Music: the form Canopy Music queues (`x-sonos-http:song:{id}.mp4`), and the
+        // streaming forms Sonos keeps in its queue for the same song (seen on a real S2 household:
+        // `x-sonosapi-hls-static:song:{id}`), so a song still reads as ours once Sonos has it.
+        for scheme in ["x-sonos-http:song:", "x-sonosapi-hls-static:song:", "x-sonosapi-hls:song:"] where decoded.hasPrefix(scheme) {
+            var id = decoded.dropFirst(scheme.count)
             if let dot = id.firstIndex(of: ".") { id = id[..<dot] }
             return id.isEmpty ? nil : String(id)
         }

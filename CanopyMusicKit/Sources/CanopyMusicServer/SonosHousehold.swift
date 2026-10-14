@@ -17,6 +17,10 @@ public final class SonosHousehold {
     /// What `ListAvailableServices` lists (the region's services; not which are linked).
     public private(set) var services: [SonosServiceDescriptor] = []
     public private(set) var serviceTypes: [Int] = []
+    /// The Sonos household the topology was read from (`Sonos_…`, DeviceProperties
+    /// `GetHouseholdID`); nil until a player has answered. Accounts are remembered under it, so a
+    /// hub taken to another home doesn't use the first home's.
+    public private(set) var householdID: String?
     /// True once a browse has had time to find something (or found nothing).
     public private(set) var hasSearched = false
     public private(set) var isRefreshing = false
@@ -133,6 +137,8 @@ public final class SonosHousehold {
             let client = SonosClient(transport: transport, host: host)
             guard let groups = try? await client.zoneGroups() else { continue }
             self.groups = Self.sorted(groups)
+            // The same player, so it's the household the topology (and the rooms) are from.
+            if let id = try? await client.householdID() { householdID = id }
             if let available = try? await client.availableServices() {
                 services = available.services
                 serviceTypes = available.types
@@ -234,6 +240,12 @@ public final class SonosHousehold {
     /// A volume just set here, shown at once rather than at the next reading.
     public func noteVolume(_ volume: Int, for roomID: String) {
         readings[roomID]?.volume = volume
+    }
+
+    /// Sonos refused to play from this account (`SonosEngine.onAccountRejected`): it's dropped
+    /// until the household shows it again.
+    public func forgetAccount(_ id: String) {
+        accounts.removeAll { $0.id == id }
     }
 
     /// Accounts read off favourites and every group's queue and current track. Current S2

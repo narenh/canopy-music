@@ -130,14 +130,31 @@ import Testing
         #expect(controller.setup() == nil)
     }
 
-    @Test func withoutALinkedAccountNothingCanBeTicked() async throws {
+    /// A real household played a linked service's songs with any serial: with no account seen,
+    /// one is assumed (serial 1), so the rooms can be chosen and play straight away.
+    @Test func withNoAccountSeenTheRoomsPlayFromAnAssumedOne() async throws {
         sim.accounts = []
         let controller = await makeController()
         controller.canChangeOutput = { true }
-        let setup = try #require(controller.setup())
-        #expect(!setup.hasAccount)
-        #expect(!controller.setSonosRoom(Self.bedroom, on: true))
-        #expect(controller.output == nil)
+        #expect(controller.accounts.isEmpty)
+        var setup = try #require(controller.setup())
+        #expect(setup.hasAccount)
+        // Nothing to choose between: no "Whose account plays".
+        #expect(setup.accounts.isEmpty)
+        #expect(controller.setSonosRoom(Self.bedroom, on: true))
+        #expect(controller.account?.serialNumber == SonosOutputController.assumedSerial)
+        #expect(controller.playback?.reference.accountSerial == 1)
+        setup = try #require(controller.setup())
+        #expect(setup.ready)
+        // The assumed account isn't kept as the choice: an account seen later takes over.
+        #expect(defaults.data(forKey: SonosOutputController.accountsKey).flatMap { try? JSONDecoder().decode([String: SonosAccount].self, from: $0) }?.isEmpty != false)
+
+        let session = try await playingSession(controller)
+        #expect(await waitFor { sim.state(of: Self.bedroom) == .playing })
+        #expect(sim.queue(of: Self.bedroom).first?.contains("sid=204&flags=8224&sn=1") == true)
+        // Playing isn't a refusal: the account stays.
+        #expect(controller.setup()?.hasAccount == true)
+        session.shutdown()
     }
 
     @Test func severalAccountsAreOfferedAndChoosingOneRebuilds() async throws {
@@ -257,12 +274,15 @@ import Testing
         sim.accounts = []
         let controller = await makeController()
         controller.select(rooms: [Self.bedroom])
-        #expect(!controller.usesSonos)
+        // The assumed account plays until one is seen.
+        #expect(controller.playback?.reference.accountSerial == 1)
+        let session = PartySession(catalog: SonosFakeCatalog(), engine: try #require(controller.makeEngine()))
+        controller.connect(session)
         let rebuilds = Counter()
         controller.onOutputChanged = { rebuilds.count += 1 }
         sim.accounts = [(SonosMusicService.appleMusic.serviceID, 3)]
         await controller.household.refreshNow()
-        #expect(controller.usesSonos)
+        #expect(controller.playback?.reference.accountSerial == 3)
         #expect(rebuilds.count == 1)
     }
 
@@ -274,8 +294,11 @@ import Testing
         let controller = await makeController()
         controller.canChangeOutput = { true }
         controller.select(rooms: [Self.bedroom])
-        #expect(controller.setup()?.hasAccount == false)
-        #expect(!controller.usesSonos)
+        // The assumed account meanwhile.
+        #expect(controller.accounts.isEmpty)
+        #expect(controller.account?.serialNumber == 1)
+        let session = PartySession(catalog: SonosFakeCatalog(), engine: try #require(controller.makeEngine()))
+        controller.connect(session)
         let rebuilds = Counter()
         controller.onOutputChanged = { rebuilds.count += 1 }
 

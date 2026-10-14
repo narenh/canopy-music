@@ -346,6 +346,8 @@ final class AppModel {
         // Debug launches above may have changed the service.
         sonosController.service = sonosService
         sonosController.onOutputChanged = { [weak self] in self?.rebuildSessionForOutput() }
+        // Other hubs' zones, asked for Sonos accounts this one hasn't seen.
+        sonosController.peers = { [weak self] in self?.otherZones ?? [] }
         sonosController.onError = { [weak self] message in self?.errorMessage = message }
         // A host's phone sees the rooms in the party page's volume row and Devices (hosts' snapshots).
         sonosController.onChange = { [weak self] in self?.publishSonosSetup() }

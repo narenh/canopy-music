@@ -206,6 +206,21 @@ public final class SonosEngine: PlaybackEngine {
     private let transport: any SonosTransport
     /// After each change of `target`, so the app can remember the rooms for the next launch.
     public var onTargetChanged: (@MainActor (SonosTarget) -> Void)?
+    /// Sonos refused the account (or the service) this engine streams from: the first song's
+    /// `AddURIToQueue` (the first command carrying the service URI) or its `Play` came back with
+    /// a UPnP fault, right after the same coordinator took `RemoveAllTracksFromQueue`. An 800
+    /// counts only once the live layout confirms the room leads its group: otherwise it's the
+    /// usual "not the coordinator", and the engine follows the group as before. Never once a
+    /// song from it has played: a later refusal is that song's, not the account's.
+    ///
+    /// What's known (a real S2 household): a service that isn't linked (Tidal) answered
+    /// `SetAVTransportURI` with 800 on the real coordinator, then `Play` with 701; a linked
+    /// service played with any serial (1–8) or none. That `AddURIToQueue` refuses an unlinked
+    /// service the same way is assumed, not seen. A refusal that shows only as the transport
+    /// stopping isn't caught.
+    public var onAccountRejected: (@MainActor (SonosTrackReference) -> Void)?
+    /// A song from `reference` has played (or `attach` found ours playing): Sonos takes the account.
+    private var accountPlayed = false
     /// The session's current song as restored at launch: the group may still be playing it from
     /// before (Sonos plays on while the app is gone), and then it's ours to pause on `shutDown`
     /// (if `attach` hasn't taken it over by then).
@@ -290,26 +305,44 @@ public final class SonosEngine: PlaybackEngine {
         stagedNumber = nil
         hasStarted = true
         attached = false
+        // The steps whose refusal, on the first song from the account, is the account's.
+        var accountStep = false
         do {
             try await groupRoomsIfNeeded(retaking: retaking)
             try await reporting("RemoveAllTracksFromQueue") { try await client.clearQueue() }
+            accountStep = true
             let number = try await reporting("AddURIToQueue") { try await client.addToQueue(uri: uri, metadata: metadata, position: 0, asNext: false) }
+            accountStep = false
             try await reporting("SetAVTransportURI") { try await client.setTransportURI(SonosURI.queue(of: target.coordinator.id)) }
             // Shuffle or repeat in the Sonos app would play the queue out of order.
             try? await client.setPlayModeNormal()
             if let crossfade { try? await client.setCrossfade(crossfade) }
             try await reporting("Seek") { try await client.seek(trackNumber: number) }
+            accountStep = true
             try await reporting("Play") { try await client.play() }
+            accountStep = false
+            accountPlayed = true
             currentTrack = track
             currentNumber = number
         } catch {
             // The queue is being replaced anyway: nothing to take over from a new coordinator.
-            await noteRefusal(error, adoptQueue: false)
+            let refusal = await noteRefusal(error, adoptQueue: false)
+            if accountStep, !accountPlayed, Self.isAccountRefusal(error, refusal) {
+                log?("Sonos refused the first song from account \(reference.accountSerial) (\(reference.service.rawValue)): the account counts as rejected")
+                onAccountRejected?(reference)
+            }
             throw error
         }
         cache(playing: true, time: 0)
         log?("play \(track.title) at #\(currentNumber ?? 0) in \(target.name)")
         startPolling()
+    }
+
+    /// A refused account step: 800 only once the live layout has confirmed the room leads its
+    /// group (else it's grouping, followed as before); any other UPnP fault as it is.
+    static func isAccountRefusal(_ error: any Error, _ refusal: Refusal) -> Bool {
+        guard case .upnp(_, let code)? = error as? SonosError else { return false }
+        return code == 800 ? refusal == .coordinator : true
     }
 
     /// One command to the coordinator; a failure is logged with the action, the room and the error.
@@ -326,16 +359,28 @@ public final class SonosEngine: PlaybackEngine {
     /// Canopy Music since the last poll. The coordinator is read now rather than at the next
     /// poll: a group now led by one of our rooms is followed; any other group has taken the room,
     /// and the next play takes it back (`lostControl`). The refused command isn't retried.
-    private func noteRefusal(_ error: any Error, adoptQueue: Bool = true) async {
+    /// What it found: `.regrouped` when the room reads as a member of another group;
+    /// `.coordinator` when the live layout says the room still leads its group (an 800 that isn't
+    /// about grouping: a real player answers a service that isn't linked with 800); `.unknown`
+    /// otherwise (another error, or nothing could be read). Each is read once; nothing is retried.
+    enum Refusal { case regrouped, coordinator, unknown }
+
+    @discardableResult
+    private func noteRefusal(_ error: any Error, adoptQueue: Bool = true) async -> Refusal {
         guard case .upnp(_, let code)? = error as? SonosError, code == 800,
-              let info = try? await client.positionInfo(),
-              let leaderID = info.trackURI.flatMap(SonosURI.coordinator(ofMemberURI:)) else { return }
+              let info = try? await client.positionInfo() else { return .unknown }
+        guard let leaderID = info.trackURI.flatMap(SonosURI.coordinator(ofMemberURI:)) else {
+            let coordinator = target.coordinator.id
+            let leads = await liveGroups()?.first { $0.members.contains { $0.id == coordinator } }?.coordinatorID == coordinator
+            return leads ? .coordinator : .unknown
+        }
         if let leader = target.rooms.first(where: { $0.id == leaderID }) {
             await follow(to: leader, adoptQueue: adoptQueue)
         } else {
             log?("\(target.coordinator.name) is in another group (led by \(leaderID)): the next play takes it back")
             lostControl = true
         }
+        return .regrouped
     }
 
     /// Our coordinator reads as a member of `leader`'s group, and `leader` is one of our rooms:
@@ -715,6 +760,8 @@ public final class SonosEngine: PlaybackEngine {
     /// next one (otherwise the session stages its own after it). Nothing is sent.
     private func adopt(_ group: SonosGroup, leader: SonosTarget.Room, info: SonosPositionInfo, state: SonosTransportState?,
                        queue: [SonosItem]?, current: QueueTrack, next: QueueTrack?) {
+        // Our song is in its queue: Sonos took the account.
+        accountPlayed = true
         let known = target.rooms
         let members = group.rooms.filter { $0.id != leader.id }.compactMap { member -> SonosTarget.Room? in
             let chosen = known.first { $0.id == member.id }

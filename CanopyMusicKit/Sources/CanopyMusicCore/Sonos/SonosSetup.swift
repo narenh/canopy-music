@@ -54,7 +54,8 @@ public struct SonosSetup: Codable, Equatable, Sendable {
     public var chosen: [String]
     /// The chosen rooms by name ("Bedroom + Move"), for when they aren't found now.
     public var chosenName: String?
-    /// An account for the service is linked in the Sonos app (found on the household).
+    /// There's an account to stream from: one seen (here, remembered, or from another hub), or
+    /// the assumed one. False only once Sonos has refused the service: "Add … in the Sonos app".
     public var hasAccount: Bool
     /// Every account found for the service; "Whose account plays" when there's more than one.
     public var accounts: [SonosSetup.Account]
@@ -100,6 +101,31 @@ public protocol SonosOutputHandler: AnyObject, Sendable {
     func beginSonosGroupVolume()
     /// Reads the rooms again (volumes, groups, what each plays); snapshots follow.
     func readSonosRooms() async
+    /// The linked accounts this hub knows for a Sonos household (`GET /api/sonos/accounts`), for
+    /// another hub that hasn't seen them.
+    func sonosAccounts(household: String) -> [SonosSharedAccount]
+}
+
+/// A linked account as one hub tells another (`GET /api/sonos/accounts?household=<id>`): only
+/// what any Sonos queue on the network shows anyway, the service id and the account's serial,
+/// and a song it played to tell accounts apart. No token.
+public struct SonosSharedAccount: Codable, Equatable, Sendable {
+    public var serviceID: Int
+    public var serialNumber: Int
+    /// A song title it played ("Account 1, played “Ribs”"), if one was seen.
+    public var label: String?
+
+    public init(serviceID: Int, serialNumber: Int, label: String? = nil) {
+        self.serviceID = serviceID
+        self.serialNumber = serialNumber
+        self.label = label
+    }
+
+    public init(_ account: SonosAccount) {
+        self.init(serviceID: account.serviceID, serialNumber: account.serialNumber, label: account.example)
+    }
+
+    public var account: SonosAccount { SonosAccount(serviceID: serviceID, serialNumber: serialNumber, example: label) }
 }
 
 public extension SonosAccount {

@@ -1802,12 +1802,13 @@
       : [{ action: "off", icon: outputIcons.speaker, name: s.chosenName || "Sonos", sub: s.searched ? "Not found on this Wi‑Fi" : "Looking…",
            tone: "warn", mark: "on" }];
     fillOutputList($("output-rooms"), rows);
-    // The service isn't linked in the Sonos app (or nothing from it has played there yet).
+    // Sonos refused to play the service here (it isn't linked in the Sonos app). Until then the
+    // rooms play from the household's account without it having been seen.
     const noAccount = rooms.length > 0 && !s.hasAccount;
     $("output-sonos-note").hidden = !noAccount;
     if (noAccount) {
       $("output-sonos-what").textContent = `Add ${s.service} in the Sonos app`;
-      $("output-sonos-todo").textContent = `Already added? Play any ${s.service} song on a Sonos speaker from the Sonos app once, so Canopy Music can find the account.`;
+      $("output-sonos-todo").textContent = `Sonos couldn't play ${s.service}. Already added? Play any ${s.service} song from the Sonos app once, so Canopy Music can find it.`;
     }
     renderAccounts(s, onSonos);
   }

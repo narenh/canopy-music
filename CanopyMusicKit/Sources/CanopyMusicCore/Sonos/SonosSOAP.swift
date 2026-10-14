@@ -3,9 +3,11 @@ import Foundation
 /// The UPnP services Canopy Music talks to on a Sonos player (port 1400).
 public enum SonosUPnPService: String, Sendable {
     case avTransport, queue, renderingControl, groupRenderingControl, zoneGroupTopology, musicServices, contentDirectory, groupManagement
+    case deviceProperties
 
     public var controlPath: String {
         switch self {
+        case .deviceProperties: "/DeviceProperties/Control"
         case .avTransport: "/MediaRenderer/AVTransport/Control"
         case .queue: "/MediaRenderer/Queue/Control"
         case .renderingControl: "/MediaRenderer/RenderingControl/Control"
@@ -27,6 +29,7 @@ public enum SonosUPnPService: String, Sendable {
         case .musicServices: "urn:schemas-upnp-org:service:MusicServices:1"
         case .contentDirectory: "urn:schemas-upnp-org:service:ContentDirectory:1"
         case .groupManagement: "urn:schemas-upnp-org:service:GroupManagement:1"
+        case .deviceProperties: "urn:schemas-upnp-org:service:DeviceProperties:1"
         }
     }
 }
@@ -70,7 +73,7 @@ public struct SonosRequest: Sendable, Equatable {
     /// Actions that only read. The debug probe and discovery use only these.
     public static let readOnlyActions: Set<String> = [
         "GetZoneGroupState", "ListAvailableServices", "Browse", "GetPositionInfo", "GetTransportInfo",
-        "GetMediaInfo", "GetTransportSettings", "GetCrossfadeMode", "GetVolume", "GetGroupVolume",
+        "GetMediaInfo", "GetTransportSettings", "GetCrossfadeMode", "GetVolume", "GetGroupVolume", "GetHouseholdID",
     ]
 
     public var isReadOnly: Bool { Self.readOnlyActions.contains(action) }
@@ -212,6 +215,13 @@ public struct SonosClient: Sendable {
         let reply = try await call(.groupRenderingControl, "GetGroupVolume", [Self.instance])
         guard let volume = reply["CurrentVolume"].flatMap(Int.init) else { throw SonosError.badResponse(action: "GetGroupVolume") }
         return volume
+    }
+
+    /// The Sonos household this player belongs to (`Sonos_…`; DeviceProperties `GetHouseholdID`,
+    /// answered by a real S2 player). Every room of a household gives the same one.
+    public func householdID() async throws -> String? {
+        let id = try await call(.deviceProperties, "GetHouseholdID")["CurrentHouseholdID"]
+        return id.flatMap { $0.isEmpty ? nil : $0 }
     }
 
     public func deviceDescription() async throws -> SonosPlayer? {

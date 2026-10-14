@@ -311,6 +311,24 @@ struct HostSettingsTests {
         #expect(stops == 1)
     }
 
+    /// Seen on real devices: a TV that left an iPad's zone stayed in its Connected list, because
+    /// stale displays were only cleared when another display checked in.
+    @Test func displaysThatLeaveOrGoQuietDropOff() async throws {
+        let hub = PartySession(catalog: DemoCatalog(), engine: DemoPlaybackEngine())
+        // Gone quiet (unplugged, off the Wi‑Fi): dropped without anyone else checking in.
+        hub.noteDisplay(ZoneDisplay(id: "tv", name: "Living Room", kind: .tv, lastSeen: Date().addingTimeInterval(-60)))
+        #expect(hub.displays.isEmpty)
+
+        // Leaving on purpose: gone as soon as it says so.
+        hub.noteDisplay(ZoneDisplay(id: "tv", name: "Living Room", kind: .tv))
+        #expect(hub.displays.map(\.id) == ["tv"])
+        let (server, task) = try #require(await PartyServer.start(session: hub, ports: [18783]))
+        defer { task.cancel(); Task { await server.stop() } }
+        let (code, _) = try await post(18783, "/api/display/bye", ["clientId": "tv"])
+        #expect(code == 204)
+        #expect(hub.displays.isEmpty)
+    }
+
     @Test func wifiIsHostOnly() async throws {
         let hub = PartySession(catalog: DemoCatalog(), engine: DemoPlaybackEngine())
         hub.hostKey = "secret"

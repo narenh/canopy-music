@@ -177,6 +177,13 @@ public final class PartyServer: Sendable {
             await session.noteDisplay(ZoneDisplay(id: body.clientId, name: body.name, kind: body.kind, device: body.device))
             return HTTPResponse(statusCode: .ok)
         }
+        // A display that stops showing this zone says so, so it leaves the hub's lists at once.
+        await server.appendRoute("POST /api/display/bye") { request in
+            struct Bye: Decodable { var clientId: String }
+            let body = try JSONDecoder.api.decode(Bye.self, from: await request.bodyData)
+            await session.forgetDisplay(id: body.clientId)
+            return HTTPResponse(statusCode: .noContent)
+        }
 
         await server.appendRoute("POST /api/display/playback") { request in
             let body = try JSONDecoder.api.decode(PlaybackBody.self, from: await request.bodyData)

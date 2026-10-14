@@ -279,6 +279,8 @@ public final class PartySession {
     @ObservationIgnored private let storeURL: URL?
     @ObservationIgnored private var saveTask: Task<Void, Never>?
     @ObservationIgnored private var tickTask: Task<Void, Never>?
+    /// Drops displays that stopped checking in (`noteDisplay`), while any are listed.
+    @ObservationIgnored private var displayExpiry: Task<Void, Never>?
     /// Playback as last sent to listeners, and the loop that resends it if the player drifts.
     @ObservationIgnored private var lastSentPlayback: PlaybackSnapshot?
     @ObservationIgnored private var driftTask: Task<Void, Never>?
@@ -367,11 +369,37 @@ public final class PartySession {
         broadcast()
     }
 
-    /// A display checked in. Displays not heard from for 30 s drop off the list.
+    /// How long a display stays listed without checking in (they check in every 10 s).
+    public static let displayTimeout: TimeInterval = 30
+
+    /// A display checked in. Displays not heard from for `displayTimeout` drop off the list, on
+    /// a timer of their own: a display that's the only one, and then goes quiet (unplugged, off
+    /// the Wi‑Fi), has nobody else's check-in to clear it.
     public func noteDisplay(_ display: ZoneDisplay) {
-        displays.removeAll { $0.id == display.id || Date().timeIntervalSince($0.lastSeen) > 30 }
+        displays.removeAll { $0.id == display.id }
         displays.append(display)
         displays.sort { $0.name < $1.name }
+        expireDisplays()
+        guard displayExpiry == nil else { return }
+        displayExpiry = Task { [weak self] in
+            while !Task.isCancelled {
+                try? await Task.sleep(for: .seconds(5))
+                guard let self else { return }
+                self.expireDisplays()
+                if self.displays.isEmpty { self.displayExpiry = nil; return }
+            }
+        }
+    }
+
+    /// A display said it's leaving (it stopped showing this zone): off the list at once.
+    public func forgetDisplay(id: String) {
+        displays.removeAll { $0.id == id }
+    }
+
+    private func expireDisplays() {
+        let now = Date()
+        let fresh = displays.filter { now.timeIntervalSince($0.lastSeen) <= Self.displayTimeout }
+        if fresh.count != displays.count { displays = fresh }
     }
 
     /// Applies settings sent by a host from the web page. (The iPad's unlock PIN isn't one: it's
@@ -453,6 +481,8 @@ public final class PartySession {
         isUnderWay = false
         skippedOnLoad = []
         displays = []
+        displayExpiry?.cancel()
+        displayExpiry = nil
         resetFollow(keepPlayerQueue: false)
         state.clear()
         broadcast()
@@ -482,6 +512,8 @@ public final class PartySession {
         tickTask = nil
         driftTask?.cancel()
         driftTask = nil
+        displayExpiry?.cancel()
+        displayExpiry = nil
     }
 
     public var hasParty: Bool { state.current != nil || !state.upNext.isEmpty }

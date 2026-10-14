@@ -332,6 +332,12 @@ public final class ZoneConnection: ZoneRemote {
     }
 
     public func stop() {
+        // Leaving: tell the hub, so it drops this display now rather than after its timeout.
+        if heartbeat != nil {
+            struct Bye: Encodable { var clientId: String }
+            let bye = Bye(clientId: clientID)
+            Task { [self] in _ = try? await post("/api/display/bye", bye) }
+        }
         loop?.cancel()
         heartbeat?.cancel()
         loop = nil

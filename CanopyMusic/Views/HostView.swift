@@ -591,23 +591,27 @@ private struct ZoneSection: View {
     }
 }
 
-/// The host PIN: Set (or, once there is one, Change) opens the keypad (`PINSheet`). Empty
-/// unlocks without asking.
+/// The host PIN: a navigation-style row ("Set ›", or "On ›" once there is one); tapping anywhere
+/// on it opens the keypad (`PINSheet`). Empty unlocks without asking.
 private struct ZonePINRow: View {
     @Environment(AppModel.self) private var model
     @State private var editing = false
 
     var body: some View {
-        HStack {
-            Text("PIN")
-            Spacer(minLength: 16)
-            if !model.hostPIN.isEmpty {
-                Text("On").foregroundStyle(.secondary)
+        Button { editing = true } label: {
+            HStack {
+                Text("PIN")
+                Spacer(minLength: 16)
+                Text(model.hostPIN.isEmpty ? "Set" : "On")
+                    .foregroundStyle(.secondary)
+                Image(systemName: "chevron.right")
+                    .font(.footnote.weight(.semibold))
+                    .foregroundStyle(.tertiary)
             }
-            Button(model.hostPIN.isEmpty ? "Set" : "Change") { editing = true }
-                .buttonStyle(.glass)
-                .tint(.primary)
+            .contentShape(Rectangle())
         }
+        .buttonStyle(.plain)
+        .accessibilityHint(model.hostPIN.isEmpty ? "Sets a host PIN" : "Changes or turns off the host PIN")
         .sheet(isPresented: $editing) { PINSheet().environment(model) }
         #if DEBUG
         // `-showPINSheet`: opens the keypad at launch, for screenshots.

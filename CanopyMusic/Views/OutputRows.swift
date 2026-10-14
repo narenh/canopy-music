@@ -100,7 +100,33 @@ struct AirPlayRow: View {
         return airPlay.isEmpty ? nil : airPlay.map(\.portName).joined(separator: ", ")
     }
 
+    /// Why AirPlay is off on a Mac: Apple Music's player plays from a system process there, which
+    /// ignores the app's AirPlay choice (Apple FB13521393, FB13934910); only the Mac's own sound
+    /// output, chosen in Control Center, applies.
+    static let macNote = "On a Mac, music plays through the Mac's sound output. Choose a speaker in Control Center, or use Sonos."
+
     var body: some View {
+        if DeviceKind.isMac {
+            // Dimmed, not hidden, so it's clear why there's no choice here.
+            HStack(spacing: 12) {
+                Image(systemName: "airplay.audio")
+                    .font(.system(size: 17))
+                    .foregroundStyle(.tertiary)
+                    .frame(width: 28, height: 28)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("AirPlay").foregroundStyle(.tertiary)
+                    Text(Self.macNote)
+                        .font(.footnote)
+                        .foregroundStyle(.secondary)
+                }
+            }
+            .accessibilityElement(children: .combine)
+        } else {
+            picker
+        }
+    }
+
+    private var picker: some View {
         Button {
             trigger.present()
         } label: {
@@ -154,7 +180,7 @@ struct ThisDeviceRow: View {
                         .frame(width: 28)
                     VStack(alignment: .leading, spacing: 2) {
                         Text("This \(DeviceKind.noun)")
-                        Text("Device speakers or AirPlay 2")
+                        Text(DeviceKind.isMac ? "The Mac's sound output" : "Device speakers or AirPlay 2")
                             .font(.footnote)
                             .foregroundStyle(.secondary)
                     }
@@ -170,9 +196,20 @@ struct ThisDeviceRow: View {
             .buttonStyle(.plain)
             .accessibilityAddTraits(chosen ? .isSelected : [])
             if chosen {
-                RoutePicker(tint: .white)
-                    .frame(width: 36, height: 36)
-                    .accessibilityLabel("AirPlay speakers")
+                if DeviceKind.isMac {
+                    // AirPlay doesn't apply on a Mac (`AirPlayRow.macNote`): dimmed, not hidden.
+                    Image(systemName: "airplay.audio")
+                        .font(.system(size: 17, weight: .semibold))
+                        .foregroundStyle(.white.opacity(0.3))
+                        .frame(width: 36, height: 36)
+                        .help(AirPlayRow.macNote)
+                        .accessibilityLabel("AirPlay speakers")
+                        .accessibilityValue("Not available on a Mac")
+                } else {
+                    RoutePicker(tint: .white)
+                        .frame(width: 36, height: 36)
+                        .accessibilityLabel("AirPlay speakers")
+                }
             }
         }
     }

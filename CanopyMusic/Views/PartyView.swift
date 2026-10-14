@@ -591,7 +591,7 @@ private struct TransportControls: View {
                     SonosSpeakersButton()
                 } else {
                 // Open AirPlay picker: AirPlay sessions sometimes drop and need re-picking.
-                // Disabled (but kept for balance) when Spotify plays on another device.
+                // Disabled (but kept for balance) when Spotify plays on another device, or on a Mac.
                 if airPlayApplies {
                     RoutePicker(tint: .white)
                         .frame(width: 44, height: 44)
@@ -606,7 +606,8 @@ private struct TransportControls: View {
                         .frame(width: 44, height: 44)
                         .glassEffect(.regular, in: Circle())
                         .accessibilityLabel("Speakers")
-                        .accessibilityValue("Not used: music plays on \(model.spotifyDeviceName ?? "another device")")
+                        .accessibilityValue(DeviceKind.isMac ? "Not available on a Mac" : "Not used: music plays on \(model.spotifyDeviceName ?? "another device")")
+                        .help(DeviceKind.isMac ? AirPlayRow.macNote : "")
                 }
                 }
                 Group {
@@ -673,7 +674,10 @@ private struct TransportControls: View {
         }
     }
 
-    private var airPlayApplies: Bool { !model.usesSonos && (model.provider != .spotify || model.spotifyPlaysOnThisDevice) }
+    /// Not on a Mac, where the music ignores the app's AirPlay choice (`AirPlayRow.macNote`).
+    private var airPlayApplies: Bool {
+        !DeviceKind.isMac && !model.usesSonos && (model.provider != .spotify || model.spotifyPlaysOnThisDevice)
+    }
 }
 
 /// Four bars bouncing at different rates; they settle low when paused.

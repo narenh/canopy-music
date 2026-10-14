@@ -26,6 +26,19 @@ struct MotionArtworkView: View {
     /// video paused on its first frame.
     @State private var inBackground = UIApplication.shared.applicationState == .background
 
+    @Environment(AppModel.self) private var model
+
+    /// Whether the video can play without pausing the music. A display plays no music. On iOS 27
+    /// the video is cut off from the audio session (`LoopingVideoView.start`). Before that, a
+    /// hub's video interrupts the music, so the still art stays: a paused party is far worse than
+    /// art that doesn't move. A Mac lacks the cut-off; it keeps the video until it's known
+    /// whether the problem happens there.
+    private var leavesMusicAlone: Bool {
+        if model.isDisplay || ProcessInfo.processInfo.isiOSAppOnMac { return true }
+        if #available(iOS 27, *) { return true }
+        return false
+    }
+
     var body: some View {
         ZStack {
             if let url {
@@ -45,7 +58,7 @@ struct MotionArtworkView: View {
             found = nil
             url = nil
             isShowing = false
-            guard MotionArtwork.isEnabled, let track else { return }
+            guard MotionArtwork.isEnabled, leavesMusicAlone, let track else { return }
             #if DEBUG
             // `-motionArtworkTestURL <HLS URL>`: plays that for every song, to try the video in the
             // simulator (which can't reach Apple Music) or with any service.

@@ -939,9 +939,16 @@ struct TVProgress: View {
             let time = held.show(live ? min(session.engine.currentTime, duration) : nil)
             VStack(spacing: 10) {
                 GeometryReader { geo in
+                    // Never narrower than a circle (a thinner capsule squashes into a sliver): at
+                    // the very start it's hidden (at once, at a song change), then fades in as a
+                    // dot and grows.
+                    let started = duration > 0 && time >= 0.25
                     ZStack(alignment: .leading) {
                         Capsule().fill(.white.opacity(0.2))
-                        Capsule().fill(.white).frame(width: duration > 0 ? geo.size.width * time / duration : 0)
+                        Capsule().fill(.white)
+                            .frame(width: max(duration > 0 ? geo.size.width * time / duration : 0, geo.size.height))
+                            .opacity(started ? 1 : 0)
+                            .animation(started ? .easeOut(duration: 0.15) : nil, value: started)
                     }
                 }
                 .frame(height: 8)

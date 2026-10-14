@@ -679,13 +679,20 @@ private struct ProgressBar: View {
         TimelineView(.animation(minimumInterval: session.isPlaying ? nil : 0.5)) { _ in
             let total = max(duration ?? 0, 1)
             let elapsed = scrub.map { $0 * total } ?? session.engine.currentTime
+            let thickness: CGFloat = isScrubbing ? 12 : 5
+            // Never narrower than a circle (a thinner capsule squashes into a sliver): at the very
+            // start it's hidden (at once, at a song change), then fades in as a dot and grows.
+            let started = elapsed >= 0.25
             VStack(spacing: 6) {
                 GeometryReader { geo in
                     ZStack(alignment: .leading) {
                         Capsule().fill(.white.opacity(0.18))
-                        Capsule().fill(.white).frame(width: geo.size.width * min(elapsed / total, 1))
+                        Capsule().fill(.white)
+                            .frame(width: max(geo.size.width * min(elapsed / total, 1), thickness))
+                            .opacity(started ? 1 : 0)
+                            .animation(started ? .easeOut(duration: 0.15) : nil, value: started)
                     }
-                    .frame(height: isScrubbing ? 12 : 5)
+                    .frame(height: thickness)
                     .frame(maxHeight: .infinity)
                     .contentShape(Rectangle())
                     .gesture(

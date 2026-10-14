@@ -744,10 +744,11 @@
   function updateProgress() {
     const fill = $("progress");
     const current = snap && nowPlaying(snap);
-    if (!current || !current.track.duration) { fill.style.width = "0"; return; }
+    if (!current || !current.track.duration) { fill.style.width = "0"; fill.classList.remove("started"); return; }
     const pb = snap.playback;
     const elapsed = pb.position + (pb.isPlaying ? (Date.now() - pb.capturedAt) / 1000 : 0);
     fill.style.width = `${Math.min(100, (elapsed / current.track.duration) * 100)}%`;
+    fill.classList.toggle("started", elapsed >= 0.25);
   }
   // Every frame while playing so the bar grows smoothly (a seek just jumps); browsers pause
   // frames in background tabs. Twice a second otherwise, which is plenty while paused.

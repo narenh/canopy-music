@@ -15,7 +15,7 @@ struct TakeoverView: View {
         let flood = Color(rgb: Self.floodColor(for: track))
         let window = Self.lyricWindow(lines)
         TimelineView(.animation) { context in
-            let time = session.engine.currentTime
+            let time = session.position
             // Only on screen while lyrics are being sung, not during the intro or outro.
             let active = window.contains(time)
             let (line, progress) = currentLine(at: time)

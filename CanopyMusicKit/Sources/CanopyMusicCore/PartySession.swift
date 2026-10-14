@@ -262,6 +262,13 @@ public final class PartySession {
     @ObservationIgnored private var generation = 0
     /// The queue item the engine currently has loaded as its current track.
     @ObservationIgnored private var loadedItemID: UUID?
+    /// A skip or previous while paused moved the queue on without the player, which is still
+    /// paused on the song before, where it was (`position`).
+    @ObservationIgnored private var playerOnOldSong = false
+
+    /// Where the current song is. The engine's time, except after a skip or previous while
+    /// paused: that's the song before's, and the new song is at 0:00 until it plays.
+    public var position: TimeInterval { playerOnOldSong ? 0 : engine.currentTime }
     /// A restored session whose engine (not a followed one) was asked to `attach`, and hasn't
     /// yet reported the player on the restored song, nor been given a song since.
     @ObservationIgnored private var awaitingAttach = false
@@ -693,7 +700,7 @@ public final class PartySession {
     }
 
     private func previousNow() async {
-        guard engine.currentTime <= 3, !state.history.isEmpty else {
+        guard position <= 3, !state.history.isEmpty else {
             engine.restartCurrent()
             broadcast()
             return
@@ -701,6 +708,7 @@ public final class PartySession {
         let wasPlaying = engine.isPlaying
         stagedItemID = nil
         cancelStaging()
+        if !wasPlaying { playerOnOldSong = true }
         mutate { $0.goBack() }
         if wasPlaying, let current = state.current {
             try? await play(current)
@@ -750,6 +758,7 @@ public final class PartySession {
             if skipped { return }
         }
         cancelStaging()
+        if !wasPlaying { playerOnOldSong = true }
         mutate { $0.advance() }
         if wasPlaying, let current = state.current { try? await play(current) }
     }
@@ -877,7 +886,7 @@ public final class PartySession {
             current: state.current,
             upNext: state.upNext,
             lockedNextID: state.lockedNextID,
-            playback: PlaybackSnapshot(isPlaying: engine.isPlaying, position: engine.currentTime, capturedAt: Date()),
+            playback: PlaybackSnapshot(isPlaying: engine.isPlaying, position: position, capturedAt: Date()),
             canReorder: phonesCanReorder,
             address: guestAddress,
             lanAddress: lanAddress,
@@ -949,6 +958,7 @@ public final class PartySession {
     private func play(_ item: QueueItem) async throws {
         stagedItemID = nil
         loadedItemID = item.id
+        playerOnOldSong = false
         awaitingAttach = false
         // A new song of ours: any staging for the old one is off.
         cancelStaging()
@@ -1072,6 +1082,7 @@ public final class PartySession {
                 externalCurrent = nil
                 playerIssue = nil
             }
+            playerOnOldSong = false
             mutate { $0.advance(to: id) }
             loadedItemID = state.current?.id
             if follower != nil { readPlayerQueueSoon() }
@@ -1436,7 +1447,7 @@ public final class PartySession {
                 guard let self else { return }
                 guard !self.listeners.isEmpty, let sent = self.lastSentPlayback else { continue }
                 let expected = sent.isPlaying ? sent.position + Date().timeIntervalSince(sent.capturedAt) : sent.position
-                if sent.isPlaying != self.engine.isPlaying || abs(self.engine.currentTime - expected) > Self.driftTolerance {
+                if sent.isPlaying != self.engine.isPlaying || abs(self.position - expected) > Self.driftTolerance {
                     self.broadcast()
                 }
             }

@@ -351,6 +351,32 @@ let base = PlaylistSummary(id: "p", name: "Base", kind: .library)
         #expect(session.state.upNext.first?.track.id == "b")
     }
 
+    /// Paused, a skip moves the queue on and leaves the player on the song before: the new song
+    /// is at 0:00 (Now Playing and snapshots), and previous goes back rather than restarting.
+    @Test func aSkipWhilePausedStartsTheNewSongAtZero() async throws {
+        let engine = FakeEngine()
+        let session = PartySession(catalog: StubCatalog(ids: ["a", "b", "c"]), engine: engine)
+        try await session.load(playlist: base)
+        try await session.play()
+        await settle()
+        engine.currentTime = 10
+        session.pause()
+        await session.skip()
+        #expect(session.state.current?.track.id == "b")
+        #expect(engine.currentTime == 10)
+        #expect(session.position == 0)
+        #expect(session.snapshot().playback.position == 0)
+        await session.previous()
+        #expect(session.state.current?.track.id == "a")
+        #expect(session.position == 0)
+        // Playing loads the song, from the start; the engine's time is the song's again.
+        engine.currentTime = 0
+        try await session.play()
+        engine.currentTime = 2
+        #expect(engine.playing?.id == "a")
+        #expect(session.position == 2)
+    }
+
     @Test func rapidBackBackNextStaysConsistent() async throws {
         let engine = FakeEngine()
         let session = PartySession(catalog: StubCatalog(ids: ["a", "b", "c", "d"]), engine: engine)

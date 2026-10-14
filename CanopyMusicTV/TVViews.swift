@@ -102,7 +102,7 @@ struct TVRootView: View {
         // Menu: closes the takeover while it's showing (for this play, as press and hold does on
         // the iPad); otherwise a hub can only end its zone and a display can only leave.
         .onExitCommand(perform: model.role == .choosing ? nil : {
-            if let (item, lines) = takeover, TakeoverView.isShowing(lines, at: model.session.engine.currentTime) {
+            if let (item, lines) = takeover, TakeoverView.isShowing(lines, at: model.session.position) {
                 easterEgg.dismissedItemID = item.id
             } else if model.canSaveParty {
                 endingWithSave = true
@@ -936,7 +936,7 @@ struct TVProgress: View {
         // while paused, to catch seeks.
         TimelineView(.animation(minimumInterval: session.isPlaying ? nil : 0.5)) { _ in
             let live = itemID == session.nowPlaying?.id
-            let time = held.show(live ? min(session.engine.currentTime, duration) : nil)
+            let time = held.show(live ? min(session.position, duration) : nil)
             VStack(spacing: 10) {
                 GeometryReader { geo in
                     // Never narrower than a circle (a thinner capsule squashes into a sliver): at

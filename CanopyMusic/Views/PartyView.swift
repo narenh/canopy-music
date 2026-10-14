@@ -694,7 +694,7 @@ private struct ProgressBar: View {
         // while paused, to catch seeks.
         TimelineView(.animation(minimumInterval: session.isPlaying ? nil : 0.5)) { _ in
             let total = max(duration ?? 0, 1)
-            let elapsed = scrub.map { $0 * total } ?? session.engine.currentTime
+            let elapsed = scrub.map { $0 * total } ?? session.position
             let thickness: CGFloat = isScrubbing ? 12 : 5
             // Never narrower than a circle (a thinner capsule squashes into a sliver): at a song
             // change it slides back to a dot and grows from there. With no song it's hidden, and
@@ -743,7 +743,7 @@ private struct ProgressBar: View {
             .accessibilityValue("\(Self.format(elapsed)) of \(Self.format(total))")
             .accessibilityAdjustableAction { direction in
                 let step: TimeInterval = direction == .increment ? 10 : -10
-                session.seek(to: min(max(session.engine.currentTime + step, 0), total))
+                session.seek(to: min(max(session.position + step, 0), total))
             }
         }
     }

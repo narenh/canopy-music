@@ -22,6 +22,10 @@ final class SongSlider {
     /// Counts the slides, so only the last one's end says none is under way.
     @ObservationIgnored private var slides = 0
 
+    /// When the wait for the next song's art ends: one wait however many changes come during it
+    /// (each restarted it, so quick taps kept the page from sliding at all until they stopped).
+    @ObservationIgnored private var artWaitEnds: ContinuousClock.Instant?
+
     static let duration = 0.5
     /// Fast at first, then slowing to a stop: the pages arrive and settle (an ease-out quint).
     static let animation = Animation.timingCurve(0.22, 1, 0.36, 1, duration: duration)
@@ -44,11 +48,11 @@ final class SongSlider {
     }
 
     /// Whether going from `item` to the session's current song is a step forward. Going back puts
-    /// the song that was playing at the top of Up next; anything else (a skip, the song ending, a
-    /// jump in the queue) counts as forward.
+    /// the song that was playing back in Up next (at the top; further down after more than one
+    /// previous); anything else (a skip, the song ending, a jump in the queue) counts as forward.
     private func slidesForward(from item: QueueItem?, in session: PartySession) -> Bool {
         guard let item else { return true }
-        return session.state.upNext.first?.id != item.id
+        return !session.state.upNext.contains { $0.id == item.id }
     }
 
     /// Slides from the shown song to the session's current one. A change during a slide waits for
@@ -63,26 +67,32 @@ final class SongSlider {
         if let slideEnds {
             do { try await Task.sleep(until: slideEnds, clock: .continuous) } catch { return }
         }
-        guard shown?.id != session.nowPlaying?.id else { return }
+        guard shown?.id != session.nowPlaying?.id else {
+            artWaitEnds = nil
+            return
+        }
         // The new song's art is loaded before it slides in (the pre-warm of the next songs' has
         // usually loaded it already); after a moment it slides anyway, and the art shows when
         // it's loaded.
         if let url = ArtworkURL.url(for: session.nowPlaying?.track, large: true) {
             let start = ContinuousClock.now
-            let ready = await ArtworkCache.shared.ready(url, bucket: artBucket, within: .milliseconds(300))
+            let ends = artWaitEnds ?? start + .milliseconds(300)
+            artWaitEnds = ends
+            let ready = await ArtworkCache.shared.ready(url, bucket: artBucket, within: ends - start)
             log("artwork \(ready ? "ready" : "not ready") after \(ContinuousClock.now - start) (\(artBucket) px)")
             if Task.isCancelled { return }
         }
+        artWaitEnds = nil
         let goingForward = slidesForward(from: shown, in: session)
         slideEnds = .now + .seconds(Self.duration)
         slides += 1
         let slide = slides
-        // Both pages move in this one animation, so they stay together.
-        withAnimation(Self.animation) {
-            forward = goingForward
-            shown = session.nowPlaying
-            isSliding = true
-        }
+        // Animated by `SongPages` (the page's id changing), not `withAnimation`: in an animated
+        // transaction, SwiftUI could first flush other pending updates during `shown`'s willSet,
+        // so the page read the song going away, missed the new one, and stayed on the old song.
+        forward = goingForward
+        shown = session.nowPlaying
+        isSliding = true
         // Not the animation's completion: that waits for everything else that changed with the
         // song too (the iPad's background takes 2 s).
         Task {
@@ -111,6 +121,8 @@ struct SongPages<Page: View>: View {
                 .id(current?.id)
                 .transition(SongSlide(offset: slider.offset(in: session, columnWidth: columnWidth)))
         }
+        // Both pages move in this one animation, so they stay together.
+        .animation(SongSlider.animation, value: current?.id)
         // A newer change cancels this one part way, and `showCurrent` goes on to the newest song.
         .task(id: session.nowPlaying?.id) { await slider.showCurrent(in: session, artBucket: artBucket, log: log) }
         // The next song or two's art at Now Playing size, loaded ahead so the slide to it has it

@@ -493,7 +493,7 @@ struct TVStartView: View {
                 if model.hostJoined {
                     Color.clear
                 } else if let host = model.hostURL?.absoluteString {
-                    HalftoneQRCode(payload: host, image: Image("MusicNote"), symbolScale: 0.5, dotScale: 0.7)
+                    HalftoneQRCode(payload: host, image: Image("LogoGlyph"), symbolScale: 0.5, dotScale: 0.7)
                 } else {
                     // The server is still starting.
                     ProgressView()

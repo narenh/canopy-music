@@ -64,6 +64,13 @@ public final class SonosSimulator: SonosTransport {
     public private(set) var requests: [SonosRequest] = []
     /// Accounts the favourites show (so discovery finds them), as (service id, serial).
     public var accounts: [(serviceID: Int, serial: Int)] = [(SonosMusicService.appleMusic.serviceID, 3), (SonosMusicService.spotify.serviceID, 4)]
+    /// What `GetHouseholdID` answers (every room the same, as on a real household).
+    public var householdID = "Sonos_Simulated"
+    /// Service ids not linked on the household: their URIs are refused with 800 even by the
+    /// coordinator, as a real S2 player answered `SetAVTransportURI` for Tidal (sid 174) there.
+    /// `AddURIToQueue` is assumed to answer the same (not seen). A linked service plays with any
+    /// serial, or none, as the real household did.
+    public var unlinkedServices: Set<Int> = []
     /// Each request takes this long (a real player answers in tens of milliseconds).
     public var latency: Duration = .zero
     /// A room joining a group takes this long to be in it.
@@ -166,6 +173,8 @@ public final class SonosSimulator: SonosTransport {
             return ["ZoneGroupState": zoneGroupState()]
         case "ListAvailableServices":
             return [:]
+        case "GetHouseholdID":
+            return ["CurrentHouseholdID": householdID]
         case "Browse":
             return ["Result": browse(request.argument("ObjectID") ?? "", group: groups[g]), "NumberReturned": "0", "TotalMatches": "0"]
 
@@ -187,6 +196,8 @@ public final class SonosSimulator: SonosTransport {
             if uri.hasPrefix("x-rincon:") {
                 if joinDelay > .zero { try await Task.sleep(for: joinDelay) }
                 join(room.id, to: String(uri.dropFirst("x-rincon:".count)))
+            } else if let sid = SonosURI.serviceAndAccount(of: uri)?.serviceID, unlinkedServices.contains(sid) {
+                throw SonosError.upnp(action: request.action, code: 800)
             } else if isCoordinator {
                 groups[g].elsewhere = uri == SonosURI.queue(of: room.id) ? nil : Elsewhere(uri: uri)
                 groups[g].state = .stopped
@@ -216,6 +227,9 @@ public final class SonosSimulator: SonosTransport {
             groups[g].track = 1
         case "AddURIToQueue":
             let uri = request.argument("EnqueuedURI") ?? ""
+            if let sid = SonosURI.serviceAndAccount(of: uri)?.serviceID, unlinkedServices.contains(sid) {
+                throw SonosError.upnp(action: request.action, code: 800)
+            }
             let desired = Int(request.argument("DesiredFirstTrackNumberEnqueued") ?? "0") ?? 0
             let index = desired == 0 || desired > groups[g].queue.count ? groups[g].queue.count : desired - 1
             groups[g].queue.insert(uri, at: index)

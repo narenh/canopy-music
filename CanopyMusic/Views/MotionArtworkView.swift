@@ -58,8 +58,8 @@ struct MotionArtworkView: View {
 }
 
 /// A muted, looping `AVPlayerLayer`. It never publishes Now Playing info (no
-/// `AVPlayerViewController`), never plays to AirPlay, pauses while `isActive` is false, and
-/// follows the music's play/pause (`isPlaying`).
+/// `AVPlayerViewController`), never plays to AirPlay, never touches the audio session (iOS 27),
+/// pauses while `isActive` is false, and follows the music's play/pause (`isPlaying`).
 private struct LoopingVideo: UIViewRepresentable {
     let url: URL
     let isActive: Bool
@@ -95,6 +95,10 @@ private final class LoopingVideoView: UIView {
     private var onReady: (@MainActor () -> Void)?
     /// Whether we want it playing (`setActive`), for the debug log.
     private var wantsToPlay = false
+    /// False until the player is cut off from the audio session; `setActive` meanwhile only
+    /// remembers what it was asked (`requested`).
+    private var canPlay = false
+    private var requested = (active: false, playing: false)
 
     func start(url: URL, onReady: @escaping @MainActor () -> Void) {
         self.onReady = onReady
@@ -112,6 +116,17 @@ private final class LoopingVideoView: UIView {
         playerLayer.videoGravity = .resizeAspectFill
         playerLayer.player = player
         self.player = player
+        // Muted or not, a playing AVPlayer activates the app's audio session, which is `.playback`
+        // with long-form audio (`AppModel.init`), so not mixable: that interrupts the Apple Music
+        // player, which plays in its own session (as found on the Apple TV), and pauses the music.
+        // Disconnected, the player leaves the session alone. Not on a Mac, which lacks it.
+        if #available(iOS 27, *), !ProcessInfo.processInfo.isiOSAppOnMac {
+            player.setDisconnectedFromSystemAudio(true) {
+                Task { @MainActor [weak self] in self?.allowPlaying() }
+            }
+        } else {
+            canPlay = true
+        }
         readyObservation = playerLayer.observe(\.isReadyForDisplay, options: [.initial, .new]) { [weak self] layer, _ in
             guard layer.isReadyForDisplay else { return }
             Task { @MainActor [weak self] in self?.revealOnce() }
@@ -135,7 +150,8 @@ private final class LoopingVideoView: UIView {
     /// `rampDuration`, as Apple Music's motion artwork does; a stream that can't play slower than
     /// normal just pauses and plays.
     func setActive(_ active: Bool, playing: Bool, animated: Bool) {
-        guard let player else { return }
+        requested = (active, playing)
+        guard let player, canPlay else { return }
         let wanted = active && playing
         guard wanted != wantsToPlay || !animated else { return }
         wantsToPlay = wanted
@@ -152,6 +168,13 @@ private final class LoopingVideoView: UIView {
         rampTimer = Timer.scheduledTimer(withTimeInterval: 1.0 / 60, repeats: true) { [weak self] _ in
             MainActor.assumeIsolated { self?.rampStep() }
         }
+    }
+
+    private func allowPlaying() {
+        guard player != nil, !canPlay else { return }
+        canPlay = true
+        motionLog("disconnected from system audio")
+        setActive(requested.active, playing: requested.playing, animated: false)
     }
 
     static let rampDuration: TimeInterval = 0.25

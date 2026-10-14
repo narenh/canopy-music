@@ -247,50 +247,47 @@ struct HostView: View {
 
                 Section {
                     // Start makes the zone live (`AppModel.startZone`); in a live zone this just
-                    // goes back to the party screen.
-                    Button {
+                    // goes back to the party screen, with End Zone beside it (in the same row, so
+                    // it's on screen without scrolling).
+                    HStack(spacing: 12) {
                         if model.isLive {
-                            model.lock()
-                        } else {
-                            Task { await model.startZone() }
+                            Button(role: .destructive) {
+                                confirmingEnd = true
+                            } label: {
+                                Text("End Zone")
+                                    .font(.headline)
+                                    .foregroundStyle(.red)
+                                    .frame(maxWidth: .infinity, minHeight: 48)
+                                    .overlay { Capsule().strokeBorder(.red, lineWidth: 1.5) }
+                                    .contentShape(Capsule())
+                            }
+                            .buttonStyle(.plain)
                         }
-                    } label: {
-                        ZStack {
-                            Text(model.isLive ? "Back to party" : "Start")
-                                .opacity(model.isStartingZone ? 0 : 1)
-                            if model.isStartingZone { ProgressView() }
+                        Button {
+                            if model.isLive {
+                                model.lock()
+                            } else {
+                                Task { await model.startZone() }
+                            }
+                        } label: {
+                            ZStack {
+                                Text(model.isLive ? "Back to party" : "Start")
+                                    .opacity(model.isStartingZone ? 0 : 1)
+                                if model.isStartingZone { ProgressView() }
+                            }
+                            .font(.headline)
+                            .frame(maxWidth: .infinity)
                         }
-                        .font(.headline)
-                        .frame(maxWidth: .infinity)
+                        .buttonStyle(.glassProminent)
+                        .controlSize(.large)
+                        // Dimmed rather than `.disabled`, which swaps the prominent glass for a gray style.
+                        .opacity(canPressStart ? 1 : 0.45)
+                        .allowsHitTesting(canPressStart && !model.isStartingZone)
+                        .accessibilityHint(canPressStart ? "" : "Choose a playlist first")
                     }
-                    .buttonStyle(.glassProminent)
-                    .controlSize(.large)
                     .listRowBackground(Color.clear)
-                    // Dimmed rather than `.disabled`, which swaps the prominent glass for a gray style.
-                    .opacity(canPressStart ? 1 : 0.45)
-                    .allowsHitTesting(canPressStart && !model.isStartingZone)
-                    .accessibilityHint(canPressStart ? "" : "Choose a playlist first")
                 } footer: {
                     Text("Press and hold the Canopy logo to return to this screen. PIN required if set. Turn on Guided Access (triple-click the top button) so guests can’t leave the app.")
-                }
-
-                if model.isLive {
-                    Section {
-                        Button(role: .destructive) {
-                            confirmingEnd = true
-                        } label: {
-                            Text("End Zone")
-                                .font(.headline)
-                                .foregroundStyle(.red)
-                                .frame(maxWidth: .infinity, minHeight: 48)
-                                .overlay { Capsule().strokeBorder(.red, lineWidth: 1.5) }
-                                .contentShape(Capsule())
-                        }
-                        .buttonStyle(.plain)
-                        .listRowBackground(Color.clear)
-                        // Set apart from Start so it isn't hit by mistake.
-                        .padding(.top, 28)
-                    }
                 }
             }
             .scrollContentBackground(.hidden)
@@ -581,18 +578,17 @@ private struct ZoneSection: View {
                 Spacer(minLength: 16)
                 if let address {
                     Text(address)
+                        .font(.system(.footnote, design: .monospaced).weight(.regular))
                         .textCase(nil)
                         .lineLimit(1)
                 }
             }
-        } footer: {
-            Text("Other Canopy Music devices on the Wi\u{2011}Fi see this zone by name. The PIN is asked for when you press and hold the logo on the party screen.")
         }
     }
 }
 
-/// The host PIN: a navigation-style row ("Set ›", or "On ›" once there is one); tapping anywhere
-/// on it opens the keypad (`PINSheet`). Empty unlocks without asking.
+/// The host PIN: a navigation-style row ("None ›", or a dot per digit once there is one); tapping
+/// anywhere on it opens the keypad (`PINSheet`). Empty unlocks without asking.
 private struct ZonePINRow: View {
     @Environment(AppModel.self) private var model
     @State private var editing = false
@@ -602,8 +598,9 @@ private struct ZonePINRow: View {
             HStack {
                 Text("PIN")
                 Spacer(minLength: 16)
-                Text(model.hostPIN.isEmpty ? "Set" : "On")
+                Text(model.hostPIN.isEmpty ? "None" : String(repeating: "•", count: model.hostPIN.count))
                     .foregroundStyle(.secondary)
+                    .accessibilityLabel(model.hostPIN.isEmpty ? "None" : "Set")
                 Image(systemName: "chevron.right")
                     .font(.footnote.weight(.semibold))
                     .foregroundStyle(.tertiary)

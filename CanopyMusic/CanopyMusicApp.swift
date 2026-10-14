@@ -161,6 +161,8 @@ struct RootView: View {
            i + 1 < ProcessInfo.processInfo.arguments.count {
             BackgroundPreview(term: ProcessInfo.processInfo.arguments[i + 1])
         }
+        // Mac only: where AirPlay sends the app's own audio (`AirPlayProbe`).
+        if ProcessInfo.processInfo.isiOSAppOnMac, model.zoneRole == .hub { AirPlayProbe() }
         #endif
     }
 

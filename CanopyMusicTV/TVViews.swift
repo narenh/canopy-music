@@ -47,8 +47,8 @@ struct TVRootView: View {
             ArtworkBackground(
                 track: backgroundItem?.track, artworkURL: ArtworkURL.url(for: backgroundItem?.track, large: true),
                 theme: ArtworkTheme(backgroundItem?.track.colors), source: ArtworkCache.shared, colorsUntilLoaded: true,
-                // Drifting while the music plays, and never under Dusk; paused, it stands still.
-                moves: model.session.isPlaying && !showsDusk
+                // Drifting, paused too, but never under Dusk.
+                moves: !showsDusk
             )
                 // Changes evenly to the new song's, starting with the party screen's slide and
                 // settling after it (`SongSlider.showCurrent`).

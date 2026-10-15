@@ -68,10 +68,10 @@ struct HostView: View {
         }
         .background {
             // The song's colours once there's a song (a playlist loaded, or playing); Dusk on the
-            // empty start screen, cross-fading as the song's background does. The art drifts only
-            // while the music plays, never under Dusk.
+            // empty start screen, cross-fading as the song's background does. The art drifts,
+            // paused too, but never under Dusk.
             ZStack {
-                ThemedBackground(track: session.nowPlaying?.track, theme: theme, moves: session.isPlaying && session.nowPlaying != nil)
+                ThemedBackground(track: session.nowPlaying?.track, theme: theme, moves: session.nowPlaying != nil)
                 DuskBackground()
                     .opacity(session.nowPlaying == nil ? 1 : 0)
                     .animation(.linear(duration: 2), value: session.nowPlaying == nil)

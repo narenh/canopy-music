@@ -122,6 +122,9 @@ struct UpNextList: View {
                 }
             }
             .listStyle(.plain)
+            // A song dragged up can't take the list past the top of Up next, into what's played
+            // (a drop there would only spring back).
+            .background(ReorderScrollLimit(row: showsHistory ? rows.firstIndex { $0.id == homeID } : nil))
             .scrollContentBackground(.hidden)
             // Feather the bottom edge instead of a hard cut; the margin lets the last row scroll clear of it.
             .contentMargins(.bottom, Self.fadeHeight, for: .scrollContent)

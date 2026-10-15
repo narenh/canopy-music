@@ -299,7 +299,7 @@ public final class SonosEngine: PlaybackEngine {
         let uri: String
         let metadata: String
         do {
-            uri = try reference.uri(for: track.id)
+            uri = try reference.uri(for: track)
             metadata = try reference.metadata(for: track)
         } catch {
             log?("can't play \(track.title) on Sonos: \(error)")
@@ -419,7 +419,7 @@ public final class SonosEngine: PlaybackEngine {
         }
         // Already right after the current song (found there by `attach`, say): nothing to send.
         if let track, track.id == stagedTrack?.id, stagedNumber != nil { return }
-        let uri = try track.map { try reference.uri(for: $0.id) }
+        let uri = try track.map { try reference.uri(for: $0) }
         let metadata = try track.map { try reference.metadata(for: $0) }
         busy += 1
         defer { busy -= 1 }

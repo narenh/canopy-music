@@ -37,6 +37,52 @@ struct SonosTrackURITests {
         #expect(SonosURI.canopyTrackID(of: "x-sonosapi-hls:song%3a1466310464?sid=204&flags=8232&sn=3") == "1466310464")
     }
 
+    static let upload = QueueTrack.libraryOnly(
+        libraryID: "i.bVl4FRZ1zY", title: "Chip the Glasses, Crack the Plates! (Film Version)",
+        artist: "Glenn Yarbrough", album: "The Hobbit (Original Motion Picture Soundtrack)", duration: 20.3
+    )
+
+    /// A library-only song: exactly what the Sonos app put in a real queue (and what played from
+    /// the debug Library test), and the DIDL that played with it.
+    @Test func appleMusicLibraryTrack() throws {
+        let uri = try appleMusic.uri(for: Self.upload)
+        #expect(uri == "x-sonos-http:librarytrack%3ai.bVl4FRZ1zY.unknown?sid=204&flags=0&sn=3")
+        #expect(SonosURI.canopyTrackID(of: uri) == "i.bVl4FRZ1zY")
+        #expect(SonosURI.serviceAndAccount(of: uri)?.serviceID == 204)
+        #expect(SonosURI.serviceAndAccount(of: uri)?.serial == 3)
+        let metadata = try appleMusic.metadata(for: Self.upload)
+        #expect(metadata.contains("<res protocolInfo=\"sonos.com-http:*:application/octet-stream:*\" duration=\"0:00:20\">x-sonos-http:librarytrack%3ai.bVl4FRZ1zY.unknown?sid=204&amp;flags=0&amp;sn=3</res>"))
+        let item = try #require(SonosParse.didlItems(metadata).first)
+        #expect(item.id == "10032020librarytrack%3ai.bVl4FRZ1zY")
+        #expect(item.title == "Chip the Glasses, Crack the Plates! (Film Version)")
+        #expect(item.desc == "SA_RINCON52231_X_#Svc52231-0-Token")
+        // A catalog song still goes by its catalog id.
+        #expect(try appleMusic.uri(for: QueueTrack(id: "1440857781", title: "t", artist: "a")) == "x-sonos-http:song%3a1440857781.mp4?sid=204&flags=8224&sn=3")
+    }
+
+    /// What Sonos reports once it plays the library song (`GetPositionInfo`, its queue): its own
+    /// `.mp4` form, flags 8232, as in raw XML too. It must still read as the same song.
+    @Test func appleMusicLibraryTrackAsSonosKeepsIt() {
+        #expect(SonosURI.canopyTrackID(of: "x-sonos-http:librarytrack%3ai.bVl4FRZ1zY.mp4?sid=204&flags=8232&sn=3") == "i.bVl4FRZ1zY")
+        #expect(SonosURI.canopyTrackID(of: "x-sonos-http:librarytrack%3ai.bVl4FRZ1zY.mp4?sid=204&amp;flags=8232&amp;sn=3") == "i.bVl4FRZ1zY")
+        #expect(SonosURI.canopyTrackID(of: "x-sonos-http:librarytrack%3ai.bVl4FRZ1zY.unknown") == "i.bVl4FRZ1zY")
+        #expect(SonosURI.canopyTrackID(of: "x-sonos-http:librarytrack%3ai.bVl4FRZ1zY") == "i.bVl4FRZ1zY")
+        #expect(SonosURI.serviceAndAccount(of: "x-sonos-http:librarytrack%3ai.bVl4FRZ1zY.mp4?sid=204&flags=8232&sn=3")?.serial == 3)
+        // Not a library id: not ours.
+        #expect(SonosURI.canopyTrackID(of: "x-sonos-http:librarytrack%3a12345.mp4?sid=204") == nil)
+        #expect(SonosURI.canopyTrackID(of: "x-sonos-http:librarytrack%3a.mp4?sid=204") == nil)
+    }
+
+    @Test func libraryTracksSonosCantPlay() {
+        // Not a library id, or a library song on a Spotify zone.
+        var odd = Self.upload
+        odd.libraryID = "i.abc&sn=9"
+        #expect(throws: SonosTrackReference.Failure.self) { try appleMusic.uri(for: odd) }
+        #expect(throws: SonosTrackReference.Failure.self) { try appleMusic.metadata(for: odd) }
+        #expect(throws: SonosTrackReference.Failure.self) { try spotify.uri(for: Self.upload) }
+        #expect(throws: SonosTrackReference.Failure.self) { try spotify.metadata(for: Self.upload) }
+    }
+
     @Test func tracksSonosCantPlay() {
         #expect(throws: SonosTrackReference.Failure.self) { try appleMusic.uri(for: "i.ABC123") }
         #expect(throws: SonosTrackReference.Failure.self) { try appleMusic.uri(for: "") }

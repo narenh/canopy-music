@@ -23,8 +23,8 @@ public struct SonosTrackReference: Hashable, Sendable {
     }
 
     public enum Failure: Error, Equatable, LocalizedError {
-        /// Not a track id this service's Sonos URIs can carry (an Apple Music library-only song,
-        /// a Spotify episode or local file).
+        /// Not a track id this service's Sonos URIs can carry (a Spotify episode or local file, a
+        /// library id given as a catalog id, a library song on a Spotify zone).
         case unsupportedTrack(String)
 
         public var errorDescription: String? {
@@ -39,7 +39,7 @@ public struct SonosTrackReference: Hashable, Sendable {
     public func serviceTrackID(for trackID: String) throws -> String {
         switch service {
         case .appleMusic:
-            // Library-only songs (`i.…`) have no catalog id Sonos can stream.
+            // Library-only songs (`i.…`) have no catalog id: they go by `libraryURI(for:)`.
             guard !trackID.isEmpty, trackID.allSatisfy(\.isNumber) else { throw Failure.unsupportedTrack(trackID) }
             return trackID
         case .spotify:
@@ -95,11 +95,41 @@ public struct SonosTrackReference: Hashable, Sendable {
         "SA_RINCON\(serviceType)_X_#Svc\(serviceType)-0-Token"
     }
 
+    /// The URI for a queue track: a song only in the account's library (`QueueTrack.libraryID`)
+    /// as `libraryURI(for:)`, anything else as `uri(for:)` its id.
+    public func uri(for track: QueueTrack) throws -> String {
+        guard let libraryID = track.libraryID else { return try uri(for: track.id) }
+        return try libraryURI(for: libraryID)
+    }
+
+    /// An Apple Music library-only song, as the Sonos app sends it (read off a real speaker's
+    /// queue, and played that way from the debug Library test):
+    /// `x-sonos-http:librarytrack%3a{libraryID}.unknown?sid=204&flags=0&sn={sn}`. Sonos then
+    /// reports it as `….mp4?sid=204&flags=8232&sn=…` (`SonosURI.canopyTrackID` reads both).
+    public func libraryURI(for libraryID: String) throws -> String {
+        guard service == .appleMusic, LibraryArtwork.isLibraryID(libraryID) else { throw Failure.unsupportedTrack(libraryID) }
+        return "x-sonos-http:\(Self.libraryObject(libraryID)).unknown?sid=\(service.serviceID)&flags=0&sn=\(accountSerial)"
+    }
+
+    static func libraryObject(_ libraryID: String) -> String { "librarytrack%3a\(libraryID)" }
+
     /// The `EnqueuedURIMetaData` for a track: DIDL-Lite with its title and the service token.
+    /// A library-only song's also has the `res` the Sonos app gives it (its URI, with
+    /// protocolInfo `sonos.com-http:*:application/octet-stream:*`, and its length).
     public func metadata(for track: QueueTrack) throws -> String {
-        let itemID = try itemID(for: track.id)
         let e = SonosXMLEscape.escape
+        let itemID: String
+        var res = ""
+        if let libraryID = track.libraryID {
+            let uri = try libraryURI(for: libraryID)
+            itemID = "10032020" + Self.libraryObject(libraryID)
+            let duration = track.duration.map { " duration=\"\(SonosTime.string($0))\"" } ?? ""
+            res = "<res protocolInfo=\"sonos.com-http:*:application/octet-stream:*\"\(duration)>\(e(uri))</res>"
+        } else {
+            itemID = try self.itemID(for: track.id)
+        }
         var item = "<item id=\"\(e(itemID))\" parentID=\"-1\" restricted=\"true\">"
+        item += res
         item += "<dc:title>\(e(track.title))</dc:title>"
         if !track.artist.isEmpty { item += "<dc:creator>\(e(track.artist))</dc:creator>" }
         if !track.album.isEmpty { item += "<upnp:album>\(e(track.album))</upnp:album>" }
@@ -134,13 +164,22 @@ public enum SonosURI {
     }
 
     /// The track id Canopy Music uses for a service track URI: Spotify's `spotify:track:…` URI,
-    /// or Apple Music's catalog id. nil for anything else (line-in, radio, TV, Spotify Connect).
+    /// Apple Music's catalog id, or an Apple Music library-only song's library id ("i.…", its
+    /// `QueueTrack.id`). nil for anything else (line-in, radio, TV, Spotify Connect).
     public static func canopyTrackID(of uri: String) -> String? {
         let base = uri.split(separator: "?", maxSplits: 1).first.map(String.init) ?? uri
         let decoded = base.removingPercentEncoding ?? base
         if decoded.hasPrefix("x-sonos-spotify:") {
             let rest = decoded.dropFirst("x-sonos-spotify:".count)
             return rest.hasPrefix("spotify:track:") ? String(rest) : nil
+        }
+        // A library-only song: the form Canopy Music queues (`librarytrack:{id}.unknown`), and the
+        // one Sonos rewrites it to once it plays (`librarytrack:{id}.mp4`, flags 8232). The id
+        // has a dot of its own ("i.bVl4FRZ1zY"), so only what follows its second is dropped.
+        if decoded.hasPrefix("x-sonos-http:librarytrack:") {
+            var id = decoded.dropFirst("x-sonos-http:librarytrack:".count)
+            if id.hasPrefix("i."), let dot = id.dropFirst(2).firstIndex(of: ".") { id = id[..<dot] }
+            return LibraryArtwork.isLibraryID(String(id)) ? String(id) : nil
         }
         // Apple Music: the form Canopy Music queues (`x-sonos-http:song:{id}.mp4`), and the
         // streaming forms Sonos keeps in its queue for the same song (seen on a real S2 household:

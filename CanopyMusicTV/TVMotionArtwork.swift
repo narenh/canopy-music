@@ -30,7 +30,7 @@ struct TVMotionArtworkView: View {
     /// To try, as the iPad's (`MotionArtworkView.fadesWhilePaused`): paused, the video (stopped at
     /// once, `TVLoopingVideoView.eases` off) fades to the still art, and back in as it plays.
     static let fadesWhilePaused = true
-    static let pauseFade: TimeInterval = 0.2
+    static let pauseFade: TimeInterval = 0.4
 
     var body: some View {
         ZStack {

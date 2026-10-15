@@ -837,9 +837,12 @@ private struct ProgressBar: View {
         }
     }
 
+    /// m:ss, or h:mm:ss from an hour (a long mix or live set).
     static func format(_ t: TimeInterval) -> String {
-        let s = Int(t.rounded(.down))
-        return String(format: "%d:%02d", s / 60, s % 60)
+        let s = max(0, Int(t.rounded(.down)))
+        return s >= 3600
+            ? String(format: "%d:%02d:%02d", s / 3600, s / 60 % 60, s % 60)
+            : String(format: "%d:%02d", s / 60, s % 60)
     }
 }
 

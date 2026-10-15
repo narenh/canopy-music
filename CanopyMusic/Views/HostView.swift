@@ -108,12 +108,10 @@ struct HostView: View {
         .outputPicker(includesSonos: true)
         .fullScreenCover(isPresented: $signingInToSpotify, onDismiss: {
             guard signedInToSpotify else { return }
-            // Signed in: Spotify is chosen now; where it plays is picked from the "Plays on" row.
-            // Already chosen (signed in again): the device is asked for if there isn't one.
+            // Signed in: Spotify is chosen now. Where it plays is picked from the "Plays on" row,
+            // never asked for here (Start asks if there's still no device).
             if model.provider != .spotify {
                 model.switchService(to: .spotify)
-            } else if model.spotifyDeviceID == nil {
-                model.isPickingSpotifyDevice = true
             }
         }) {
             ZStack {

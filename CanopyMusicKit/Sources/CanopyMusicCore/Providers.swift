@@ -21,10 +21,22 @@ public protocol MusicCatalog: Sendable {
     /// Finds animated album artwork for Now Playing (see `MotionArtwork`). nil for services
     /// without it.
     var motionArtwork: MotionArtworkLookup? { get }
+    /// Loads the art of songs only in the account's library, which the hub relays
+    /// (`LibraryArtwork`). nil for services without such songs.
+    var libraryArtwork: (any LibraryArtworkSource)? { get }
+}
+
+/// The image of a song only in the account's library (`QueueTrack.libraryID`), which has no public
+/// URL: only the hub can load it, and it serves it to everything else (`/api/artwork/…`).
+public protocol LibraryArtworkSource: Sendable {
+    /// The song's art as image data ImageIO can read, ideally at least `size` pixels square; the
+    /// hub scales it. nil when the song has none (or isn't in the library).
+    func artwork(libraryID: String, size: Int) async throws -> Data?
 }
 
 public extension MusicCatalog {
     var motionArtwork: MotionArtworkLookup? { nil }
+    var libraryArtwork: (any LibraryArtworkSource)? { nil }
     func songCount(of playlist: PlaylistSummary) async throws -> Int? { playlist.songCount }
     func loadReport(for playlist: PlaylistSummary) async -> PlaylistLoadReport? { nil }
     var playlistDestination: String? { nil }

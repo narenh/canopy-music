@@ -1125,6 +1125,7 @@ final class AppModel {
         }
         self.server = server
         serverTask = task
+        ArtworkURL.relayBase = server.url(host: "127.0.0.1")
         refreshAddresses()
     }
 
@@ -1156,6 +1157,7 @@ final class AppModel {
         serverTask = nil
         await server?.stop()
         server = nil
+        ArtworkURL.relayBase = nil
         hostname.unregister()
         zoneAdvertiser.stop()
         localGuestURL = nil

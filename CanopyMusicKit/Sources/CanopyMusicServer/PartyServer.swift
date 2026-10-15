@@ -12,6 +12,7 @@ public final class PartyServer: Sendable {
     public let port: UInt16
     private let session: PartySession
     private let server: HTTPServer
+    private let libraryArtwork = LibraryArtworkRelay()
 
     public init(session: PartySession, port: UInt16 = 8080) {
         self.session = session
@@ -125,6 +126,21 @@ public final class PartyServer: Sendable {
             let offset = max(0, Int(request.query["offset"] ?? "") ?? 0)
             let limit = min(100, max(0, Int(request.query["limit"] ?? "") ?? 50))
             return try .json(await session.upcoming(offset: offset, limit: limit))
+        }
+
+        // The art of songs only in the hub's library (`LibraryArtwork`), which only the hub can
+        // load: for the page, displays, and the hub's own views. Library ids don't change, so
+        // browsers may keep it.
+        let libraryArtwork = libraryArtwork
+        await server.appendRoute("GET /api/artwork/*") { request in
+            let id = String(request.path.dropFirst(LibraryArtwork.pathPrefix.count))
+            guard request.path.hasPrefix(LibraryArtwork.pathPrefix), LibraryArtwork.isLibraryID(id),
+                  let source = await session.catalog.libraryArtwork else { return HTTPResponse(statusCode: .notFound) }
+            let size = LibraryArtworkRelay.size(for: request.query["size"].flatMap { Int($0) })
+            guard let data = await libraryArtwork.image(libraryID: id, size: size, from: source) else {
+                return HTTPResponse(statusCode: .notFound, headers: [.cacheControl: "no-store"])
+            }
+            return HTTPResponse(statusCode: .ok, headers: [.contentType: "image/jpeg", .cacheControl: "max-age=86400"], body: data)
         }
 
         await server.appendRoute("GET /api/search") { request in

@@ -720,6 +720,7 @@ final class TVModel {
         self.server = server
         serverTask = task
         serverSession = session
+        ArtworkURL.relayBase = server.url(host: "127.0.0.1")
         guard let ip = LocalNetwork.lanAddress() else { return }
         guestURL = server.url(host: ip)
         // Hand out the .local name only once it's confirmed ours: another zone may already have
@@ -753,6 +754,7 @@ final class TVModel {
         serverTask = nil
         self.server = nil
         serverSession = nil
+        ArtworkURL.relayBase = nil
         hostname.unregister()
         advertiser.stop()
         guestURL = nil

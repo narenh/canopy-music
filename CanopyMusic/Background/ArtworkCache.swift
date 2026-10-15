@@ -8,8 +8,17 @@ import UIKit
 /// The image a track shows: the big one for Now Playing (and the background's blur, which comes
 /// with it), the thumbnail for rows, each falling back to the other.
 enum ArtworkURL {
-    static func url(for track: QueueTrack?, large: Bool) -> URL? {
+    /// This hub's own phone server (`http://127.0.0.1:<port>`) while it runs: a library-only
+    /// song's art is a path relative to it (`LibraryArtwork`). Displays get those paths made
+    /// absolute against their zone's hub as they arrive (`ZoneConnection`), so they never use this.
+    @MainActor static var relayBase: URL?
+
+    @MainActor static func url(for track: QueueTrack?, large: Bool) -> URL? {
         let url = large ? track?.artworkURL ?? track?.thumbnailURL : track?.thumbnailURL ?? track?.artworkURL
+        if let url, url.scheme == nil {
+            guard let relayBase else { return nil }
+            return URL(string: url.relativeString, relativeTo: relayBase)?.absoluteURL
+        }
         // `-demoArtworkURLs` (debug builds): demo tracks get a remote image each.
         return url ?? DemoArtwork.url(for: track)
     }

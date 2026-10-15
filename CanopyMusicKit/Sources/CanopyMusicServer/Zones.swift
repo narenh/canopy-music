@@ -419,7 +419,8 @@ public final class ZoneConnection: ZoneRemote {
                     let message = try await socket.receive()
                     guard case .string(let text) = message,
                           let snapshot = try? JSONDecoder.api.decode(PartySnapshot.self, from: Data(text.utf8)) else { continue }
-                    session?.apply(snapshot)
+                    // Relayed library art loads from this hub, not from this device.
+                    session?.apply(snapshot.resolvingArtwork(against: baseURL))
                     hasSnapshot = true
                     isConnected = true
                     attempt = 0
@@ -479,7 +480,7 @@ public final class ZoneConnection: ZoneRemote {
         components.queryItems = [URLQueryItem(name: "q", value: term)]
         let (data, response) = try await urlSession.data(from: components.url!)
         try Self.check(response)
-        return try JSONDecoder.api.decode([QueueTrack].self, from: data)
+        return try JSONDecoder.api.decode([QueueTrack].self, from: data).map { $0.resolvingArtwork(against: baseURL) }
     }
 
     public func upcoming(offset: Int, limit: Int) async throws -> UpcomingPage {
@@ -487,13 +488,13 @@ public final class ZoneConnection: ZoneRemote {
         components.queryItems = [URLQueryItem(name: "offset", value: "\(offset)"), URLQueryItem(name: "limit", value: "\(limit)")]
         let (data, response) = try await urlSession.data(from: components.url!)
         try Self.check(response)
-        return try JSONDecoder.api.decode(UpcomingPage.self, from: data)
+        return try JSONDecoder.api.decode(UpcomingPage.self, from: data).resolvingArtwork(against: baseURL)
     }
 
     private func refresh() async {
         guard let (data, _) = try? await urlSession.data(from: baseURL.appending(path: "api/state")),
               let snapshot = try? JSONDecoder.api.decode(PartySnapshot.self, from: data) else { return }
-        session?.apply(snapshot, force: true)
+        session?.apply(snapshot.resolvingArtwork(against: baseURL), force: true)
     }
 
     @discardableResult

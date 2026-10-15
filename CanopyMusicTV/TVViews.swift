@@ -319,7 +319,8 @@ struct TVZoneListView: View {
 
     var body: some View {
         VStack(spacing: 34) {
-            Image("CanopyLogo").resizable().scaledToFit().frame(height: 70)
+            // The setup screens' "canopy music" lockup (the party screen keeps the wordmark).
+            Image("CanopyMusicLogo").resizable().scaledToFit().frame(height: 150)
             VStack(spacing: 16) {
                 // This TV's own zone from last time comes first.
                 if model.canResumeZone {
@@ -509,10 +510,10 @@ struct TVStartView: View {
     var body: some View {
         HStack(spacing: 90) {
             VStack(alignment: .leading, spacing: 28) {
-                Image("CanopyLogo")
+                Image("CanopyMusicLogo")
                     .resizable()
                     .scaledToFit()
-                    .frame(height: 70)
+                    .frame(height: 150)
                 Text(model.hostJoined ? "Continue on your phone" : "Scan to host")
                     .font(.system(size: 76, weight: .bold))
                     .holdsRemoteFocus()

@@ -106,6 +106,7 @@ struct TVLibraryPlayTestView: View {
         // 2. Played by the engine, as a zone plays it ("[engine]" lines: queue set, play()
         // returned or threw, and on tvOS the off-main check that it started).
         let engine = AppleMusicEngine(cache: cache)
+        engine.onEvent = { event in log("engine event: \(event)") }
         log("engine.play…")
         start = clock.now
         do {
@@ -115,10 +116,28 @@ struct TVLibraryPlayTestView: View {
             log("engine.play threw after \((clock.now - start).inMilliseconds): \(error)")
         }
 
+        // `-libraryPlayTestAdvance`: the same song staged after itself, as a zone stages its next
+        // song, and at 3 s a seek to 8 s before the end, so the engine's move on to the staged
+        // song (by the clock: "[engine] moved on to … (by the clock)", then "engine event:
+        // advancedToStaged") comes within the 15 s.
+        let advance = args.contains("-libraryPlayTestAdvance")
+        if advance {
+            do {
+                try await engine.stage(track)
+                log("staged the song again after itself")
+            } catch {
+                log("stage threw: \(error)")
+            }
+        }
+
         // 3. The player every second.
         let mainReads = ProcessInfo.processInfo.arguments.contains("-libraryPlayTestMainReads")
         log("reading the player every second for 15 s, \(mainReads ? "on the main thread" : "off the main thread")")
         for second in 1...15 {
+            if advance, second == 4, let duration = track.duration {
+                log("seeking to \(Int(duration - 8)) s")
+                engine.seek(to: duration - 8)
+            }
             try? await Task.sleep(for: .seconds(1))
             let reading = mainReads ? PlayerReading.take() : await PlayerReading.takeOffMain(within: 2)
             let player = reading.map { "status=\($0.status) playbackTime=\(String(format: "%.1f", $0.time)) currentEntry=\($0.title ?? "nil") (\($0.itemID ?? "no item"))" }

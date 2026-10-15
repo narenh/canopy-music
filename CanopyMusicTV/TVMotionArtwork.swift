@@ -205,8 +205,8 @@ private final class TVLoopingVideoView: UIView {
         }
     }
 
-    /// Trying 0.75 s with the slow-down curve flipped (was 0.25 s; 1 s eased out looked choppy).
-    static let rampDuration: TimeInterval = 0.75
+    /// Trying 0.5 s with the slow-down curve flipped (was 0.25 s; 1 s eased out looked choppy, 0.75 s too long).
+    static let rampDuration: TimeInterval = 0.5
     private var rampTimer: Timer?
     private var ramp: (from: Double, to: Double, start: Date)?
 

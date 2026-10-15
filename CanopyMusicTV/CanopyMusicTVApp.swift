@@ -77,7 +77,10 @@ final class TVModel {
     /// Why the zone list's Resume didn't go back in (Spotify signed out, or another zone on the
     /// account). Cleared by the next attempt.
     private(set) var resumeProblem: String?
-    private(set) var session: PartySession
+    private(set) var session: PartySession {
+        // The hub's library art follows the session the views show (`HubLibraryArtwork`).
+        didSet { HubLibraryArtwork.follow(session) }
+    }
     let browser = ZoneBrowser()
     private(set) var guestURL: URL?
     private(set) var friendlyURL: URL?
@@ -166,6 +169,7 @@ final class TVModel {
         // Apple Music player's own session. Left at the default (not mixable), the music starting
         // interrupted this session and paused the video. Ambient mixes, so it never is.
         try? AVAudioSession.sharedInstance().setCategory(.ambient)
+        HubLibraryArtwork.follow(session)
         restoreZoneIfNeeded()
     }
 
@@ -725,7 +729,7 @@ final class TVModel {
         await stopServerNow()
         debugLog("starting server")
         let session = session
-        guard let (server, task) = await PartyServer.start(session: session, artworkCache: .shared) else {
+        guard let (server, task) = await PartyServer.start(session: session, libraryArtwork: HubLibraryArtwork.relay) else {
             debugLog("server failed to start")
             return
         }
@@ -740,8 +744,6 @@ final class TVModel {
         self.server = server
         serverTask = task
         serverSession = session
-        ArtworkURL.relayBase = server.url(host: "127.0.0.1")
-        ArtworkURL.relay = { [server] url in await server.libraryArtwork(at: url) }
         guard let ip = LocalNetwork.lanAddress() else { return }
         guestURL = server.url(host: ip)
         // Hand out the .local name only once it's confirmed ours: another zone may already have
@@ -775,8 +777,6 @@ final class TVModel {
         serverTask = nil
         self.server = nil
         serverSession = nil
-        ArtworkURL.relayBase = nil
-        ArtworkURL.relay = nil
         hostname.unregister()
         advertiser.stop()
         guestURL = nil

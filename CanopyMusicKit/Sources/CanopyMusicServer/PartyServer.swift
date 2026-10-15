@@ -4,7 +4,6 @@ import CoreImage.CIFilterBuiltins
 import FlyingFox
 import Foundation
 import ImageIO
-import Observation
 import UniformTypeIdentifiers
 
 /// LAN web server that lets guests queue from their phones. Serves the web app, a small JSON API,
@@ -14,59 +13,33 @@ public final class PartyServer: Sendable {
     private let session: PartySession
     private let server: HTTPServer
     private let libraryArtwork: LibraryArtworkRelay
+    /// It made its relay, so it warms it too (`LibraryArtworkRelay.warmAhead`); an app passing
+    /// its own warms it itself, for as long as its session lasts.
+    private let warmsLibraryArtwork: Bool
     private let snapshotEncoder = SnapshotEncoder()
 
-    /// `artworkCache`: where the relayed library art is kept across launches (the apps pass
-    /// `LibraryArtworkDiskCache.shared`); nil keeps it in memory only.
-    public init(session: PartySession, port: UInt16 = 8080, artworkCache: LibraryArtworkDiskCache? = nil) {
+    /// `libraryArtwork`: the relay for the hub's library art, shared with the app's own views (the
+    /// apps hold one with a disk cache); nil makes one in memory only.
+    public init(session: PartySession, port: UInt16 = 8080, libraryArtwork: LibraryArtworkRelay? = nil) {
         self.session = session
         self.port = port
         self.server = HTTPServer(port: port, logger: .disabled)
-        self.libraryArtwork = LibraryArtworkRelay(disk: artworkCache)
+        self.libraryArtwork = libraryArtwork ?? LibraryArtworkRelay(disk: nil)
+        warmsLibraryArtwork = libraryArtwork == nil
     }
 
     /// Runs until cancelled.
     public func run() async throws {
         await registerRoutes()
-        let warming = Task { await warmLibraryArtwork() }
-        defer { warming.cancel() }
+        let session = session, relay = libraryArtwork
+        let warming = warmsLibraryArtwork ? Task { await relay.warmAhead(of: session) } : nil
+        defer { warming?.cancel() }
         try await server.run()
     }
 
-    /// The songs ahead whose library art the relay loads before anything shows them: the one
-    /// playing and the next ones in Up Next.
-    static let artworkWarmAhead = 10
-
-    /// As the queue changes (a playlist loads, songs are queued, the music moves on), the relay
-    /// starts loading the art of the song playing and the next `artworkWarmAhead` that are the
-    /// hub's library songs, so Now Playing and Up Next have it when they ask.
-    private func warmLibraryArtwork() async {
-        let session = session, relay = libraryArtwork
-        let upcoming = Observations { @MainActor in
-            let tracks = [session.state.current?.track].compactMap { $0 } + session.state.upNext.prefix(Self.artworkWarmAhead).map(\.track)
-            return tracks.compactMap(\.libraryID)
-        }
-        var last: [String] = []
-        for await libraryIDs in upcoming where libraryIDs != last {
-            last = libraryIDs
-            guard !libraryIDs.isEmpty, let source = await session.catalog.libraryArtwork else { continue }
-            await relay.warm(libraryIDs, from: source)
-        }
-    }
-
-    /// The relayed library art at `url` (this server's `/api/artwork/<library id>?size=<px>`),
-    /// from the relay in process: the hub's own views load it this way, not through the server.
-    /// nil when it's not such a path, or there's no art.
-    public func libraryArtwork(at url: URL) async -> Data? {
-        let size = URLComponents(url: url, resolvingAgainstBaseURL: true)?.queryItems?.first { $0.name == "size" }?.value
-        return await relayedArtwork(path: url.path, size: size.flatMap { Int($0) })
-    }
-
     private func relayedArtwork(path: String, size: Int?) async -> Data? {
-        let id = String(path.dropFirst(LibraryArtwork.pathPrefix.count))
-        guard path.hasPrefix(LibraryArtwork.pathPrefix), LibraryArtwork.isLibraryID(id),
-              let source = await session.catalog.libraryArtwork else { return nil }
-        return await libraryArtwork.image(libraryID: id, size: LibraryArtworkRelay.size(for: size), from: source)
+        guard let source = await session.catalog.libraryArtwork else { return nil }
+        return await libraryArtwork.image(path: path, size: size, from: source)
     }
 
     public func stop() async {
@@ -80,14 +53,14 @@ public final class PartyServer: Sendable {
     /// Starts on the first port that binds (port 80 gives guests a URL without `:port`).
     /// Returns the running server and the task driving it.
     public static func start(session: PartySession, ports: [UInt16] = [80, 8080, 8081],
-                             artworkCache: LibraryArtworkDiskCache? = nil) async -> (PartyServer, Task<Void, Error>)? {
+                             libraryArtwork: LibraryArtworkRelay? = nil) async -> (PartyServer, Task<Void, Error>)? {
         for port in ports {
             // Right after a restart the previous socket can hold port 80 briefly; retry the
             // preferred port before falling back.
             let attempts = port == ports.first ? 3 : 1
             for attempt in 0..<attempts {
                 if attempt > 0 { try? await Task.sleep(for: .milliseconds(400)) }
-                let server = PartyServer(session: session, port: port, artworkCache: artworkCache)
+                let server = PartyServer(session: session, port: port, libraryArtwork: libraryArtwork)
                 let task = Task { try await server.run() }
                 do {
                     try await server.waitUntilListening(timeout: 1.5)

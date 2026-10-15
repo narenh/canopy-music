@@ -73,6 +73,41 @@ actor FakeDownloads {
         #expect(await downloads.urls.count == 1)
     }
 
+    /// Uploaded songs each have their own template, but an album's art is one image: downloaded
+    /// once for the album, whatever the templates.
+    @Test func anAlbumDownloadsOnceWhateverItsTemplates() async throws {
+        let album = LibraryArtworkHints.albumKey(album: "The Hobbit (Original Motion Picture Soundtrack)", artist: "Glenn Yarbrough")
+        let ids = (1...6).map { "i.Hobbit\($0)" }
+        let source = FakeLibraryArtwork(hints: Dictionary(uniqueKeysWithValues: ids.map {
+            ($0, LibraryArtworkHint(template: "https://art.test/upload/\($0)/{w}x{h}{c}.{f}", album: album))
+        }))
+        let downloads = FakeDownloads(delay: .milliseconds(30))
+        let relay = relay(downloads)
+        let images = await withTaskGroup(of: Data?.self) { group in
+            for id in ids { group.addTask { await relay.image(libraryID: id, size: 160, from: source) } }
+            return await group.reduce(into: [Data?]()) { $0.append($1) }
+        }
+        #expect(images.allSatisfy { $0 != nil && $0 == images[0] })
+        #expect(await downloads.urls.count == 1)
+        // Sized as MusicKit sizes it: no placeholder left for the server to ignore.
+        #expect(await downloads.urls.first?.hasSuffix("/1200x1200bb.jpg") == true)
+    }
+
+    /// Two albums whose downloads are the same bytes keep one copy.
+    @Test func theSameBytesAreKeptOnce() async throws {
+        let source = FakeLibraryArtwork(hints: [
+            "i.A": LibraryArtworkHint(template: "https://art.test/a/{w}x{h}.jpg", album: "a|x"),
+            "i.B": LibraryArtworkHint(template: "https://art.test/b/{w}x{h}.jpg", album: "b|x"),
+        ])
+        let downloads = FakeDownloads()
+        let relay = relay(downloads)
+        let a = await relay.image(libraryID: "i.A", size: 160, from: source)
+        let b = await relay.image(libraryID: "i.B", size: 160, from: source)
+        #expect(a != nil && a == b)
+        #expect(await downloads.urls.count == 2)
+        #expect(await relay.cachedImage(libraryID: "i.B", size: 1200) == relay.cachedImage(libraryID: "i.A", size: 1200))
+    }
+
     /// However many sizes and pages ask for a song at once, it's looked up once.
     @Test func oneLookupForEveryoneAsking() async throws {
         let source = FakeLibraryArtwork(delay: .milliseconds(100))
@@ -120,10 +155,17 @@ actor FakeDownloads {
             .init(libraryID: "i.Art", template: Self.albumArt, album: "spring awakening: tour SF", artist: "the cast"),
             .init(libraryID: "i.Alone", template: nil, album: "Bootlegs", artist: "The Cast"),
         ])
-        #expect(await hints.hint(for: "i.Art") == LibraryArtworkHint(template: Self.albumArt))
-        #expect(await hints.hint(for: "i.Bare") == LibraryArtworkHint(albumTemplate: Self.albumArt))
-        #expect(await hints.hint(for: "i.Alone") == LibraryArtworkHint())
+        let album = LibraryArtworkHints.albumKey(album: "Spring Awakening (Tour, SF)", artist: "The Cast")
+        #expect(album == "spring awakening tour sf|the cast")
+        #expect(await hints.hint(for: "i.Art") == LibraryArtworkHint(template: Self.albumArt, album: album))
+        #expect(await hints.hint(for: "i.Bare") == LibraryArtworkHint(albumTemplate: Self.albumArt, album: album))
+        #expect(await hints.hint(for: "i.Alone") == LibraryArtworkHint(album: "bootlegs|the cast"))
         #expect(await hints.hint(for: "i.Unlisted") == nil)
+    }
+
+    @Test func templatesAreFilledAsMusicKitFillsThem() {
+        #expect(LibraryArtworkHint.url("https://a.test/x/{w}x{h}{c}.{f}", size: 1200)?.absoluteString == "https://a.test/x/1200x1200bb.jpg")
+        #expect(LibraryArtworkHint.url("https://a.test/x/{w}x{h}bb.jpg", size: 160)?.absoluteString == "https://a.test/x/160x160bb.jpg")
     }
 
     @Test func hintsAreKeptAcrossLaunches() async throws {
@@ -134,8 +176,8 @@ actor FakeDownloads {
                             .init(libraryID: "i.Bare", template: nil, album: "A", artist: "B")])
         await hints.save()
         let relaunched = LibraryArtworkHints(url: url)
-        #expect(await relaunched.hint(for: "i.Art") == LibraryArtworkHint(template: Self.albumArt))
-        #expect(await relaunched.hint(for: "i.Bare") == LibraryArtworkHint(albumTemplate: Self.albumArt))
+        #expect(await relaunched.hint(for: "i.Art") == LibraryArtworkHint(template: Self.albumArt, album: "a|b"))
+        #expect(await relaunched.hint(for: "i.Bare") == LibraryArtworkHint(albumTemplate: Self.albumArt, album: "a|b"))
     }
 
     /// After a relaunch the art comes from disk, with no download and no lookup.
@@ -223,10 +265,32 @@ struct LibraryArtworkWarmingTests {
         let deadline = Date().addingTimeInterval(5)
         while await artwork.asked.isEmpty, Date() < deadline { try await Task.sleep(for: .milliseconds(20)) }
         #expect(await artwork.asked == ["\(LibraryArtworkCatalog.upload.libraryID!)@1200"])
-        // The hub's own views get it in process, at the sizes they ask for.
+        // A page or display asking at the sizes it uses gets what was warmed.
         let thumbnail = try #require(LibraryArtworkCatalog.upload.thumbnailURL)
-        let url = try #require(URL(string: thumbnail.relativeString, relativeTo: URL(string: "http://127.0.0.1:18867")!))
-        #expect(await server.libraryArtwork(at: url.absoluteURL) != nil)
+        let (data, _) = try await URLSession(configuration: .ephemeral).data(from: URL(string: "http://127.0.0.1:18867" + thumbnail.relativeString)!)
+        #expect(!data.isEmpty)
+        #expect(await artwork.asked.count == 1)
+    }
+
+    /// The app's own relay (its views', before the zone is live: no server) warms and serves
+    /// the hub's songs by their relay paths; a server given it shares what it has.
+    @Test func theAppsRelayWorksWithoutAServer() async throws {
+        let artwork = FakeLibraryArtwork()
+        let hub = PartySession(catalog: LibraryArtworkCatalog(artwork: artwork), engine: DemoPlaybackEngine())
+        let relay = LibraryArtworkRelay(disk: nil)
+        let warming = Task { await relay.warmAhead(of: hub) }
+        defer { warming.cancel() }
+        try await hub.load(playlist: PlaylistSummary(id: "mixed", name: "Mixed", kind: .library))
+        let deadline = Date().addingTimeInterval(5)
+        while await artwork.asked.isEmpty, Date() < deadline { try await Task.sleep(for: .milliseconds(20)) }
+        let path = try #require(LibraryArtworkCatalog.upload.thumbnailURL).path
+        #expect(await relay.image(path: path, size: 160, from: artwork) != nil)
+        #expect(await relay.image(path: "/api/artwork/not-a-library-id", size: 160, from: artwork) == nil)
+
+        let (server, task) = try #require(await PartyServer.start(session: hub, ports: [18868], libraryArtwork: relay))
+        defer { task.cancel(); Task { await server.stop() } }
+        let (data, _) = try await URLSession(configuration: .ephemeral).data(from: URL(string: "http://127.0.0.1:18868" + path + "?size=1200")!)
+        #expect(!data.isEmpty)
         #expect(await artwork.asked.count == 1)
     }
 }

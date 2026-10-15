@@ -1,6 +1,8 @@
 import CanopyMusicCore
+import CryptoKit
 import Foundation
 import ImageIO
+import Observation
 import UniformTypeIdentifiers
 
 /// The hub's relay for the art of songs only in its account's library (`LibraryArtwork`), at
@@ -10,12 +12,15 @@ import UniformTypeIdentifiers
 ///   library playlist's tracks and searches carry it), with no request to the service;
 /// - else from the source's own lookup (`LibraryArtworkSource.artwork`);
 /// - else, for a song without art of its own, its album's (another song's from the same album).
-/// Songs whose art is the same URL (an album's) share one image: one download, one copy. Kept as
+/// An album's songs share one image (each song's template differs; the image doesn't): one
+/// download, one copy; so do images whose bytes are the same. Kept as
 /// JPEG within a byte budget in memory and on disk (`LibraryArtworkDiskCache`), so a page's rows
 /// asking again, every phone asking for the same song, and a relaunch cost nothing. Art that isn't
 /// there is remembered for a while too, so rows don't ask again on every render. `warm` loads the
 /// next songs' art before anything shows them.
-actor LibraryArtworkRelay {
+/// The hub's own views use the same relay in process (`image(path:size:from:)`), the apps holding
+/// one for their whole run, so library art shows before the zone is live too (no server yet).
+public actor LibraryArtworkRelay {
     /// The sizes served: a request gets the smallest at least as big as it asked for.
     static let sizes = [160, 300, 600, 1200]
     static let largest = sizes[sizes.count - 1]
@@ -37,13 +42,16 @@ actor LibraryArtworkRelay {
     private var order: [String] = []
     private var bytes = 0
     private var missing: [String: Date] = [:]
-    /// Which image each song's art is, once found: "t:<URL template>" for art from a template
-    /// (an album's songs often share one), "id:<library id>" for the source's own lookup.
+    /// Which image each song's art is, once found: "a:<album>" for art from a template of a song
+    /// on a library album (`LibraryArtworkHints.albumKey`), "t:<URL template>" for one without an
+    /// album, "id:<library id>" for the source's own lookup.
     private var imageKeys: [String: String] = [:]
     /// Songs being found, however many sizes and pages ask at once.
     private var finding: [String: Task<Original?, Never>] = [:]
-    /// Templates being downloaded, however many songs share them.
-    private var downloads: [String: Task<Data?, Never>] = [:]
+    /// Images being downloaded, however many songs share them.
+    private var downloads: [String: Task<Downloaded?, Never>] = [:]
+    /// The image key each downloaded image's bytes (their SHA-256) were kept under.
+    private var contentKeys: [String: String] = [:]
     /// Smaller sizes being scaled, by "<size>|<image key>".
     private var scaling: [String: Task<Data?, Never>] = [:]
     private var warmQueue: [String] = []
@@ -61,9 +69,23 @@ actor LibraryArtworkRelay {
         self.now = now
     }
 
+    /// `disk`: where the art is kept across launches (`LibraryArtworkDiskCache.shared`); nil keeps
+    /// it in memory only.
+    public init(disk: LibraryArtworkDiskCache?) {
+        self.init(disk: disk, download: Self.download)
+    }
+
     static func size(for requested: Int?) -> Int {
         guard let requested else { return largest }
         return sizes.first { $0 >= requested } ?? largest
+    }
+
+    /// The art at a relay path (`/api/artwork/<library id>`, `LibraryArtwork`) at `size` pixels
+    /// (the next size served up; nil: the largest). nil when it's not such a path, or there's none.
+    public func image(path: String, size: Int?, from source: any LibraryArtworkSource) async -> Data? {
+        let id = String(path.dropFirst(LibraryArtwork.pathPrefix.count))
+        guard path.hasPrefix(LibraryArtwork.pathPrefix), LibraryArtwork.isLibraryID(id) else { return nil }
+        return await image(libraryID: id, size: Self.size(for: size), from: source)
     }
 
     /// JPEG data for the song's art at `size` (one of `sizes`), or nil when there's none.
@@ -111,6 +133,27 @@ actor LibraryArtworkRelay {
         warmQueue = wanted
         if !wanted.isEmpty { Self.log("warming \(wanted.count): \(wanted.joined(separator: ", "))") }
         startWarming(from: source)
+    }
+
+    /// The songs ahead whose art `warmAhead` loads before anything shows them: the one playing
+    /// and the next ones in Up Next.
+    static let warmAheadCount = 10
+
+    /// Until cancelled: as `session`'s queue changes (a playlist loads, songs are queued, the music
+    /// moves on), warms the art of the song playing and the next `warmAheadCount` that are the
+    /// hub's library songs, so Now Playing and Up Next have it when they ask (here, and on the
+    /// pages and displays asking the relay).
+    public nonisolated func warmAhead(of session: PartySession) async {
+        let upcoming = Observations { @MainActor in
+            let tracks = [session.state.current?.track].compactMap { $0 } + session.state.upNext.prefix(Self.warmAheadCount).map(\.track)
+            return tracks.compactMap(\.libraryID)
+        }
+        var last: [String] = []
+        for await libraryIDs in upcoming where libraryIDs != last {
+            last = libraryIDs
+            guard !libraryIDs.isEmpty, let source = await session.catalog.libraryArtwork else { continue }
+            await warm(libraryIDs, from: source)
+        }
     }
 
     private func startWarming(from source: any LibraryArtworkSource) {
@@ -161,7 +204,7 @@ actor LibraryArtworkRelay {
     private func find(libraryID: String, from source: any LibraryArtworkSource) async -> Original? {
         let clock = ContinuousClock(), start = clock.now
         let hint = await source.artworkHint(libraryID: libraryID)
-        if let template = hint?.template, let original = await original(template: template) {
+        if let template = hint?.template, let original = await original(template: template, album: hint?.album) {
             Self.log("\(libraryID): its own art, from its template, in \(Self.ms(clock.now - start))")
             return original
         }
@@ -180,22 +223,24 @@ actor LibraryArtworkRelay {
                 return Original(key: key, jpeg: jpeg)
             }
         }
-        if let template = hint?.albumTemplate, let original = await original(template: template) {
+        if let template = hint?.albumTemplate, let original = await original(template: template, album: hint?.album) {
             Self.log("\(libraryID): its album's art in \(Self.ms(clock.now - start))")
             return original
         }
         return nil
     }
 
-    /// The image at `template`, at the largest size: in memory, on disk, or downloaded (once for
-    /// every song that has it).
-    private func original(template: String) async -> Original? {
-        let key = "t:\(template)"
+    /// The image at `template`, at the largest size: in memory, on disk, or downloaded. Songs of
+    /// one library `album` share it (each song's template differs, the image doesn't), so it's
+    /// downloaded once for the album: "a:<album>"; without an album, once per template. Images
+    /// whose bytes turn out the same (another album with the same art) share one copy too.
+    private func original(template: String, album: String?) async -> Original? {
+        let key = album.map { "a:\($0)" } ?? "t:\(template)"
         if let jpeg = cached("\(Self.largest)|\(key)") { return Original(key: key, jpeg: jpeg) }
         if let jpeg = await disk?.data(for: key) { return Original(key: key, jpeg: jpeg) }
-        if let task = downloads[key] { return await task.value.map { Original(key: key, jpeg: $0) } }
+        if let task = downloads[key] { return await task.value.map { Original(key: $0.key, jpeg: $0.jpeg) } }
         let download = download
-        let task = Task<Data?, Never> {
+        let task = Task<Downloaded?, Never> {
             guard let url = LibraryArtworkHint.url(template, size: Self.largest) else { return nil }
             let clock = ContinuousClock(), start = clock.now
             guard let data = await download(url) else {
@@ -203,15 +248,29 @@ actor LibraryArtworkRelay {
                 return nil
             }
             let downloaded = clock.now - start
-            let jpeg = await Task.detached(priority: .userInitiated) { Self.jpeg(data, side: Self.largest) }.value
-            Self.log("downloaded \(data.count / 1024) KB in \(Self.ms(downloaded)), scaled in \(Self.ms(clock.now - start - downloaded))")
-            return jpeg
+            let (hash, pixels) = await Task.detached(priority: .userInitiated) { (Self.hash(data), Self.pixelSize(data)) }.value
+            if let sameKey = contentKeys[hash], let jpeg = cached("\(Self.largest)|\(sameKey)") {
+                Self.log("downloaded \(data.count / 1024) KB (\(pixels)) in \(Self.ms(downloaded)): the same image as \(sameKey), kept once")
+                return Downloaded(key: sameKey, jpeg: jpeg)
+            }
+            guard let jpeg = await Task.detached(priority: .userInitiated, operation: { Self.jpeg(data, side: Self.largest) }).value else { return nil }
+            Self.log("downloaded \(data.count / 1024) KB (\(pixels)) in \(Self.ms(downloaded)), scaled in \(Self.ms(clock.now - start - downloaded)) to \(jpeg.count / 1024) KB, for \(key): \(url.absoluteString)")
+            if contentKeys.count > 2000 { contentKeys = [:] }
+            contentKeys[hash] = key
+            return Downloaded(key: key, jpeg: jpeg)
         }
         downloads[key] = task
-        let jpeg = await task.value
+        let result = await task.value
         downloads[key] = nil
-        if let jpeg { await disk?.store(jpeg, for: key) }
-        return jpeg.map { Original(key: key, jpeg: $0) }
+        guard let result else { return nil }
+        // Under this key too when it's another's image: after a relaunch it's on disk at once.
+        await disk?.store(result.jpeg, for: key)
+        return Original(key: result.key, jpeg: result.jpeg)
+    }
+
+    private struct Downloaded: Sendable {
+        var key: String
+        var jpeg: Data
     }
 
     // MARK: Memory
@@ -243,6 +302,18 @@ actor LibraryArtworkRelay {
               let (data, response) = try? await URLSession.shared.data(from: url),
               (response as? HTTPURLResponse)?.statusCode == 200, !data.isEmpty else { return nil }
         return data
+    }
+
+    static func hash(_ data: Data) -> String {
+        SHA256.hash(data: data).map { String(format: "%02x", $0) }.joined()
+    }
+
+    /// "<width>x<height>" from the image's header, for the log.
+    static func pixelSize(_ data: Data) -> String {
+        guard let source = CGImageSourceCreateWithData(data as CFData, [kCGImageSourceShouldCache: false] as CFDictionary),
+              let properties = CGImageSourceCopyPropertiesAtIndex(source, 0, nil) as? [CFString: Any],
+              let width = properties[kCGImagePropertyPixelWidth] as? Int, let height = properties[kCGImagePropertyPixelHeight] as? Int else { return "?" }
+        return "\(width)x\(height)"
     }
 
     /// The image scaled down so its longer side is at most `side` (never up), as JPEG. A JPEG

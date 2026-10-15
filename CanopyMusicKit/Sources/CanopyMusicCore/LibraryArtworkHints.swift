@@ -6,15 +6,22 @@ public struct LibraryArtworkHint: Sendable, Equatable {
     public var template: String?
     /// For a song without art of its own: another song's on the same library album.
     public var albumTemplate: String?
+    /// The library album it's on (`LibraryArtworkHints.albumKey`): its songs share one image, so
+    /// the relay downloads it once for all of them.
+    public var album: String?
 
-    public init(template: String? = nil, albumTemplate: String? = nil) {
+    public init(template: String? = nil, albumTemplate: String? = nil, album: String? = nil) {
         self.template = template
         self.albumTemplate = albumTemplate
+        self.album = album
     }
 
-    /// `template` at `size` pixels square.
+    /// `template` at `size` pixels square, as MusicKit fills Apple Music's templates: `{w}` and
+    /// `{h}`, and `{c}` (crop, "bb") and `{f}` (format, "jpg") where it has them. Left in, those
+    /// two make the server send the original upload, megabytes of it, whatever the size asked.
     public static func url(_ template: String, size: Int) -> URL? {
-        URL(string: template.replacingOccurrences(of: "{w}", with: "\(size)").replacingOccurrences(of: "{h}", with: "\(size)"))
+        URL(string: template.replacingOccurrences(of: "{w}", with: "\(size)").replacingOccurrences(of: "{h}", with: "\(size)")
+            .replacingOccurrences(of: "{c}", with: "bb").replacingOccurrences(of: "{f}", with: "jpg"))
     }
 }
 
@@ -99,8 +106,8 @@ public actor LibraryArtworkHints {
     /// nil for a song never listed.
     public func hint(for libraryID: String) -> LibraryArtworkHint? {
         guard let entry = songs[libraryID] else { return nil }
-        if let template = entry.template { return LibraryArtworkHint(template: template) }
-        return LibraryArtworkHint(albumTemplate: entry.album.flatMap { albums[$0] })
+        if let template = entry.template { return LibraryArtworkHint(template: template, album: entry.album) }
+        return LibraryArtworkHint(albumTemplate: entry.album.flatMap { albums[$0] }, album: entry.album)
     }
 
     /// Writes to disk if anything changed since the last save (call once after a batch).

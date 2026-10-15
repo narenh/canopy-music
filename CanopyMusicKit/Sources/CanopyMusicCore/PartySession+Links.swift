@@ -191,20 +191,13 @@ extension PartySession {
         Task { try? await self.serially { await self.playMovingOn(next) } }
     }
 
-    /// "“Title” couldn't download: <cmdlp's reason>", kept short (yt-dlp's messages can be long).
+    /// "Skipped “Title”: Download failed", or for a link pasted again after it failed, "That link
+    /// couldn't download". cmdlp's reason (yt-dlp's, with server paths in it) is for the log only.
     static func failure(_ reason: String?, title: String?) -> String {
-        let subject = title.map { "“\($0)”" } ?? "That link"
-        guard var reason = reason?.trimmingCharacters(in: .whitespacesAndNewlines), !reason.isEmpty else {
-            return "\(subject) couldn't download"
-        }
-        if reason.hasPrefix("ERROR: ") { reason.removeFirst("ERROR: ".count) }
-        // yt-dlp's "[youtube] dQw4w9WgXcQ: " in front says nothing to guests.
-        if reason.hasPrefix("["), let close = reason.firstIndex(of: "]"),
-           let colon = reason[close...].range(of: ": ") {
-            reason = String(reason[colon.upperBound...])
-        }
-        if reason.count > 120 { reason = String(reason.prefix(117)) + "…" }
-        return "\(subject) couldn't download: \(reason)"
+        #if DEBUG
+        if let reason, !reason.isEmpty { print("[links] failed (\(title ?? "a link")): \(reason)") }
+        #endif
+        return title.map { "Skipped “\($0)”: Download failed" } ?? "That link couldn't download"
     }
 
     /// Every phone shows it once, for a while (`PartySnapshot.notice`).

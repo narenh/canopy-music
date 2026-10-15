@@ -272,8 +272,9 @@ final class FakeLinkService: LinkService {
         #expect(session.state.upNext.contains { $0.track.link != nil })
         #expect(await !session.pollLink("L1"))
         #expect(!session.state.upNext.contains { $0.track.link != nil })
-        #expect(session.playerIssue == "“Gone” couldn't download: Video unavailable")
-        #expect(session.snapshot().notice?.text == "“Gone” couldn't download: Video unavailable")
+        // cmdlp's reason stays out of what people see.
+        #expect(session.playerIssue == "Skipped “Gone”: Download failed")
+        #expect(session.snapshot().notice?.text == "Skipped “Gone”: Download failed")
     }
 
     /// cmdlp lost it (its zone swept, say): as a failure.
@@ -285,7 +286,7 @@ final class FakeLinkService: LinkService {
         service.trackError = CmdlpError(status: 404, reason: "not_found")
         await eventually { !session.state.upNext.contains { $0.track.link != nil } }
         #expect(!session.state.upNext.contains { $0.track.link != nil })
-        #expect(session.playerIssue?.hasSuffix("couldn't download: Its download is gone.") == true)
+        #expect(session.playerIssue?.hasSuffix(": Download failed") == true)
     }
 
     /// cmdlp not answering for a moment isn't a failure: it's asked again.

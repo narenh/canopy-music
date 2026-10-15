@@ -407,6 +407,15 @@
   const foreignItems = (s) => s.foreignUpcoming || [];
   const isForeign = (item) => foreignItems(snap).some((f) => f.id === item.id);
 
+  /** Sets an icon's SVG only when it's a different one: rewriting it on every snapshot rebuilt it
+   * for nothing. */
+  const shownIcons = new WeakMap();
+  function setIcon(el, html) {
+    if (shownIcons.get(el) === html) return;
+    shownIcons.set(el, html);
+    el.innerHTML = html;
+  }
+
   function render() {
     const current = nowPlaying(snap);
     applyTheme(current && current.track);
@@ -424,9 +433,9 @@
     if (!$("setup").hidden) { setupAddress(); renderSetupMusic(); }
     if (!$("edit-modal").hidden) editAddress();
     const playing = !!(current && snap.playback.isPlaying);
-    $("t-play").innerHTML = playing ? icons.pause : icons.play;
+    setIcon($("t-play"), playing ? icons.pause : icons.play);
     $("t-play").setAttribute("aria-label", playing ? "Pause" : "Play");
-    $("zone-device").innerHTML = deviceIcon(snap.hubKind, snap.hubDevice);
+    setIcon($("zone-device"), deviceIcon(snap.hubKind, snap.hubDevice));
     $("zone-name").textContent = snap.zoneName || "";
     document.title = snap.zoneName ? `${snap.zoneName} - Canopy Music` : "Canopy Music";
     $("zone-line").hidden = !snap.zoneName;
@@ -750,23 +759,36 @@
     setTimeout(() => el.classList.remove("flash"), 60);
   }
 
+  // The fill is the whole bar slid left, so 3 px plus the played share shows: a dot from the
+  // first moment past 0:00, the whole bar at the end. Sliding (a transform) needs no layout,
+  // which resizing it did every frame. Each snapshot sets it once: playing, one linear animation
+  // runs it to the end (a seek just jumps); paused, it stays.
+  const progressAt = (share) => `translateX(calc((100% - 3px) * ${Math.min(1, Math.max(0, share)) - 1}))`;
+  let progressKey = null;
+  let progressAnimation = null;
+  let progressStart = null;
   function updateProgress() {
     const fill = $("progress");
     const current = snap && nowPlaying(snap);
-    if (!current || !current.track.duration) { fill.style.width = "0"; fill.classList.remove("started"); return; }
-    const pb = snap.playback;
+    const duration = current ? current.track.duration : 0;
+    const pb = snap && snap.playback;
+    const key = duration ? `${current.id} ${duration} ${pb.position} ${pb.capturedAt} ${pb.isPlaying}` : "";
+    if (key === progressKey) return;
+    progressKey = key;
+    if (progressAnimation) progressAnimation.cancel();
+    progressAnimation = null;
+    clearTimeout(progressStart);
+    if (!duration) { fill.style.transform = progressAt(0); fill.classList.remove("started"); return; }
     const elapsed = pb.position + (pb.isPlaying ? (Date.now() - pb.capturedAt) / 1000 : 0);
-    fill.style.width = `${Math.min(100, (elapsed / current.track.duration) * 100)}%`;
+    fill.style.transform = progressAt(elapsed / duration);
+    // None at exactly 0:00; a dot the moment it's past it.
     fill.classList.toggle("started", elapsed > 0);
+    if (!pb.isPlaying || elapsed >= duration) return;
+    if (elapsed <= 0) progressStart = setTimeout(() => fill.classList.add("started"), -elapsed * 1000 + 1);
+    const from = Math.max(0, elapsed);
+    progressAnimation = fill.animate([{ transform: progressAt(from / duration) }, { transform: progressAt(1) }],
+      { duration: (duration - from) * 1000, delay: Math.max(0, -elapsed) * 1000, easing: "linear", fill: "both" });
   }
-  // Every frame while playing so the bar grows smoothly (a seek just jumps); browsers pause
-  // frames in background tabs. Twice a second otherwise, which is plenty while paused.
-  function progressLoop() {
-    updateProgress();
-    if (snap && snap.playback.isPlaying) requestAnimationFrame(progressLoop);
-    else setTimeout(progressLoop, 500);
-  }
-  progressLoop();
 
   // MARK: Network
 
@@ -826,8 +848,18 @@
       reconnectTimer = setTimeout(connect, retryDelay(retries++));
     };
   }
-  document.addEventListener("visibilitychange", () => { if (!document.hidden) connect(); });
-  addEventListener("online", connect);
+  // Hidden (another app, the phone locked): the socket closes, so a phone in a pocket keeps no
+  // connection open and the hub sends it nothing. Shown again, it connects at once and the hub
+  // sends the snapshot as it is then. Not a dropped connection: no retries, no offline banner.
+  function disconnect() {
+    clearTimeout(reconnectTimer);
+    reconnectTimer = null;
+    const ws = socket;
+    socket = null;
+    if (ws) ws.close();
+  }
+  document.addEventListener("visibilitychange", () => { if (document.hidden) disconnect(); else connect(); });
+  addEventListener("online", () => { if (!document.hidden) connect(); });
 
   // MARK: Queue interactions
 

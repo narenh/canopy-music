@@ -488,8 +488,9 @@ struct ServiceDropdown: View {
 
     var body: some View {
         if isOpen, let choose {
-            ForEach([AppModel.Provider.appleMusic, .spotify], id: \.self) { provider in
-                ServiceOptionRow(provider: provider, isCurrent: provider == model.provider) {
+            // Only the service to switch to: the Music row above already shows the current one.
+            ForEach([AppModel.Provider.appleMusic, .spotify].filter { $0 != model.provider }, id: \.self) { provider in
+                ServiceOptionRow(provider: provider) {
                     withAnimation { isOpen = false }
                     choose(provider)
                 }
@@ -501,7 +502,6 @@ struct ServiceDropdown: View {
 private struct ServiceOptionRow: View {
     @Environment(AppModel.self) private var model
     let provider: AppModel.Provider
-    let isCurrent: Bool
     let action: () -> Void
 
     var body: some View {
@@ -515,19 +515,11 @@ private struct ServiceOptionRow: View {
                     }
                 }
                 Spacer(minLength: 8)
-                // Under the Music row's chevron.
-                Image(systemName: "checkmark")
-                    .font(.body.weight(.semibold))
-                    .foregroundStyle(.tint)
-                    .frame(width: 24, height: 28)
-                    .opacity(isCurrent ? 1 : 0)
-                    .accessibilityHidden(true)
             }
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
-        .accessibilityAddTraits(isCurrent ? .isSelected : [])
-        .accessibilityHint(isCurrent ? "" : "Switches the music service")
+        .accessibilityHint("Switches the music service")
     }
 }
 

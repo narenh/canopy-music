@@ -847,22 +847,22 @@ struct TVProgress: View {
     @State private var held = HeldSongTime()
 
     var body: some View {
-        // Every frame while playing so the bar grows smoothly (a seek just jumps); twice a second
-        // while paused, to catch seeks.
-        TimelineView(.animation(minimumInterval: session.isPlaying ? nil : 0.5)) { _ in
+        // Four times a second while playing, for the time labels and to catch seeks; the fill
+        // moves smoothly in between by itself (`ProgressFill`). Twice a second while paused.
+        TimelineView(.periodic(from: .now, by: session.isPlaying ? 0.25 : 0.5)) { _ in
             let live = itemID == session.nowPlaying?.id
             let time = held.show(live ? min(session.position, duration) : nil)
             VStack(spacing: 10) {
-                GeometryReader { geo in
-                    // Never narrower than a circle (a thinner capsule squashes into a sliver): at
-                    // 0:00 there's none, and from the first moment past it a dot, which grows.
-                    let started = duration > 0 && time > 0
-                    ZStack(alignment: .leading) {
-                        Capsule().fill(.white.opacity(0.2))
-                        Capsule().fill(.white)
-                            .frame(width: max(duration > 0 ? geo.size.width * time / duration : 0, geo.size.height))
-                            .opacity(started ? 1 : 0)
-                    }
+                // Never narrower than a circle (a thinner capsule squashes into a sliver): at
+                // 0:00 there's none, and from the first moment past it a dot, which grows.
+                let started = duration > 0 && time > 0
+                ZStack(alignment: .leading) {
+                    Capsule().fill(.white.opacity(0.2))
+                    ProgressFill(
+                        fraction: duration > 0 ? time / duration : 0,
+                        duration: live && session.isPlaying && duration > 0 ? duration : nil
+                    )
+                    .opacity(started ? 1 : 0)
                 }
                 .frame(height: 8)
                 HStack {

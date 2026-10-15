@@ -722,9 +722,9 @@ private struct ProgressBar: View {
     @State private var isScrubbing = false
 
     var body: some View {
-        // Every frame while playing so the bar grows smoothly (a seek just jumps); twice a second
-        // while paused, to catch seeks.
-        TimelineView(.animation(minimumInterval: session.isPlaying ? nil : 0.5)) { _ in
+        // Four times a second while playing, for the time labels and to catch seeks; the fill
+        // moves smoothly in between by itself (`ProgressFill`). Twice a second while paused.
+        TimelineView(.periodic(from: .now, by: session.isPlaying ? 0.25 : 0.5)) { _ in
             let total = max(duration ?? 0, 1)
             let live = itemID == session.nowPlaying?.id
             let elapsed = scrub.map { $0 * total } ?? held.show(live ? session.position : nil)
@@ -733,12 +733,13 @@ private struct ProgressBar: View {
             // there's none, and from the first moment past it a dot, which grows. At once, not
             // with the scrubbing's spring.
             let started = duration != nil && elapsed > 0
+            // Runs on by itself only while the song shown is playing and no finger holds it.
+            let moving = scrub == nil && live && session.isPlaying ? duration : nil
             VStack(spacing: 6) {
                 GeometryReader { geo in
                     ZStack(alignment: .leading) {
                         Capsule().fill(.white.opacity(0.18))
-                        Capsule().fill(.white)
-                            .frame(width: max(geo.size.width * min(elapsed / total, 1), thickness))
+                        ProgressFill(fraction: min(elapsed / total, 1), duration: moving)
                             .opacity(started ? 1 : 0)
                             .animation(nil, value: started)
                     }

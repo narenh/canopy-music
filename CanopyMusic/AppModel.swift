@@ -120,7 +120,11 @@ final class AppModel {
     /// The party screen is showing and host mode is behind press and hold (and the PIN). A live
     /// zone remembers it, so after a crash it comes back locked.
     private(set) var isLocked = false {
-        didSet { if isLive { zoneRecord.wasLocked = isLocked } }
+        didSet {
+            if isLive { zoneRecord.wasLocked = isLocked }
+            // The start screen mid-party offers the rooms; the party screen doesn't.
+            if isLocked != oldValue { updateSonosDiscovery() }
+        }
     }
     private(set) var authorization: MusicAuthorization.Status = MusicAuthorization.currentStatus
     /// Apple Music playback needs a subscription; search works without one. Kept current by
@@ -1456,13 +1460,14 @@ final class AppModel {
     }
 
     /// Sonos discovery (the `_sonos._tcp` browse, and the household read again on its news) runs
-    /// where rooms can be chosen or the music plays on them: the zone list and start screen, and
-    /// a zone on Sonos. Not in a live zone on this device (or a Spotify Connect device), whose
-    /// party screen and phones offer no rooms, nor on a display. The rooms found stay listed.
+    /// where rooms can be chosen or the music plays on them: the zone list and start screen (a
+    /// live zone's too, reached from its party screen), and a zone on Sonos. Not while a live
+    /// zone on this device (or a Spotify Connect device) shows its party screen, which offers no
+    /// rooms, nor on a display. The rooms found stay listed.
     private func updateSonosDiscovery() {
         // From launch on (`startOnLaunch`), as before.
         guard hasStartedDiscovery else { return }
-        if zoneRole != .display, !isLive || sonosController.output != nil {
+        if zoneRole != .display, !isLive || !isLocked || sonosController.output != nil {
             sonos.start()
         } else {
             sonos.stop()

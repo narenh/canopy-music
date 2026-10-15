@@ -1123,6 +1123,8 @@
   let results = [];
   let searchAbort = null;
   let searchTimer = null;
+  /** The results are a pasted link's (or its lookup), and the field was emptied for it. */
+  let linkLookedUp = false;
 
   function openSearch() {
     $("search").hidden = false;
@@ -1178,6 +1180,11 @@
    * take a while (the hub answers 202 until it's done), so it says so meanwhile. */
   async function lookUpLink(term, link, signal) {
     results = [];
+    // The field empties, ready for the next song; the link's row (and its preparing) stays until
+    // something new is typed (`runSearch`). Setting the value doesn't fire "input".
+    linkLookedUp = true;
+    $("search-input").value = "";
+    $("search-clear").hidden = true;
     renderResults(term, "Checking link…", true);
     try {
       for (;;) {
@@ -1208,6 +1215,10 @@
 
   async function runSearch() {
     const term = $("search-input").value.trim();
+    // The field was emptied for a pasted link: nothing new to search, so its row (or its lookup)
+    // stays.
+    if (!term && linkLookedUp) return;
+    linkLookedUp = false;
     if (searchAbort) searchAbort.abort();
     if (!term) { results = []; renderResults(); return; }
     searchAbort = new AbortController();
@@ -1350,6 +1361,7 @@
       sub.textContent = li.dataset.sub;
       const note = li.querySelector(".row-note");
       if (note) note.remove();
+      li.classList.remove("has-note");
       button.classList.remove("preparing");
       setButton(button, "Add", false);
       return;
@@ -1364,10 +1376,12 @@
     }
     sub.textContent = prep.percent != null ? `Preparing… ${prep.percent}%` : "Preparing…";
     if (prep.takesLong && !li.querySelector(".row-note")) {
+      // Its own line under the row (art, text, and spinner), centered.
       const note = document.createElement("p");
       note.className = "row-note";
       note.textContent = "Your song will queue automatically when it's finished preparing.";
-      li.querySelector(".row-meta").append(note);
+      li.classList.add("has-note");
+      li.append(note);
     }
   }
 
@@ -1389,6 +1403,13 @@
     if (reply) {
       const failed = new Set(reply.failed.map((f) => f.id));
       const still = new Map(reply.preparing.map((p) => [p.id, p]));
+      for (const [id, p] of still) {
+        // Never back (a hub relaunched starts its figures over), and the note once shown stays.
+        const before = preparing.get(id);
+        if (!before) continue;
+        if (before.percent != null && (p.percent == null || p.percent < before.percent)) p.percent = before.percent;
+        p.takesLong = p.takesLong || before.takesLong;
+      }
       for (const id of preparing.keys()) if (!still.has(id) && !failed.has(id)) awaitingQueue.add(id);
       preparing.clear();
       still.forEach((p, id) => preparing.set(id, p));

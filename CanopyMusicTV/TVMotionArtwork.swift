@@ -13,7 +13,7 @@ import SwiftUI
 struct TVMotionArtworkView: View {
     let track: QueueTrack?
     let catalog: any MusicCatalog
-    /// The music's play/pause: the video eases to a stop with it, and back up (as Apple Music's).
+    /// The music's play/pause: the video follows it (`fadesWhilePaused`).
     var isPlaying: Bool
     var cornerRadius: CGFloat
 
@@ -190,68 +190,33 @@ private final class TVLoopingVideoView: UIView {
         }
     }
 
-    /// `active` false (the app's in the background, or the video can't be seen) stops it at once. Otherwise it follows the
-    /// music: `animated`, the rate eases down to a stop or back up to normal speed over
-    /// `rampDuration`, as Apple Music's motion artwork does; a stream that can't play slower than
-    /// normal just pauses and plays.
+    /// `active` false (the app's in the background, or the video can't be seen) stops it at once.
+    /// Otherwise it follows the music: `animated`, a pause lets it keep moving while it fades to
+    /// the still art (`TVMotionArtworkView.fadesWhilePaused`), then stops it. (Easing the rate
+    /// down instead stuttered on busy artwork at every length tried.)
     func setActive(_ active: Bool, playing: Bool, animated: Bool) {
         guard let player else { return }
         let wanted = active && playing
         guard wanted != wantsToPlay || !animated else { return }
         wantsToPlay = wanted
-        rampTimer?.invalidate()
-        rampTimer = nil
-        let canRamp = Self.eases && animated && active && (player.currentItem?.canPlaySlowForward ?? false)
-        guard canRamp else {
-            if wanted {
-                player.play()
-            } else if animated, active, TVMotionArtworkView.fadesWhilePaused {
-                // The music paused: it keeps moving while it fades to the still art, then stops.
-                rampTimer = Timer.scheduledTimer(withTimeInterval: TVMotionArtworkView.pauseFade, repeats: false) { [weak self] _ in
-                    MainActor.assumeIsolated {
-                        self?.rampTimer = nil
-                        self?.player?.pause()
-                    }
+        pauseTimer?.invalidate()
+        pauseTimer = nil
+        if wanted {
+            player.play()
+        } else if animated, active, TVMotionArtworkView.fadesWhilePaused {
+            pauseTimer = Timer.scheduledTimer(withTimeInterval: TVMotionArtworkView.pauseFade, repeats: false) { [weak self] _ in
+                MainActor.assumeIsolated {
+                    self?.pauseTimer = nil
+                    self?.player?.pause()
                 }
-            } else {
-                player.pause()
             }
-            return
-        }
-        ramp = (from: Double(player.rate), to: wanted ? 1 : 0, start: Date())
-        if wanted, player.rate == 0 { player.rate = 0.05 }
-        rampTimer = Timer.scheduledTimer(withTimeInterval: 1.0 / 60, repeats: true) { [weak self] _ in
-            MainActor.assumeIsolated { self?.rampStep() }
-        }
-    }
-
-    /// Off, to try: the video stops and starts at once with the music. Easing the rate stuttered
-    /// on busy artwork at every length tried (0.25–1 s, eased in or out), like dropped frames.
-    static let eases = false
-    static let rampDuration: TimeInterval = 0.3
-    private var rampTimer: Timer?
-    private var ramp: (from: Double, to: Double, start: Date)?
-
-    private func rampStep() {
-        guard let player, let ramp else {
-            rampTimer?.invalidate()
-            rampTimer = nil
-            return
-        }
-        let progress = min(1, Date().timeIntervalSince(ramp.start) / Self.rampDuration)
-        // Slowing down eases in: near full speed until late, then drops to a stop, so little time
-        // is spent at slow speeds, where each frame holds long enough to stutter. Speeding back
-        // up eases out, leaving the slow speeds quickly for the same reason.
-        let eased = ramp.to < ramp.from ? progress * progress : 1 - pow(1 - progress, 2)
-        if progress >= 1 {
-            rampTimer?.invalidate()
-            rampTimer = nil
-            self.ramp = nil
-            if ramp.to == 0 { player.pause() } else { player.rate = 1 }
         } else {
-            player.rate = Float(max(ramp.from + (ramp.to - ramp.from) * eased, 0.05))
+            player.pause()
         }
     }
+
+    /// Stops the video once it has faded out on a pause.
+    private var pauseTimer: Timer?
 
     private func statusChanged(_ player: AVPlayer) {
         let status = switch player.timeControlStatus {
@@ -265,8 +230,8 @@ private final class TVLoopingVideoView: UIView {
 
     func stop() {
         wantsToPlay = false
-        rampTimer?.invalidate()
-        rampTimer = nil
+        pauseTimer?.invalidate()
+        pauseTimer = nil
         statusObservation?.invalidate()
         statusObservation = nil
         if let interruptionObserver { NotificationCenter.default.removeObserver(interruptionObserver) }

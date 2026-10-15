@@ -420,6 +420,10 @@ struct NowPlayingView: View {
     var isHidden = false
     @Environment(AppModel.self) private var model
     @Environment(\.displayScale) private var displayScale
+    /// The song whose animated art is showing (`MotionArtworkView.onShowing`), if any.
+    @State private var videoShowing: QueueItem.ID?
+    /// Trying it: the equalizer bars go while the song's video shows. False keeps them.
+    private static let barsHideForVideo = true
 
     /// The song shown: the one playing, once it has slid in.
     private var item: QueueItem? { slider.current(in: session) }
@@ -487,13 +491,19 @@ struct NowPlayingView: View {
                     MotionArtworkView(
                         track: item?.track, catalog: session.catalog, isPlaying: session.isPlaying && live,
                         waits: !live || slider.isSliding, cornerRadius: 18, isHidden: isHidden
-                    )
+                    ) { showing in
+                        guard let id = item?.id else { return }
+                        withAnimation(.easeInOut(duration: 0.4)) {
+                            if showing { videoShowing = id } else if videoShowing == id { videoShowing = nil }
+                        }
+                    }
                 }
                 .frame(width: side, height: side)
                 .shadow(color: .black.opacity(0.5), radius: 40, y: 20)
             VStack(spacing: 6) {
                 HStack(alignment: .firstTextBaseline, spacing: 12) {
-                    if item != nil {
+                    // Not while the song's video plays: that already says it's playing. Trying it.
+                    if item != nil, !(Self.barsHideForVideo && videoShowing == item?.id) {
                         EqualizerBars(isAnimating: session.isPlaying)
                             // Trying 16 × 22 (was 24 × 24): lighter beside the title.
                             .frame(width: 16, height: 22)

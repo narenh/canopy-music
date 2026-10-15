@@ -75,7 +75,7 @@ final class AppleMusicEngine: PlaybackEngine {
     }
 
     func play(_ track: QueueTrack) async throws {
-        let song = try await cache.song(for: track.id)
+        let song = try await cache.song(for: track)
         stagedTrackID = nil
         reportedEnd = false
         pausedByUs = false
@@ -109,7 +109,9 @@ final class AppleMusicEngine: PlaybackEngine {
         defer { log("staged; status=\(player.state.playbackStatus) entries=\(player.queue.entries.count)") }
         stagedTrackID = nil
         guard let track else { return }
-        let song = try await cache.song(for: track.id)
+        // A song only in the library is fetched from it by its library id, which is its id here
+        // too, so the player's entry for it (`poll`) matches as a catalog song's does.
+        let song = try await cache.song(for: track)
         try await player.queue.insert(song, position: .afterCurrentEntry)
         stagedTrackID = track.id
     }

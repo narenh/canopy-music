@@ -168,6 +168,9 @@ public struct PlaylistLoadReport: Sendable, Equatable {
     public var skipped: [QueueTrack] = []
     /// Songs actually loaded.
     public var loaded = 0
+    /// Unlabelled tracks with no catalog match, loaded to play from the library
+    /// (`QueueTrack.isLibraryOnly`) rather than skipped. Counted in `loaded`.
+    public var libraryOnly = 0
 
     public var skippedCount: Int { skipped.count }
 

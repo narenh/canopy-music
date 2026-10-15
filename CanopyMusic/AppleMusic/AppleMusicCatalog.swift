@@ -1,6 +1,10 @@
 import CanopyMusicCore
 import CoreGraphics
 import Foundation
+#if os(iOS)
+import MediaPlayer
+import UIKit
+#endif
 import MusicKit
 
 /// Holds MusicKit `Song`s by id so the player can play tracks that came through the provider-agnostic layer.
@@ -18,15 +22,30 @@ actor SongCache {
         songs[id] = song
         return song
     }
+
+    /// The song to play for `track`: a song only in the library (`QueueTrack.isLibraryOnly`) from
+    /// the library, by its library id (the player plays it as it does a catalog song); anything
+    /// else, a library copy of a catalog song included, from the catalog by its id.
+    func song(for track: QueueTrack) async throws -> Song {
+        guard track.isLibraryOnly, let libraryID = track.libraryID else { return try await song(for: track.id) }
+        if let song = songs[libraryID] { return song }
+        var request = MusicLibraryRequest<Song>()
+        request.filter(matching: \.id, equalTo: MusicItemID(libraryID))
+        guard let song = try await request.response().items.first else { throw AppleMusicError.librarySongNotFound(libraryID) }
+        songs[libraryID] = song
+        return song
+    }
 }
 
 enum AppleMusicError: LocalizedError {
     case songNotFound(String)
+    case librarySongNotFound(String)
     case badResponse
 
     var errorDescription: String? {
         switch self {
         case .songNotFound: "That song isn't available on Apple Music."
+        case .librarySongNotFound: "That song isn't in this Apple Music library."
         case .badResponse: "Apple Music sent back something unexpected."
         }
     }
@@ -44,8 +63,9 @@ struct AppleMusicCatalog: MusicCatalog {
         storefront: { try? await MusicDataRequest.currentCountryCode }
     )
 
-    /// Tracks left out of the last library playlist loaded through this catalog (not on Apple Music,
-    /// or no confident match). 0 before any library playlist has loaded.
+    /// Tracks left out of the last library playlist loaded through this catalog (no usable library
+    /// id, or a catalog id the catalog doesn't know; songs only in the library play from it). 0
+    /// before any library playlist has loaded.
     var lastSkippedCount: Int {
         get async { await reports.last?.skippedCount ?? 0 }
     }
@@ -59,8 +79,15 @@ struct AppleMusicCatalog: MusicCatalog {
     /// Its typing suggestions complete it ("…beacons") and come with their own top songs, like the
     /// Music app's search. Gathered without duplicates from those top songs, matches from your
     /// library, a search for the completed phrase and one for exactly what was typed, then ranked
-    /// by how well they match (`SearchRanking`).
+    /// by how well they match (`SearchRanking`). Guests' search: the library's songs come as the
+    /// catalog songs they are.
     func searchSongs(_ term: String) async throws -> [QueueTrack] {
+        try await searchSongs(term, includingLibrary: false)
+    }
+
+    /// `includingLibrary` (a host's search): the library's songs come as its own copies (its art
+    /// and titles), songs only in the library too, and each song once (`LibraryDuplicates`).
+    func searchSongs(_ term: String, includingLibrary: Bool) async throws -> [QueueTrack] {
         async let librarySongs = try? searchLibrarySongs(term)
         async let typedSongs = catalogSearch(term)
         let suggestions = try? await MusicCatalogSearchSuggestionsRequest(term: term, includingTopResultsOfTypes: [Song.self]).response()
@@ -73,14 +100,24 @@ struct AppleMusicCatalog: MusicCatalog {
         let completedSongs = if let completed { (try? await catalogSearch(completed)) ?? [] } else { [Song]() }
         let typed = try await typedSongs
         let library = await librarySongs ?? []
+        let libraryCatalogSongs = library.compactMap(\.song)
         #if DEBUG
-        print("[search] \"\(term)\" → \"\(completed ?? "-")\": top \(topSongs.count), library \(library.count), completed \(completedSongs.count), typed \(typed.count)")
+        print("[search] \"\(term)\" → \"\(completed ?? "-")\": top \(topSongs.count), library \(library.count) (\(library.count - libraryCatalogSongs.count) library only), completed \(completedSongs.count), typed \(typed.count)")
         #endif
         var seen = Set<MusicItemID>()
-        let unique = (topSongs + library + completedSongs + typed).filter { seen.insert($0.id).inserted }
+        let unique = (topSongs + libraryCatalogSongs + completedSongs + typed).filter { seen.insert($0.id).inserted }
         await cache.store(unique)
+        let tracks: [QueueTrack]
+        if includingLibrary {
+            let results: [LibraryDuplicates.Result] = topSongs.map { .catalog(QueueTrack($0)) }
+                + library.map { .library($0.result) }
+                + (completedSongs + typed).map { .catalog(QueueTrack($0)) }
+            tracks = LibraryDuplicates.collapse(results)
+        } else {
+            tracks = unique.map(QueueTrack.init)
+        }
         // Apple ranks by popularity; put what matches the typed words first (your library ahead).
-        let ranked = SearchRanking.rank(unique.map(QueueTrack.init), for: term, library: Set(library.map(\.id.rawValue)))
+        let ranked = SearchRanking.rank(tracks, for: term, library: Set(library.map(\.result.track.id)))
         return Array(ranked.prefix(40))
     }
 
@@ -90,13 +127,14 @@ struct AppleMusicCatalog: MusicCatalog {
         return Array(try await request.response().songs)
     }
 
-    /// Library search via the Apple Music API, mapped to catalog songs (https artwork, playable by id).
-    private func searchLibrarySongs(_ term: String) async throws -> [Song] {
+    /// Library search via the Apple Music API, mapped to catalog songs (https artwork, playable by
+    /// id) where they have one; the rest are songs only in the library.
+    private func searchLibrarySongs(_ term: String) async throws -> [LoadedTrack] {
         let encoded = term.replacingOccurrences(of: " ", with: "+")
             .addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? term
         let response: LibrarySearchResponse = try await fetch("/v1/me/library/search?term=\(encoded)&types=library-songs&limit=10&include=catalog")
         // Uses remembered matches for uploads but doesn't search for them: this runs as you type.
-        return try await catalogSongs(for: response.results.librarySongs?.data ?? [], searchUnlabelled: false).songs
+        return try await catalogSongs(for: response.results.librarySongs?.data ?? [], searchUnlabelled: false).loaded
     }
 
     func searchPlaylists(_ term: String) async throws -> [PlaylistSummary] {
@@ -152,13 +190,19 @@ struct AppleMusicCatalog: MusicCatalog {
         return "Updated " + date.formatted(.relative(presentation: .named))
     }
 
+    /// A library playlist's songs are the library's copies (`QueueTrack.libraryCopy`: its art and
+    /// titles, played as their catalog songs), and its songs only in the library are those.
     func tracks(in playlist: PlaylistSummary) async throws -> [QueueTrack] {
-        let songs = switch playlist.kind {
-        case .catalog: try await catalogPlaylistSongs(id: playlist.id)
-        case .library: try await libraryPlaylistSongs(id: playlist.id)
+        switch playlist.kind {
+        case .catalog:
+            let songs = try await catalogPlaylistSongs(id: playlist.id)
+            await cache.store(songs)
+            return songs.map(QueueTrack.init)
+        case .library:
+            let loaded = try await libraryPlaylistSongs(id: playlist.id)
+            await cache.store(loaded.compactMap(\.song))
+            return loaded.map(\.result.track)
         }
-        await cache.store(songs)
-        return songs.map(QueueTrack.init)
     }
 
     /// The library playlist list has no track count (nor does any library playlist attribute),
@@ -205,7 +249,7 @@ struct AppleMusicCatalog: MusicCatalog {
     }
 
     /// Library playlist tracks are library songs; map each to its catalog song.
-    private func libraryPlaylistSongs(id: String) async throws -> [Song] {
+    private func libraryPlaylistSongs(id: String) async throws -> [LoadedTrack] {
         var resources: [LibrarySongResource] = []
         var path: String? = "/v1/me/library/playlists/\(id)/tracks?limit=100&include=catalog"
         while let next = path {
@@ -219,23 +263,33 @@ struct AppleMusicCatalog: MusicCatalog {
             resources += page.data
             path = page.next
         }
-        let (songs, report) = try await catalogSongs(for: resources, playlistID: id)
+        let (loaded, report) = try await catalogSongs(for: resources, playlistID: id)
         await reports.record(report)
         #if DEBUG
         if report.skippedCount > 0 || report.unlabelled > 0 {
-            print("[match] playlist \(id): loaded \(report.loaded) of \(report.total); unlabelled \(report.unlabelled) (memory \(report.matchedFromMemory), search \(report.matchedBySearch)); skipped \(report.skippedCount)")
+            print("[match] playlist \(id): loaded \(report.loaded) of \(report.total); unlabelled \(report.unlabelled) (memory \(report.matchedFromMemory), search \(report.matchedBySearch), library only \(report.libraryOnly)); skipped \(report.skippedCount)")
         }
         #endif
-        return songs
+        return loaded
+    }
+
+    /// A library song as loaded: its catalog song when it has one, and the track it queues as (the
+    /// library's copy of that song, or a song only in the library), for `LibraryDuplicates`.
+    private struct LoadedTrack {
+        var song: Song?
+        var result: LibraryDuplicates.LibraryResult
     }
 
     /// Maps library songs to their catalog songs, keeping order. Most come with their catalog song
     /// or its id. iTunes Match and uploaded copies come with neither, so they're found by searching
     /// the catalog for a song with the same title, artist, album and length (`CatalogMatching`),
-    /// remembered for next time. Songs with no catalog match can't be played here and are skipped.
+    /// remembered for next time. Each becomes the library's copy of its catalog song. Ones with no
+    /// catalog match (an upload, or a match that's unknown or failed) play from the library
+    /// (`QueueTrack.isLibraryOnly`). Only a track the library gives no usable id is skipped, or one
+    /// whose catalog id the catalog doesn't know.
     private func catalogSongs(
         for resources: [LibrarySongResource], playlistID: String = "", searchUnlabelled: Bool = true
-    ) async throws -> (songs: [Song], report: PlaylistLoadReport) {
+    ) async throws -> (loaded: [LoadedTrack], report: PlaylistLoadReport) {
         enum Slot { case song(Song), pending(String), remembered(String), search, skip }
         var report = PlaylistLoadReport(playlistID: playlistID)
         report.total = resources.count
@@ -308,8 +362,9 @@ struct AppleMusicCatalog: MusicCatalog {
         }
         if changedMemory { await memory.save() }
 
-        var songs: [Song] = []
+        var loaded: [LoadedTrack] = []
         for (index, slot) in slots.enumerated() {
+            let resource = resources[index]
             let song: Song? = switch slot {
             case .song(let song): song
             case .pending(let id): fetched[id]
@@ -317,16 +372,25 @@ struct AppleMusicCatalog: MusicCatalog {
             case .search: if case .found(let song) = searched.results[index]?.outcome { song } else { nil }
             case .skip: nil
             }
+            let hasArtwork = resource.attributes?.artwork != nil
             if let song {
-                songs.append(song)
+                let track = resource.libraryID.map { QueueTrack(song).libraryCopy(libraryID: $0, title: resource.attributes?.name,
+                                                                                   artist: resource.attributes?.artistName,
+                                                                                   album: resource.attributes?.albumName) }
+                    ?? QueueTrack(song)
+                loaded.append(LoadedTrack(song: song, result: .init(track: track, isAppleMusicCopy: !resource.isUnlabelled, hasArtwork: hasArtwork)))
                 if case .remembered = slot { report.matchedFromMemory += 1 }
                 if case .search = slot { report.matchedBySearch += 1 }
+            } else if resource.isUnlabelled, let track = resource.libraryOnlyTrack {
+                // No catalog song: it plays from the library.
+                loaded.append(LoadedTrack(song: nil, result: .init(track: track, isAppleMusicCopy: false, hasArtwork: hasArtwork)))
+                report.libraryOnly += 1
             } else {
-                report.skipped.append(resources[index].track)
+                report.skipped.append(resource.track)
             }
         }
-        report.loaded = songs.count
-        return (songs, report)
+        report.loaded = loaded.count
+        return (loaded, report)
     }
 
     /// `noMatch` is a search that worked but found nothing acceptable (remembered for a day);
@@ -477,8 +541,8 @@ struct AppleMusicCatalog: MusicCatalog {
                 note("  catalog id only: \(r.withCatalogIDOnly)")
                 note("  neither (iTunes Match / uploads): \(r.unlabelled)")
                 note("    resolved: \(r.matchedFromMemory + r.matchedBySearch) (from memory \(r.matchedFromMemory), by search \(r.matchedBySearch))")
-                note("    unresolved: \(unmatched) (of which no-match remembered from an earlier load: \(r.recentlyUnmatched))")
-                note("  catalog ids that didn't come back: \(r.skippedCount - unmatched)")
+                note("    unresolved: \(unmatched) (of which no-match remembered from an earlier load: \(r.recentlyUnmatched); played from the library: \(r.libraryOnly))")
+                note("  catalog ids that didn't come back: \(r.skippedCount - (unmatched - r.libraryOnly))")
                 note("  searches: \(r.searches) (attempts \(r.searchAttempts), retries \(r.searchRetries), resolved after retry \(r.resolvedAfterRetry), failed every try \(r.searchesFailed), concurrency at end \(r.searchConcurrency))")
                 note("  search errors: \(r.searchErrors.count)")
                 for (error, count) in Dictionary(grouping: r.searchErrors, by: { $0 }).mapValues(\.count).sorted(by: { $0.value > $1.value }) {
@@ -527,6 +591,10 @@ struct AppleMusicCatalog: MusicCatalog {
         }
     }
 
+    // MARK: Library artwork
+
+    var libraryArtwork: (any LibraryArtworkSource)? { self }
+
     private func send(_ method: String, _ path: String, body: some Encodable) async throws -> Data {
         guard let url = URL(string: "https://api.music.apple.com" + path) else { throw AppleMusicError.badResponse }
         var request = URLRequest(url: url)
@@ -563,6 +631,77 @@ struct AppleMusicCatalog: MusicCatalog {
     }
 }
 
+// MARK: - Library artwork
+
+/// The art the hub relays for library songs (`/api/artwork/<library id>`, `LibraryArtwork`):
+/// the library's own, from the Apple Music API's library song or, on an iPad or Mac, MediaPlayer's
+/// copy of the song (same title and artist, the closest length); else, for a library copy of a
+/// catalog song, the catalog song's. Debug builds log which one each song got.
+extension AppleMusicCatalog: LibraryArtworkSource {
+    func artwork(libraryID: String, size: Int) async throws -> Data? {
+        let page: APIPage<LibrarySongResource>? = try? await fetch("/v1/me/library/songs/\(libraryID)?include=catalog")
+        let resource = page?.data.first
+        if let url = resource?.attributes?.artwork?.url(size: size), let data = await Self.download(url) {
+            Self.artworkLog(libraryID, "the library's (API)")
+            return data
+        }
+        #if os(iOS)
+        var title = resource?.attributes?.name ?? ""
+        var artist = resource?.attributes?.artistName ?? ""
+        var duration = resource?.attributes?.durationInMillis.map { TimeInterval($0) / 1000 }
+        if resource == nil {
+            var request = MusicLibraryRequest<Song>()
+            request.filter(matching: \.id, equalTo: MusicItemID(libraryID))
+            if let song = try? await request.response().items.first {
+                title = song.title
+                artist = song.artistName
+                duration = song.duration
+            }
+        }
+        if let data = await Self.mediaLibraryArtwork(title: title, artist: artist, duration: duration, size: size) {
+            Self.artworkLog(libraryID, "the library's (MediaPlayer)")
+            return data
+        }
+        #endif
+        if let url = resource?.relationships?.catalog?.data.first?.artwork?.url(width: size, height: size), let data = await Self.download(url) {
+            Self.artworkLog(libraryID, "its catalog song's")
+            return data
+        }
+        Self.artworkLog(libraryID, resource == nil ? "none (the library song didn't load)" : "none")
+        return nil
+    }
+
+    private static func download(_ url: URL) async -> Data? {
+        guard url.scheme == "https" || url.scheme == "http",
+              let (data, response) = try? await URLSession.shared.data(from: url),
+              (response as? HTTPURLResponse)?.statusCode == 200, !data.isEmpty else { return nil }
+        return data
+    }
+
+    #if os(iOS)
+    /// MediaPlayer's artwork for the library song with this title and artist (the closest length
+    /// if there are several). Only if the app may already read the library: never asks.
+    private static func mediaLibraryArtwork(title: String, artist: String, duration: TimeInterval?, size: Int) async -> Data? {
+        guard !title.isEmpty, MPMediaLibrary.authorizationStatus() == .authorized else { return nil }
+        return await Task.detached(priority: .userInitiated) { () -> Data? in
+            let query = MPMediaQuery.songs()
+            query.addFilterPredicate(MPMediaPropertyPredicate(value: title, forProperty: MPMediaItemPropertyTitle, comparisonType: .equalTo))
+            let items = (query.items ?? []).filter { artist.isEmpty || $0.artist == artist }
+            let distance = { (item: MPMediaItem) in abs(item.playbackDuration - (duration ?? item.playbackDuration)) }
+            guard let item = items.min(by: { distance($0) < distance($1) }),
+                  let image = item.artwork?.image(at: CGSize(width: size, height: size)) else { return nil }
+            return image.jpegData(compressionQuality: 0.9)
+        }.value
+    }
+    #endif
+
+    private static func artworkLog(_ libraryID: String, _ found: String) {
+        #if DEBUG
+        print("[artwork] library song \(libraryID): \(found)")
+        #endif
+    }
+}
+
 // MARK: - Apple Music API shapes
 
 private struct APIPage<Resource: Decodable>: Decodable {
@@ -574,8 +713,18 @@ private struct APIPage<Resource: Decodable>: Decodable {
 
 private struct APIArtwork: Decodable {
     var url: String
+    /// Hex without "#", when the API sends them.
+    var bgColor: String?
+    var textColor1: String?
+    var textColor2: String?
+
     func url(size: Int) -> URL? {
         URL(string: url.replacingOccurrences(of: "{w}", with: "\(size)").replacingOccurrences(of: "{h}", with: "\(size)"))
+    }
+
+    var colors: ArtworkColors? {
+        guard let bgColor else { return nil }
+        return ArtworkColors(background: "#" + bgColor, primary: "#" + (textColor1 ?? "FFFFFF"), secondary: "#" + (textColor2 ?? "CCCCCC"))
     }
 }
 
@@ -608,6 +757,9 @@ private struct LibrarySongResource: Decodable {
         var artistName: String?
         var albumName: String?
         var durationInMillis: Int?
+        /// The library's own artwork (absent when it has none).
+        var artwork: APIArtwork?
+        var contentRating: String?
     }
     struct Relationships: Decodable {
         struct Catalog: Decodable { var data: [Song] }
@@ -623,6 +775,25 @@ private struct LibrarySongResource: Decodable {
         QueueTrack(
             id: id ?? "", title: attributes?.name ?? "", artist: attributes?.artistName ?? "",
             album: attributes?.albumName ?? "", duration: attributes?.durationInMillis.map { TimeInterval($0) / 1000 }
+        )
+    }
+
+    /// The id, if it's a library id a relay path and a Sonos URI can carry.
+    var libraryID: String? { id.flatMap { LibraryArtwork.isLibraryID($0) ? $0 : nil } }
+
+    /// It came with neither its catalog song nor a catalog id: an iTunes Match or uploaded copy,
+    /// not one added from Apple Music.
+    var isUnlabelled: Bool {
+        relationships?.catalog?.data.first == nil && attributes?.playParams?.catalogId == nil
+    }
+
+    /// As a song only in the library, which plays from it.
+    var libraryOnlyTrack: QueueTrack? {
+        guard let libraryID, let name = attributes?.name, !name.isEmpty else { return nil }
+        return .libraryOnly(
+            libraryID: libraryID, title: name, artist: attributes?.artistName ?? "", album: attributes?.albumName ?? "",
+            duration: attributes?.durationInMillis.map { TimeInterval($0) / 1000 }, colors: attributes?.artwork?.colors,
+            isExplicit: attributes?.contentRating == "explicit"
         )
     }
 }

@@ -48,7 +48,7 @@ struct MotionArtworkView: View {
     /// To try: paused, the video (stopped at once, `LoopingVideoView.eases` off) fades to the
     /// still art over `pauseFade`, and back in as the music plays.
     static let fadesWhilePaused = true
-    static let pauseFade: TimeInterval = 0.2
+    static let pauseFade: TimeInterval = 0.4
 
     static func leavesMusicAlone(isDisplay: Bool) -> Bool {
         if isDisplay { return true }

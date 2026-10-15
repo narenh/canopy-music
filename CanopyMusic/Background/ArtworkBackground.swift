@@ -141,7 +141,7 @@ enum BlurredArtwork {
 /// The background art's slow drift (`BackgroundDrift` has the maths): `content` is laid out as a
 /// square as big as the window's longer side, centred, and moved, turned and scaled so no edge
 /// of it ever shows, in any window shape. It keeps going through song changes, and stands still
-/// where it is while `moves` is false (the music paused, or hidden) or in Low Power Mode, carrying
+/// where it is while `moves` is false (hidden under Dusk) or in Low Power Mode, carrying
 /// on from there (`DriftClock`); Reduce Motion stops it (the art then rests at 1.3×, centred).
 struct ArtworkDrift<Content: View>: View {
     var moves = true

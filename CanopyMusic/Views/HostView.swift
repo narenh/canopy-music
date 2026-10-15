@@ -710,8 +710,14 @@ private struct SettingsSheet: View {
                 }
                 Section {
                     Toggle("Queue from phones", isOn: $model.phoneQueueEnabled)
+                    LabeledContent("Address", value: model.localAddress)
+                } footer: {
+                    Text("Guests search and queue from their phones at \(model.localAddress), which follows the zone name. Turning it off hides the QR code; Host Control and displays keep working.")
+                }
+                .listRowBackground(Color.white.opacity(0.08))
+                // Reordering in its own section: each toggle only brings in the rows below it.
+                Section {
                     Toggle("Reorder from phones", isOn: $model.phoneReorderEnabled)
-                    // Only meaningful while guests can reorder at all.
                     if model.phoneReorderEnabled {
                         Toggle("Limit reorders", isOn: $model.reorderLimit.isOn)
                         if model.reorderLimit.isOn {
@@ -723,11 +729,8 @@ private struct SettingsSheet: View {
                             }
                         }
                     }
-                    LabeledContent("Address", value: model.localAddress)
                 } footer: {
-                    // The limit's rule first, while it's on: it's what just changed.
-                    let limit = model.phoneReorderEnabled && model.reorderLimit.isOn ? "\(model.reorderLimit.summary) " : ""
-                    Text("\(limit)Guests search and queue from their phones at \(model.localAddress), which follows the zone name. Turning it off hides the QR code; Host Control and displays keep working.")
+                    if model.phoneReorderEnabled && model.reorderLimit.isOn { Text(model.reorderLimit.summary) }
                 }
                 .listRowBackground(Color.white.opacity(0.08))
                 if let hostURL = model.hostControlURL {

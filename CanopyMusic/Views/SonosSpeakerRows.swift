@@ -2,11 +2,10 @@ import CanopyMusicCore
 import CanopyMusicServer
 import SwiftUI
 
-/// "Where should music play?"'s Sonos section (start screen and party screen), below the
-/// devices: the household's rooms, several at once. Ticking one moves the music there from this
-/// device or a Spotify Connect device (a gap while it switches, then the same song from where it
-/// was); once on Sonos, more rooms join and leave without a restart, and unticking the last goes
-/// back to this device or the Connect device. Each row's second line is its model, what it's busy playing (orange),
+/// "Where should music play?"'s Sonos section (start screen), below the devices: the
+/// household's rooms, several at once. Ticking one moves the music there from this device or a
+/// Spotify Connect device (a gap while it switches); once on Sonos, more rooms join and leave
+/// without a restart. Each row's second line is its model, what it's busy playing (orange),
 /// that another Canopy Music zone plays there (orange, with "Use" instead of a tick), or that it
 /// doesn't answer. Several linked accounts for the zone's service get a "Whose account plays"
 /// picker.

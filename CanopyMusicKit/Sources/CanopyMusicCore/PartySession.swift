@@ -780,6 +780,19 @@ public final class PartySession {
         broadcast()
     }
 
+    /// A seek that waits its turn behind the operations under way, rather than being dropped as
+    /// `seek` drops one meanwhile: for going back to where the song was right after playing it
+    /// (a session rebuilt for another output, whose play is still staging the next song). Not if
+    /// the song has changed by then. Hub only.
+    public func seekInTurn(to time: TimeInterval, on itemID: QueueItem.ID) async {
+        guard remote == nil else { return }
+        _ = try? await serially {
+            guard self.state.current?.id == itemID, !self.playerOnOldSong else { return }
+            self.engine.seek(to: max(0, time))
+            self.broadcast()
+        }
+    }
+
     public func skip() async {
         if let remote {
             try? await remote.send(.next)

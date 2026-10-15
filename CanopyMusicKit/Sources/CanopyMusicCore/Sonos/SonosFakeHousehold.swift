@@ -8,7 +8,8 @@ import Foundation
 ///
 /// Bedroom (Beam) is idle, Move (Move) is playing something from the Sonos app, and Kitchen
 /// (One) doesn't answer. On the iPad, pair with `-sonosFakeParty 1|2` for the party screen
-/// playing in Bedroom (and Move), and `-sonosPanel` to open its Speakers panel.
+/// playing in Bedroom (and Move), and `-sonosPanel` to open its Speakers panel; or with
+/// `-sonosFakeParty 0` for it playing on the iPad, with the rooms to move to.
 ///
 /// `-sonosFakeOtherZone` (`otherZone`): another Canopy Music zone, "Living Room iPad" on Apple
 /// Music, plays in Bedroom and Move (grouped, Bedroom leading), and Kitchen answers, so it's the

@@ -16,6 +16,8 @@ struct HostView: View {
     /// Switching to Spotify from the Music row before it's signed in: setup's sign-in step.
     @State private var signingInToSpotify = false
     @State private var signedInToSpotify = false
+    /// The Music row's dropdown (`ServiceDropdown`) is open: both services, as rows under it.
+    @State private var choosingService = false
 
     private var session: PartySession { model.session }
 
@@ -25,10 +27,15 @@ struct HostView: View {
     }
 
     /// Spotify signs in first if it isn't yet, on its setup page (backing out keeps the current
-    /// service), then is chosen (`AppModel.switchService`).
+    /// service), then is chosen (`AppModel.switchService`). The current service changes nothing,
+    /// except Spotify signed out, whose dropdown row says "Tap to sign in": its setup page.
     private func chooseService(_ next: AppModel.Provider) {
-        guard next != model.provider else { return }
-        if next == .spotify, !model.spotifyAuth.isSignedIn || model.spotifyClientID.isEmpty {
+        let spotifySignedOut = !model.spotifyAuth.isSignedIn || model.spotifyClientID.isEmpty
+        guard next != model.provider else {
+            if next == .spotify, spotifySignedOut { openSpotifySetup() }
+            return
+        }
+        if next == .spotify, spotifySignedOut {
             openSpotifySetup()
         } else {
             model.switchService(to: next)
@@ -129,8 +136,9 @@ struct HostView: View {
                let next = AppModel.Provider(rawValue: args[i + 1]), let switchService {
                 Task { try? await Task.sleep(for: .seconds(2)); switchService(next) }
             }
-            if args.contains("-openServiceMenu") {
-                Task { try? await Task.sleep(for: .seconds(2)); DebugMenuOpener.openWidestMenu() }
+            // `-showServiceDropdown`: opens the Music row's dropdown, for screenshots.
+            if args.contains("-showServiceDropdown"), switchService != nil {
+                Task { try? await Task.sleep(for: .seconds(1)); choosingService = true }
             }
         }
         #endif
@@ -184,23 +192,25 @@ struct HostView: View {
             .padding(.top, 20)
 
             Form {
-                // The service row switches services on the start screen only (its chevron menu);
-                // in a live zone it just shows the service.
+                // The service row switches services on the start screen only (it opens the
+                // service dropdown, rows under it); in a live zone it just shows the service.
                 Section("Music") {
                     if model.provider == .spotify {
-                        SpotifyStatusRows(switchService: switchService, openSetup: openSpotifySetup)
+                        SpotifyStatusRows(switchService: switchService, choosingService: $choosingService, openSetup: openSpotifySetup)
                     } else if model.isDemo {
                         HStack(spacing: 12) {
-                            ServiceMenu(choose: switchService) {
+                            ServiceMenu(isOpen: $choosingService, choose: switchService) {
                                 Label("Demo mode: fake songs, no audio", systemImage: "theatermasks")
                                     .frame(maxWidth: .infinity, alignment: .leading)
                             }
-                            if let switchService {
-                                ServiceMenu(choose: switchService) { ServiceChevron() }
+                            if switchService != nil {
+                                ServiceMenu(isOpen: $choosingService, choose: switchService) { ServiceChevron(isOpen: choosingService) }
                             }
                         }
+                        ServiceDropdown(isOpen: $choosingService, choose: switchService)
                     } else {
-                        AppleMusicStatusRow(showOffer: $showSubscriptionOffer, switchService: switchService)
+                        AppleMusicStatusRow(showOffer: $showSubscriptionOffer, switchService: switchService, choosingService: $choosingService)
+                        ServiceDropdown(isOpen: $choosingService, choose: switchService)
                         // This iPad, with its AirPlay row, or Sonos rooms.
                         OutputRow()
                     }
@@ -288,12 +298,17 @@ struct HostView: View {
                     }
                     .listRowBackground(Color.clear)
                 } footer: {
-                    Text("Press and hold the Canopy logo to return to this screen. PIN required if set. Turn on Guided Access (triple-click the top button) so guests can’t leave the app.")
+                    Text("Press and hold the Canopy Music logo to return to this screen. PIN required if set. Turn on Guided Access (triple-click the top button) so guests can’t leave the app.")
                 }
             }
             .scrollContentBackground(.hidden)
             .scrollBounceBehavior(.basedOnSize)
             .listSectionSpacing(.compact)
+            // The dropdown closes when the screen changes: the zone going live (no switching
+            // there), the service changing from elsewhere, or leaving this screen.
+            .onChange(of: model.isLive) { choosingService = false }
+            .onChange(of: model.provider) { choosingService = false }
+            .onDisappear { choosingService = false }
         }
         .endZoneConfirmation(isPresented: $confirmingEnd)
     }
@@ -371,20 +386,18 @@ private struct WifiPasswordField: View {
 // MARK: - Apple Music
 
 /// The service with a one-line status; problem states carry their fix in the row. On the start
-/// screen the row (and its chevron) opens the service menu.
+/// screen the row (and its chevron) opens the service dropdown.
 private struct AppleMusicStatusRow: View {
     @Environment(AppModel.self) private var model
     @Binding var showOffer: Bool
     let switchService: ((AppModel.Provider) -> Void)?
+    @Binding var choosingService: Bool
 
     var body: some View {
         HStack(spacing: 12) {
-            ServiceMenu(choose: switchService) {
+            ServiceMenu(isOpen: $choosingService, choose: switchService) {
                 HStack(spacing: 12) {
-                    Image("AppleMusicIcon")
-                        .resizable()
-                        .frame(width: 28, height: 28)
-                        .clipShape(RoundedRectangle(cornerRadius: 7, style: .continuous))
+                    ServiceIcon(provider: .appleMusic)
                         .saturation(model.authorization == .authorized ? 1 : 0)
                         .opacity(model.authorization == .authorized ? 1 : 0.5)
                     VStack(alignment: .leading, spacing: 2) {
@@ -395,8 +408,8 @@ private struct AppleMusicStatusRow: View {
                 }
             }
             action
-            if let switchService {
-                ServiceMenu(choose: switchService) { ServiceChevron() }
+            if switchService != nil {
+                ServiceMenu(isOpen: $choosingService, choose: switchService) { ServiceChevron(isOpen: choosingService) }
             }
         }
     }
@@ -441,30 +454,21 @@ private struct AppleMusicStatusRow: View {
 // MARK: - Switching services
 
 /// The start screen's service switcher: the Music row is a full-width dropdown. The row, and its
-/// down chevron, open a menu offering only the other service, with that service's state on a
-/// second line. In a live zone (`choose` is nil) it's just the row: the service changes only by
+/// down chevron, open and close `ServiceDropdown`, rows under it in the Music section listing
+/// both services. In a live zone (`choose` is nil) it's just the row: the service changes only by
 /// ending the zone.
 struct ServiceMenu<Content: View>: View {
-    @Environment(AppModel.self) private var model
+    @Binding var isOpen: Bool
     let choose: ((AppModel.Provider) -> Void)?
     @ViewBuilder let label: Content
 
     var body: some View {
-        if let choose {
-            Menu {
-                ForEach([AppModel.Provider.appleMusic, .spotify].filter { $0 != model.provider }, id: \.self) { provider in
-                    Button {
-                        choose(provider)
-                    } label: {
-                        Text(provider.title)
-                        if let detail = model.serviceDetail(provider) { Text(detail) }
-                        Image(provider == .spotify ? "SpotifyIcon" : "AppleMusicIcon")
-                    }
-                }
+        if choose != nil {
+            Button {
+                withAnimation { isOpen.toggle() }
             } label: {
                 label.contentShape(Rectangle())
             }
-            .menuStyle(.button)
             .buttonStyle(.plain)
             .accessibilityHint("Switches the music service")
         } else {
@@ -473,8 +477,80 @@ struct ServiceMenu<Content: View>: View {
     }
 }
 
+/// The open dropdown: a row for each service, under the Music row in the same section (so the
+/// rows below move down), with its logo, its state (`AppModel.serviceDetail`), and a checkmark
+/// on the current one. Choosing one closes it and switches (`choose`); choosing the current one
+/// just closes it. The demo isn't offered (the old menu didn't offer it either).
+struct ServiceDropdown: View {
+    @Environment(AppModel.self) private var model
+    @Binding var isOpen: Bool
+    let choose: ((AppModel.Provider) -> Void)?
+
+    var body: some View {
+        if isOpen, let choose {
+            ForEach([AppModel.Provider.appleMusic, .spotify], id: \.self) { provider in
+                ServiceOptionRow(provider: provider, isCurrent: provider == model.provider) {
+                    withAnimation { isOpen = false }
+                    choose(provider)
+                }
+            }
+        }
+    }
+}
+
+private struct ServiceOptionRow: View {
+    @Environment(AppModel.self) private var model
+    let provider: AppModel.Provider
+    let isCurrent: Bool
+    let action: () -> Void
+
+    var body: some View {
+        Button(action: action) {
+            HStack(spacing: 12) {
+                ServiceIcon(provider: provider)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(provider.title)
+                    if let detail = model.serviceDetail(provider) {
+                        Text(detail).font(.footnote).foregroundStyle(.secondary)
+                    }
+                }
+                Spacer(minLength: 8)
+                // Under the Music row's chevron.
+                Image(systemName: "checkmark")
+                    .font(.body.weight(.semibold))
+                    .foregroundStyle(.tint)
+                    .frame(width: 24, height: 28)
+                    .opacity(isCurrent ? 1 : 0)
+                    .accessibilityHidden(true)
+            }
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .accessibilityAddTraits(isCurrent ? .isSelected : [])
+        .accessibilityHint(isCurrent ? "" : "Switches the music service")
+    }
+}
+
+/// A service's logo at the Music row's size: Apple Music's rounded square, Spotify's circle.
+struct ServiceIcon: View {
+    let provider: AppModel.Provider
+
+    var body: some View {
+        if provider == .spotify {
+            Image("SpotifyIcon")
+                .resizable()
+                .frame(width: 28, height: 28)
+        } else {
+            Image("AppleMusicIcon")
+                .resizable()
+                .frame(width: 28, height: 28)
+                .clipShape(RoundedRectangle(cornerRadius: 7, style: .continuous))
+        }
+    }
+}
+
 extension AppModel {
-    /// A service's state in a line, as the service menu and setup's service step say it:
+    /// A service's state in a line, as the service dropdown and setup's service step say it:
     /// Spotify's sign-in (choosing it when it isn't connected opens its setup page), and Apple
     /// Music's access when something's in the way.
     func serviceDetail(_ provider: Provider) -> String? {
@@ -494,38 +570,15 @@ extension AppModel {
     }
 }
 
-#if DEBUG
-/// `-openServiceMenu`: opens the start screen's Music menu, for screenshots (the simulator can't
-/// be tapped from here). Finds the widest menu button on screen (the Music row's) and presents its
-/// menu through UIKit's private `_presentMenuAtLocation:`. Debug builds only.
-@MainActor
-enum DebugMenuOpener {
-    static func openWidestMenu() {
-        guard let window = UIApplication.shared.connectedScenes.compactMap({ ($0 as? UIWindowScene)?.keyWindow }).first else { return }
-        var found: [(view: UIView, interaction: UIContextMenuInteraction)] = []
-        func walk(_ view: UIView) {
-            if view is UIButton {
-                for case let interaction as UIContextMenuInteraction in view.interactions { found.append((view, interaction)) }
-            }
-            view.subviews.forEach(walk)
-        }
-        walk(window)
-        guard let target = found.max(by: { $0.view.bounds.width < $1.view.bounds.width }) else { return }
-        let selector = NSSelectorFromString("_presentMenuAtLocation:")
-        guard let method = class_getInstanceMethod(type(of: target.interaction), selector) else { return }
-        typealias Present = @convention(c) (AnyObject, Selector, CGPoint) -> Void
-        let present = unsafeBitCast(method_getImplementation(method), to: Present.self)
-        present(target.interaction, selector, CGPoint(x: target.view.bounds.midX, y: target.view.bounds.maxY))
-    }
-}
-#endif
-
-/// The down chevron at the end of the Music row.
+/// The chevron at the end of the Music row: down, and up while the dropdown is open.
 struct ServiceChevron: View {
+    let isOpen: Bool
+
     var body: some View {
         Image(systemName: "chevron.down")
             .font(.footnote.weight(.semibold))
             .foregroundStyle(.secondary)
+            .rotationEffect(.degrees(isOpen ? 180 : 0))
             .frame(width: 24, height: 28)
             .contentShape(Rectangle())
             .accessibilityLabel("Music service")

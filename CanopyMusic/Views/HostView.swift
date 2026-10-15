@@ -771,6 +771,7 @@ private struct SettingsSheet: View {
                     Text("Used when crossfade is on. Apple Music's AutoMix isn't available to other apps.")
                 }
                 .listRowBackground(Color.white.opacity(0.08))
+                LinksSection()
                 // A party to save, or a zone to end, only once it's live.
                 if model.isLive, model.session.partySaveInfo.offersSave {
                     Section {
@@ -829,6 +830,80 @@ private struct SettingsSheet: View {
                 ToolbarItem(placement: .confirmationAction) { Button("Done") { dismiss() }.tint(.primary) }
             }
         }
+    }
+}
+
+// MARK: - Links
+
+/// The hub's canopy-cmdlp server, which turns links guests paste into songs. Links stay hidden
+/// until the address and a token are both set. Only the token's last four characters show.
+private struct LinksSection: View {
+    @Environment(AppModel.self) private var model
+    @State private var tokenDraft = ""
+    @State private var testResult: String?
+    @State private var isTesting = false
+
+    var body: some View {
+        @Bindable var model = model
+        Section {
+            TextField("Server address", text: $model.linkBaseURL)
+                .textInputAutocapitalization(.never)
+                .autocorrectionDisabled()
+                .keyboardType(.URL)
+                .textContentType(nil)
+            if let hint = model.linkTokenHint {
+                HStack {
+                    LabeledContent("API token", value: "…\(hint)")
+                    Spacer()
+                    Button("Forget", role: .destructive) {
+                        model.forgetLinkToken()
+                        testResult = nil
+                    }
+                    .buttonStyle(.borderless)
+                }
+            }
+            HStack {
+                SecureField(model.linkTokenHint == nil ? "API token" : "New API token", text: $tokenDraft)
+                    .textInputAutocapitalization(.never)
+                    .autocorrectionDisabled()
+                    .textContentType(nil)
+                    .onSubmit(saveToken)
+                Button("Save", action: saveToken)
+                    .buttonStyle(.borderless)
+                    .disabled(tokenDraft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+            }
+            HStack {
+                Button("Test Connection") {
+                    isTesting = true
+                    testResult = nil
+                    Task {
+                        testResult = await model.testLinkConnection()
+                        isTesting = false
+                    }
+                }
+                .disabled(isTesting || model.linkBaseURL.trimmingCharacters(in: .whitespaces).isEmpty)
+                if isTesting {
+                    Spacer()
+                    ProgressView()
+                }
+            }
+            if let testResult {
+                Text(testResult)
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
+            }
+        } header: {
+            Text("Links")
+        } footer: {
+            Text("Songs from links guests paste into search on their phones, through your own canopy-cmdlp server. Leave it empty to keep links off.")
+        }
+        .listRowBackground(Color.white.opacity(0.08))
+    }
+
+    private func saveToken() {
+        model.saveLinkToken(tokenDraft)
+        tokenDraft = ""
+        testResult = nil
     }
 }
 

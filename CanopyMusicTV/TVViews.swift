@@ -767,7 +767,8 @@ struct TVQueueRow: View {
             VStack(alignment: .leading, spacing: 2) {
                 Text(item.track.title)
                     .font(.system(size: 26, weight: .medium))
-                Text(item.track.artist)
+                // A link still downloading says how far it's got.
+                Text(item.track.rowSubtitle)
                     .font(.system(size: 20))
                     .foregroundStyle(.white.opacity(0.6))
             }

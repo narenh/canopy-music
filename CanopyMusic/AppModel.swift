@@ -292,6 +292,21 @@ final class AppModel {
         wifiSimpleQR = defaults.bool(forKey: "wifiSimpleQR")
         phoneQueueEnabled = defaults.object(forKey: "phoneQueueEnabled") as? Bool ?? true
         phoneReorderEnabled = defaults.object(forKey: "phoneReorderEnabled") as? Bool ?? true
+        linkBaseURL = defaults.string(forKey: "cmdlpBaseURL") ?? ""
+        #if DEBUG
+        // `-cmdlpBaseURL <address> -cmdlpToken <token>`: links set up at launch, as Settings
+        // would (`CanopyMusicDevServer -onlyCmdlp` in the simulator: any token).
+        if let i = ProcessInfo.processInfo.arguments.firstIndex(of: "-cmdlpToken"), i + 1 < ProcessInfo.processInfo.arguments.count {
+            linkTokens.save(ProcessInfo.processInfo.arguments[i + 1])
+        }
+        #endif
+        linkTokenHint = LinkTokenHint.of(linkTokens.load())
+        if let zone = defaults.string(forKey: "cmdlpZone"), LinkZone.isValid(zone) {
+            linkZone = zone
+        } else {
+            linkZone = LinkZone.make()
+            defaults.set(linkZone, forKey: "cmdlpZone")
+        }
         // The `.local` address follows the zone name.
         hostname = FriendlyHostname(name: FriendlyHostname.localName(forZone: zoneName))
         defaults.removeObject(forKey: "localName") // the old editable address
@@ -423,13 +438,105 @@ final class AppModel {
             return PartySession(catalog: NoServiceCatalog(), engine: NoServiceEngine())
         case .appleMusic:
             let cache = SongCache()
-            return PartySession(catalog: AppleMusicCatalog(cache: cache), engine: sonosEngine ?? AppleMusicEngine(cache: cache), storeURL: store)
+            return PartySession(catalog: AppleMusicCatalog(cache: cache), engine: sonosEngine ?? makeLinkHandoffEngine(cache: cache), storeURL: store)
         case .spotify:
             return PartySession(catalog: SpotifyCatalog(api: spotify), engine: sonosEngine ?? SpotifyEngine(api: spotify), storeURL: store)
         #if DEBUG
         case .demo:
-            return PartySession(catalog: DemoCatalog(), engine: DemoPlaybackEngine(), storeURL: store)
+            // Links play for real (AVPlayer) between the demo's silent songs, so they can be
+            // tried in the simulator (`CanopyMusicDevServer -onlyCmdlp`).
+            let links = LinkPlayerEngine()
+            links.log = { print("[link-player] \($0)") }
+            let engine = LinkHandoffEngine(music: DemoPlaybackEngine(), links: links)
+            engine.log = { print("[handoff] \($0)") }
+            return PartySession(catalog: DemoCatalog(), engine: engine, storeURL: store)
         #endif
+        }
+    }
+
+    /// Apple Music on this device: its own player for catalog and library songs, and an AVPlayer
+    /// for songs from links (`LinkHandoffEngine`), which acts as Apple Music's engine alone until
+    /// links are set up.
+    private static func makeLinkHandoffEngine(cache: SongCache) -> LinkHandoffEngine {
+        let links = LinkPlayerEngine()
+        let engine = LinkHandoffEngine(music: AppleMusicEngine(cache: cache), links: links)
+        #if DEBUG
+        engine.log = { print("[handoff] \($0)") }
+        links.log = { print("[link-player] \($0)") }
+        #endif
+        return engine
+    }
+
+    // MARK: Links (canopy-cmdlp)
+
+    /// cmdlp's address, as the host typed it in Settings. Not a secret: the token is
+    /// (`linkTokens`, in the Keychain). Links are hidden until both are set.
+    var linkBaseURL: String {
+        didSet {
+            guard linkBaseURL != oldValue else { return }
+            defaults.set(linkBaseURL, forKey: "cmdlpBaseURL")
+            applyLinkSettings()
+        }
+    }
+    /// The token's last four characters, all Settings shows of it; nil when there's none.
+    private(set) var linkTokenHint: String?
+    @ObservationIgnored private let linkTokens: any LinkTokenStore = KeychainLinkTokenStore()
+    /// This zone's name at cmdlp: kept across relaunches, and a new one for each zone (`clearZone`).
+    @ObservationIgnored private var linkZone: String
+
+    /// The address and a token are both set: guests' pasted links become songs.
+    var linksConfigured: Bool { CmdlpClient.baseURL(linkBaseURL) != nil && linkTokenHint != nil }
+
+    func saveLinkToken(_ typed: String) {
+        let token = typed.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !token.isEmpty else { return }
+        linkTokens.save(token)
+        linkTokenHint = LinkTokenHint.of(token)
+        applyLinkSettings()
+    }
+
+    func forgetLinkToken() {
+        linkTokens.save(nil)
+        linkTokenHint = nil
+        applyLinkSettings()
+    }
+
+    /// The hub's session takes links once cmdlp's address and token are set
+    /// (`PartySession.linkService`), in this zone's cmdlp zone. Not a display's.
+    private func applyLinkSettings() {
+        guard !isDisplay else { return }
+        session.linkZone = linkZone
+        if let base = CmdlpClient.baseURL(linkBaseURL), let token = linkTokens.load() {
+            session.linkService = CmdlpClient(baseURL: base, token: token)
+        } else {
+            session.linkService = nil
+        }
+        (session.engine as? LinkHandoffEngine)?.linksEnabled = { [weak session] in session?.linksEnabled ?? false }
+    }
+
+    /// The zone ended (and its cmdlp zone with it, `PartySession.end`): the next one gets its own.
+    private func startNewLinkZone() {
+        linkZone = LinkZone.make()
+        defaults.set(linkZone, forKey: "cmdlpZone")
+        applyLinkSettings()
+    }
+
+    /// Settings' "Test connection": cmdlp's `/health`, then the token. A sentence to show.
+    func testLinkConnection() async -> String {
+        guard let base = CmdlpClient.baseURL(linkBaseURL) else { return "Enter the server's address first." }
+        do {
+            try await CmdlpClient.health(baseURL: base)
+        } catch {
+            return "Couldn't reach \(base.host() ?? "the server")."
+        }
+        guard let token = linkTokens.load() else { return "The server is up. Add its API token to turn links on." }
+        do {
+            try await CmdlpClient(baseURL: base, token: token).checkToken()
+            return "Connected. Guests can paste links into search."
+        } catch let error as CmdlpError where error.status == 401 {
+            return "The server is up, but it didn't accept the token."
+        } catch {
+            return "The server is up, but the token couldn't be checked."
         }
     }
 
@@ -972,7 +1079,9 @@ final class AppModel {
 
     /// Empties the queue and its saved copies and forgets the zone, so there's nothing to resume.
     private func clearZone() {
+        // Deletes the zone's cmdlp downloads too; the next zone gets a cmdlp zone of its own.
         session.end()
+        startNewLinkZone()
         // Queues saved under another service (from before a service change) would come back too.
         for other in Self.allProviders where other != provider {
             try? FileManager.default.removeItem(at: Self.storeURL(other))
@@ -1049,6 +1158,7 @@ final class AppModel {
         sonosController.connect(session)
         session.sonosHandler = sonosController
         publishSonosSetup()
+        applyLinkSettings()
     }
 
     /// Announces this zone (or refreshes what's playing in the announcement). Only a live zone.

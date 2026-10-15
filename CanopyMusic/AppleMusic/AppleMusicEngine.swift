@@ -115,6 +115,10 @@ final class AppleMusicEngine: PlaybackEngine {
     private var retriedEarlyStop = false
     /// Counts starts: one overtaken by a later one while it fetched its song gives up.
     private var startGeneration = 0
+    /// A song got ready while a link played (`prepare`): its `play` doesn't set the queue again.
+    private var preparedTrackID: String?
+    /// The next song is a link (`LinkHandoffEngine`): the end is read for more often.
+    private var endsIntoHandoff = false
 
     // Playback state as of the last poll. Reading `ApplicationMusicPlayer` goes to an
     // out-of-process service; the UI asks for the time every frame (lyrics takeover), so it
@@ -145,8 +149,8 @@ final class AppleMusicEngine: PlaybackEngine {
 
     private func nextPollInterval() -> Duration {
         let remaining = cachedDuration.map { $0 - currentTime }
-        return pacing.interval(playing: cachedPlaying && !pollingPaused, remaining: remaining,
-                               sinceCommand: Date().timeIntervalSince(lastCommandAt))
+        return (endsIntoHandoff ? .appleMusicIntoLink : pacing)
+            .interval(playing: cachedPlaying && !pollingPaused, remaining: remaining, sinceCommand: Date().timeIntervalSince(lastCommandAt))
     }
 
     /// A command went to the player: read it soon, as before.
@@ -184,6 +188,9 @@ final class AppleMusicEngine: PlaybackEngine {
         let song = try await cache.song(for: track)
         // A later start has begun meanwhile (the session gave up on this one): it's the one wanted.
         guard generation == startGeneration else { throw CancellationError() }
+        // Got ready while a link played: already the player's queue, prepared.
+        let prepared = preparedTrackID == track.id && retryingEarlyStop
+        preparedTrackID = nil
         if track.isLibraryOnly { _ = attachesLibraryAccount() }
         stagedTrackID = nil
         stagedTrack = nil
@@ -204,8 +211,8 @@ final class AppleMusicEngine: PlaybackEngine {
         cache(playing: false, time: 0)
         startReading = nil
         let start = ContinuousClock.now
-        player.queue = ApplicationMusicPlayer.Queue(for: [song])
-        log("play \(track.title)\(track.isLibraryOnly ? " (library only)" : ""): queue set")
+        if !prepared { player.queue = ApplicationMusicPlayer.Queue(for: [song]) }
+        log("play \(track.title)\(track.isLibraryOnly ? " (library only)" : ""): \(prepared ? "prepared" : "queue set")")
         do {
             try await player.play()
             log("play(): returned after \((ContinuousClock.now - start).inMilliseconds)")
@@ -546,6 +553,44 @@ final class AppleMusicEngine: PlaybackEngine {
     /// thread (`readsOffMain`): then nothing is read here.
     private var playerDetails: String {
         readsOffMain ? " (player read off the main thread)" : " status=\(player.state.playbackStatus) entries=\(player.queue.entries.count)"
+    }
+}
+
+/// Apple Music's side of a `LinkHandoffEngine`, which plays link tracks in an AVPlayer between its songs.
+extension AppleMusicEngine: HandoffSide {
+    /// While a link plays: the song after it becomes the player's queue and `prepareToPlay`s, so
+    /// its `play` starts in about 0.14 s rather than 0.46 s (measured on a real iPad), and the link
+    /// plays on undisturbed. Not a library song on tvOS: only `play` starts one, watching it.
+    func prepare(_ track: QueueTrack?) async throws {
+        guard let track else {
+            preparedTrackID = nil
+            return
+        }
+        guard !(Self.readsLibrarySongsOffMain && track.isLibraryOnly), preparedTrackID != track.id else { return }
+        let song = try await cache.song(for: track)
+        let start = ContinuousClock.now
+        // `poll` mustn't take the new queue for the player landing somewhere unexpected.
+        isReplacingQueue = true
+        defer { isReplacingQueue = false }
+        player.queue = ApplicationMusicPlayer.Queue(for: [song])
+        try await player.prepareToPlay()
+        preparedTrackID = track.id
+        stagedTrackID = nil
+        stagedTrack = nil
+        log("prepared \(track.title) in \((ContinuousClock.now - start).inMilliseconds)")
+    }
+
+    /// A link plays now: the song before (ended, or left mid-song by a skip) is paused.
+    func handOff() {
+        endsIntoHandoff = false
+        pause()
+    }
+
+    func setEndsIntoHandoff(_ value: Bool) {
+        guard value != endsIntoHandoff else { return }
+        endsIntoHandoff = value
+        // The poll loop takes up the new pace from now.
+        if _player != nil, !isShutDown { startPolling() }
     }
 }
 

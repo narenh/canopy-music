@@ -16,8 +16,10 @@ struct HostView: View {
     /// Switching to Spotify from the Music row before it's signed in: setup's sign-in step.
     @State private var signingInToSpotify = false
     @State private var signedInToSpotify = false
-    /// The Music row's dropdown (`ServiceDropdown`) is open: both services, as rows under it.
+    /// The Music row's dropdown (`ServiceDropdown`) is open: a panel floating under the row.
     @State private var choosingService = false
+    /// Where the Music row is, for placing the dropdown under it (`serviceRow()`).
+    @State private var serviceRowFrames = ServiceRowFrames()
 
     private var session: PartySession { model.session }
 
@@ -71,6 +73,11 @@ struct HostView: View {
                         .padding(.trailing, 24)
                 }
                 .frame(maxWidth: .infinity)
+                // Over both columns, so it's drawn above the rows below the Music row and a tap
+                // anywhere else closes it.
+                .overlay {
+                    ServiceDropdown(isOpen: $choosingService, frames: serviceRowFrames, choose: switchService)
+                }
             }
         }
         .background {
@@ -193,7 +200,7 @@ struct HostView: View {
 
             Form {
                 // The service row switches services on the start screen only (it opens the
-                // service dropdown, rows under it); in a live zone it just shows the service.
+                // service dropdown, floating under it); in a live zone it just shows the service.
                 Section("Music") {
                     if model.provider == .spotify {
                         SpotifyStatusRows(switchService: switchService, choosingService: $choosingService, openSetup: openSpotifySetup)
@@ -207,10 +214,9 @@ struct HostView: View {
                                 ServiceMenu(isOpen: $choosingService, choose: switchService) { ServiceChevron(isOpen: choosingService) }
                             }
                         }
-                        ServiceDropdown(isOpen: $choosingService, choose: switchService)
+                        .serviceRow()
                     } else {
                         AppleMusicStatusRow(showOffer: $showSubscriptionOffer, switchService: switchService, choosingService: $choosingService)
-                        ServiceDropdown(isOpen: $choosingService, choose: switchService)
                         // This iPad, with its AirPlay row, or Sonos rooms.
                         OutputRow()
                     }
@@ -304,6 +310,7 @@ struct HostView: View {
             .scrollContentBackground(.hidden)
             .scrollBounceBehavior(.basedOnSize)
             .listSectionSpacing(.compact)
+            .environment(\.serviceRowFrames, serviceRowFrames)
             // The dropdown closes when the screen changes: the zone going live (no switching
             // there), the service changing from elsewhere, or leaving this screen.
             .onChange(of: model.isLive) { choosingService = false }
@@ -412,6 +419,7 @@ private struct AppleMusicStatusRow: View {
                 ServiceMenu(isOpen: $choosingService, choose: switchService) { ServiceChevron(isOpen: choosingService) }
             }
         }
+        .serviceRow()
     }
 
     @ViewBuilder private var status: some View {
@@ -454,9 +462,8 @@ private struct AppleMusicStatusRow: View {
 // MARK: - Switching services
 
 /// The start screen's service switcher: the Music row is a full-width dropdown. The row, and its
-/// down chevron, open and close `ServiceDropdown`, rows under it in the Music section listing
-/// both services. In a live zone (`choose` is nil) it's just the row: the service changes only by
-/// ending the zone.
+/// down chevron, open and close `ServiceDropdown`, a panel floating under the row. In a live zone
+/// (`choose` is nil) it's just the row: the service changes only by ending the zone.
 struct ServiceMenu<Content: View>: View {
     @Binding var isOpen: Bool
     let choose: ((AppModel.Provider) -> Void)?
@@ -477,31 +484,113 @@ struct ServiceMenu<Content: View>: View {
     }
 }
 
-/// The open dropdown: a row for each service, under the Music row in the same section (so the
-/// rows below move down), with its logo, its state (`AppModel.serviceDetail`), and a checkmark
-/// on the current one. Choosing one closes it and switches (`choose`); choosing the current one
-/// just closes it. The demo isn't offered (the old menu didn't offer it either).
+/// Where the Music row is on screen, in global coordinates: its card (the row's background, the
+/// section's full width) and its content (inside the row's insets). Set by `serviceRow()`; read
+/// only by `ServiceDropdown`, so the host screen isn't redrawn as the column scrolls.
+@MainActor @Observable final class ServiceRowFrames {
+    var card: CGRect?
+    var content: CGRect?
+}
+
+extension EnvironmentValues {
+    @Entry var serviceRowFrames: ServiceRowFrames?
+}
+
+extension View {
+    /// Marks the Music row (with the section's row background) so `ServiceDropdown` can float
+    /// under it.
+    func serviceRow() -> some View { modifier(ServiceRowMeasure()) }
+}
+
+private struct ServiceRowMeasure: ViewModifier {
+    @Environment(\.serviceRowFrames) private var frames
+
+    func body(content: Content) -> some View {
+        let frames = frames
+        content
+            .onGeometryChange(for: CGRect.self) { $0.frame(in: .global) } action: { frames?.content = $0 }
+            .listRowBackground(
+                Color.white.opacity(0.08)
+                    .onGeometryChange(for: CGRect.self) { $0.frame(in: .global) } action: { frames?.card = $0 }
+            )
+    }
+}
+
+/// The open dropdown: a raised panel the Music section's width, floating just under the
+/// Music row, over the rows below it (drawn in an overlay on the whole host screen, so nothing
+/// moves). A row for each service to switch to, with its logo and its state
+/// (`AppModel.serviceDetail`). Choosing one closes it and switches (`choose`); a tap anywhere
+/// else, Escape, or VoiceOver's escape gesture just closes it. The demo isn't offered (the old
+/// menu didn't offer it either).
 struct ServiceDropdown: View {
     @Environment(AppModel.self) private var model
     @Binding var isOpen: Bool
+    let frames: ServiceRowFrames
     let choose: ((AppModel.Provider) -> Void)?
 
+    /// The Form's section corners.
+    private static let cornerRadius: CGFloat = 26
+
+    private func close() {
+        withAnimation { isOpen = false }
+    }
+
     var body: some View {
-        if isOpen, let choose {
-            // Only the service to switch to: the Music row above already shows the current one.
-            ForEach([AppModel.Provider.appleMusic, .spotify].filter { $0 != model.provider }, id: \.self) { provider in
-                ServiceOptionRow(provider: provider) {
-                    withAnimation { isOpen = false }
+        GeometryReader { proxy in
+            if isOpen, let choose, let card = frames.card {
+                let origin = proxy.frame(in: .global).origin
+                // The rows' own inset, so the logo lines up with the Music row's.
+                let inset = frames.content.map { max(0, $0.minX - card.minX) } ?? 20
+                ZStack(alignment: .topLeading) {
+                    Button(action: close) {
+                        Color.clear.contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
+                    .keyboardShortcut(.cancelAction)
+                    .accessibilityHidden(true)
+
+                    panel(choose: choose, inset: inset, rowHeight: card.height)
+                        .frame(width: card.width)
+                        .offset(x: card.minX - origin.x, y: card.maxY - origin.y + 6)
+                        .transition(.opacity.combined(with: .scale(scale: 0.96, anchor: .top)))
+                }
+            }
+        }
+    }
+
+    private func panel(choose: @escaping (AppModel.Provider) -> Void, inset: CGFloat, rowHeight: CGFloat) -> some View {
+        // Only the service to switch to: the Music row above already shows the current one.
+        let providers = [AppModel.Provider.appleMusic, .spotify].filter { $0 != model.provider }
+        return VStack(spacing: 0) {
+            ForEach(providers, id: \.self) { provider in
+                if provider != providers.first {
+                    Divider().padding(.leading, inset)
+                }
+                ServiceOptionRow(provider: provider, inset: inset, minHeight: rowHeight) {
+                    close()
                     choose(provider)
                 }
             }
         }
+        // A thick material rather than Liquid Glass: glass refracts the rows under it, so "This
+        // iPad" showed through the option's name.
+        .background(.thickMaterial, in: RoundedRectangle(cornerRadius: Self.cornerRadius, style: .continuous))
+        .overlay {
+            RoundedRectangle(cornerRadius: Self.cornerRadius, style: .continuous)
+                .strokeBorder(.white.opacity(0.1), lineWidth: 1)
+        }
+        .shadow(color: .black.opacity(0.35), radius: 18, y: 8)
+        .accessibilityElement(children: .contain)
+        .accessibilityAddTraits(.isModal)
+        .accessibilityAction(.escape, close)
     }
 }
 
 private struct ServiceOptionRow: View {
     @Environment(AppModel.self) private var model
     let provider: AppModel.Provider
+    let inset: CGFloat
+    let minHeight: CGFloat
     let action: () -> Void
 
     var body: some View {
@@ -516,6 +605,9 @@ private struct ServiceOptionRow: View {
                 }
                 Spacer(minLength: 8)
             }
+            .padding(.horizontal, inset)
+            .padding(.vertical, 8)
+            .frame(minHeight: minHeight)
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)

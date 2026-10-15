@@ -319,6 +319,10 @@ final class TVModel {
         }
         // A zone that had a host (or a playlist) is past "Scan to host".
         hostJoined = !fresh && (zoneRecord.hostJoined || session.hasParty || session.state.playlistName != nil)
+        #if DEBUG
+        // `-hostJoined` (with `-createZone`): as if a phone had scanned, for screenshots of what follows.
+        if ProcessInfo.processInfo.arguments.contains("-hostJoined") { hostJoined = true }
+        #endif
         hostname.rename(to: FriendlyHostname.localName(forZone: zoneName))
         session.configureHub(kind: .tv, id: deviceID, zoneName: zoneName, serviceName: serviceName)
         // Same settings, saved under the same names, as an iPad hub.

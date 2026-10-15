@@ -515,11 +515,11 @@ struct TVStartView: View {
                     .resizable()
                     .scaledToFit()
                     .frame(height: 150)
-                Text(model.hostJoined ? "Continue on your phone" : "Scan to host")
-                    .font(.system(size: 76, weight: .bold))
-                    .holdsRemoteFocus()
-                Text("Use your phone to set up this zone. Other devices on this network with Canopy Music can join it.")
+                Text(model.hostJoined
+                     ? "Continue on your phone to finish setting up this zone. Guests can join after you press Start."
+                     : "Use your phone to set up this zone. Other devices on this network with Canopy Music can join it.")
                     .font(.system(size: 34))
+                    .holdsRemoteFocus()
                     .foregroundStyle(.white.opacity(0.7))
                     .frame(maxWidth: 820, alignment: .leading)
             }

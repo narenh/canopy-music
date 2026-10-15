@@ -120,7 +120,7 @@ struct PartyView: View {
             .padding(.bottom, 12)
 
             ZStack {
-                NowPlayingView(session: session, slider: slider)
+                NowPlayingView(session: session, slider: slider, isHidden: searchActive)
                     .opacity(searchActive ? 0 : 1)
                     .scaleEffect(searchActive ? 0.96 : 1)
                 if searchActive {
@@ -414,6 +414,8 @@ struct NowPlayingView: View {
     /// The song change: the art, text and progress slide to the next song's, as on the Apple TV;
     /// the controls below stay where they are. `PartyView`'s, so the background goes with it.
     let slider: SongSlider
+    /// The search results are over it: its video pauses.
+    var isHidden = false
     @Environment(AppModel.self) private var model
     @Environment(\.displayScale) private var displayScale
 
@@ -482,7 +484,7 @@ struct NowPlayingView: View {
                 .overlay {
                     MotionArtworkView(
                         track: item?.track, catalog: session.catalog, isPlaying: session.isPlaying && live,
-                        waits: !live || slider.isSliding, cornerRadius: 18
+                        waits: !live || slider.isSliding, cornerRadius: 18, isHidden: isHidden
                     )
                 }
                 .frame(width: side, height: side)

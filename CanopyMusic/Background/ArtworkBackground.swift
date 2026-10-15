@@ -212,8 +212,9 @@ struct ArtworkDrift<Content: View>: View {
 }
 
 extension EnvironmentValues {
-    /// Something opaque covers the whole party screen (the lyrics takeover; on the TV, a sheet):
-    /// what's under it (the background's drift, the animated art) stops until it goes.
+    /// Something opaque covers the whole party screen (the lyrics takeover): what's under it (the
+    /// background's drift, the animated art) stops until it goes. Not the sheets: on the TV and
+    /// the iPad alike they float over the party screen, which shows around and through them.
     @Entry var screenCovered = false
 }
 

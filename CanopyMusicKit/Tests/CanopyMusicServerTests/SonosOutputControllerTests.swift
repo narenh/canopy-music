@@ -1,6 +1,7 @@
 @testable import CanopyMusicCore
 @testable import CanopyMusicServer
 import Foundation
+import Observation
 import Testing
 
 /// The Sonos output both hubs share (`SonosOutputController`): choosing rooms and an account,
@@ -130,6 +131,47 @@ import Testing
         // No service Sonos can stream (no service yet, or the demo): nothing to show.
         controller.service = nil
         #expect(controller.setup() == nil)
+    }
+
+    /// Raised from an observation's change handler (on the main actor here, as the tests run).
+    final class Flag: @unchecked Sendable { var raised = false }
+
+    /// A list open while the music moves to Sonos (the party screen's picker, a mid-party move)
+    /// is told once the rooms play the zone's music, though the engine itself isn't observable
+    /// and the rooms' readings come back the same: its ticked room then says so.
+    @Test func listsHearWhenTheRoomsStartPlayingOurs() async throws {
+        let controller = await makeController()
+        controller.select(rooms: [Self.bedroom])
+        let bedroom = try #require(controller.household.player(Self.bedroom))
+        #expect(controller.status(of: bedroom).text == "Beam")
+        let told = Flag()
+        withObservationTracking {
+            _ = controller.status(of: bedroom)
+        } onChange: {
+            told.raised = true
+        }
+        let session = try await playingSession(controller)
+        #expect(controller.isLive)
+        await controller.readRooms()
+        #expect(told.raised)
+        #expect(controller.status(of: bedroom).text == "Playing Canopy Music")
+        withExtendedLifetime(session) {}
+    }
+
+    /// The music moving to Sonos mid-song (`AppModel.rebuildSessionForOutput`): the rebuilt
+    /// session plays the song, then goes to where it was, though the play is still staging the
+    /// next song behind it (a plain `seek` then is dropped, and the song started over).
+    @Test func aSeekRightAfterPlayGoesWhereTheSongWas() async throws {
+        let controller = await makeController()
+        controller.select(rooms: [Self.bedroom])
+        let session = try await playingSession(controller)
+        let song = try #require(session.state.current?.id)
+        await session.seekInTurn(to: 95, on: song)
+        let engine = try #require(controller.engine)
+        #expect(engine.currentTime >= 95)
+        // Another song by its turn: it goes nowhere.
+        await session.seekInTurn(to: 10, on: UUID())
+        #expect(engine.currentTime >= 95)
     }
 
     /// A real household played a linked service's songs with any serial: with no account seen,

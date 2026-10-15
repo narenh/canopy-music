@@ -25,7 +25,7 @@ struct HostView: View {
     }
 
     /// Spotify signs in first if it isn't yet, on its setup page (backing out keeps the current
-    /// service), then asks where music plays (`AppModel.switchService`).
+    /// service), then is chosen (`AppModel.switchService`).
     private func chooseService(_ next: AppModel.Provider) {
         guard next != model.provider else { return }
         if next == .spotify, !model.spotifyAuth.isSignedIn || model.spotifyClientID.isEmpty {
@@ -90,12 +90,12 @@ struct HostView: View {
                 .preferredColorScheme(.dark)
         }
         // "Where should music play?": the Music section's output row, Start finding no Spotify
-        // device, or switching to Spotify. With the Sonos rooms.
+        // device, or signing in to Spotify again with no device chosen. With the Sonos rooms.
         .outputPicker(includesSonos: true)
         .fullScreenCover(isPresented: $signingInToSpotify, onDismiss: {
             guard signedInToSpotify else { return }
-            // Signed in: Spotify is chosen now, then "Where should music play?" (already
-            // chosen: signed in again, the device is asked for if there isn't one).
+            // Signed in: Spotify is chosen now; where it plays is picked from the "Plays on" row.
+            // Already chosen (signed in again): the device is asked for if there isn't one.
             if model.provider != .spotify {
                 model.switchService(to: .spotify)
             } else if model.spotifyDeviceID == nil {

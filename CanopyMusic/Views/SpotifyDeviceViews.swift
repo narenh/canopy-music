@@ -98,7 +98,8 @@ struct SpotifyDeviceButton: View {
         .glassEffect(.regular.interactive(), in: Circle())
         .accessibilityLabel("Where music plays")
         .accessibilityValue(model.spotifyDeviceName.map { unavailable ? "\($0), not available" : $0 } ?? "Not chosen")
-        // Spotify Connect devices only: the music moves to Sonos from the start screen.
+        // Spotify Connect devices only; the music moves to Sonos rooms from host mode. Apple Music
+        // zones get the rooms here, from the speaker button (`PartySpeakerButton.outputPicker`).
         .outputPicker(includesSonos: false)
         // Read again when it may have changed, else once a minute (`refreshSpotifyDevicesIfNeeded`).
         .task {
@@ -112,8 +113,8 @@ struct SpotifyDeviceButton: View {
 
 extension View {
     /// Presents "Where should music play?" (`AppModel.isPickingSpotifyDevice`). `includesSonos`:
-    /// with its Sonos section (the start screen); setup and the party screen list only what they
-    /// always did.
+    /// with its Sonos section (the start screen, and the party screen in an Apple Music zone);
+    /// setup and the party screen's Spotify device button list only the Spotify Connect devices.
     func outputPicker(includesSonos: Bool) -> some View {
         modifier(OutputPickerPresenter(includesSonos: includesSonos))
     }
@@ -135,11 +136,14 @@ private struct OutputPickerPresenter: ViewModifier {
 }
 
 /// "Where should music play?" For Spotify: the Spotify Connect devices, kept current while open.
-/// For Apple Music: this device (and its AirPlay speakers). On the start screen, with Sonos rooms
-/// on the Wi‑Fi, the Sonos rooms (`SonosPickerSection`) are stacked below, all on one page: the
-/// iPad has the room, so there's no switch as on the phone's setup page. Choosing a device (or
-/// This iPad) lets go of the rooms in one tap (the music moves back, with a gap if it's playing);
-/// ticking a room leaves this device or the Connect device.
+/// For Apple Music: this device (and its AirPlay speakers). On the start screen (and an Apple
+/// Music zone's party screen), with Sonos rooms on the Wi‑Fi, the Sonos rooms
+/// (`SonosPickerSection`) are stacked below, all on one page: the iPad has the room, so there's
+/// no switch as on the phone's setup page. Choosing a device (or This iPad) lets go of the rooms
+/// in one tap (the music moves back, with a gap if it's playing); ticking a room leaves this
+/// device or the Connect device (the session is rebuilt, `AppModel.rebuildSessionForOutput`, and
+/// a song playing carries on there, from where it was). It stays open after a move, as on the
+/// start screen, so more rooms or the account can be chosen.
 struct OutputPicker: View {
     @Environment(AppModel.self) private var model
     @Environment(\.dismiss) private var dismiss
@@ -148,7 +152,7 @@ struct OutputPicker: View {
     private static let intro = "Open Spotify on this \(DeviceKind.noun) or another device in your home. That's where music will play from."
 
     private var showsSonos: Bool {
-        includesSonos && model.sonosService != nil && (!model.sonos.rooms.isEmpty || model.sonosOutput != nil)
+        includesSonos && (model.sonosRoomsFound || (model.sonosService != nil && model.sonosOutput != nil))
     }
 
     var body: some View {

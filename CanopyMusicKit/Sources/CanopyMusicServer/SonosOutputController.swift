@@ -165,7 +165,15 @@ public final class SonosOutputController {
         memory = defaults?.data(forKey: Self.knownAccountsKey).flatMap { try? JSONDecoder().decode(SonosAccountMemory.self, from: $0) } ?? SonosAccountMemory()
     }
 
+    /// `ownsRooms` as of the last change, for the lists to observe: the engine isn't observable,
+    /// so a list open while the music moves to Sonos (the session rebuilt under it) wouldn't
+    /// redraw its ticked rooms as "Playing Canopy Music" (`status(of:)` reads this). Set at each
+    /// change, so at the latest by the next reading.
+    public private(set) var ownedRoomsSeen = false
+
     private func changed() {
+        let owns = ownsRooms
+        if owns != ownedRoomsSeen { ownedRoomsSeen = owns }
         onChange?()
     }
 
@@ -268,9 +276,11 @@ public final class SonosOutputController {
     /// party screen's Speakers, where ticked rooms play the zone's music (by default, whether
     /// they do: `ownsRooms`).
     public func status(of player: SonosPlayer, live: Bool? = nil) -> SonosRoomStatus {
-        SonosRoomStatus.of(roomID: player.id, model: player.displayName, ticked: isTicked(player.id), joining: joining.contains(player.id),
-                           live: live.map { $0 && engine?.hasLostControl != true } ?? ownsRooms,
-                           reading: household.readings[player.id], claim: claim(on: player.id))
+        // Read for its observation (`ownedRoomsSeen`); the engine's own state decides.
+        _ = ownedRoomsSeen
+        return SonosRoomStatus.of(roomID: player.id, model: player.displayName, ticked: isTicked(player.id), joining: joining.contains(player.id),
+                                  live: live.map { $0 && engine?.hasLostControl != true } ?? ownsRooms,
+                                  reading: household.readings[player.id], claim: claim(on: player.id))
     }
 
     /// An engine for the current output, or nil when the music doesn't play through Sonos.

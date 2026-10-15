@@ -94,6 +94,7 @@ struct PartyView: View {
         }
         .onChange(of: session.state.upNext.map(\.id)) { old, new in flashPhoneRequests(old: old, new: new) }
         .sheet(isPresented: $showUnlock) { UnlockView().environment(model) }
+        .modifier(PartyOutputPicker())
         .overlay { DisplayConnectionOverlay() }
         #if DEBUG
         .task { await runAutoSearch() }
@@ -659,23 +660,27 @@ private struct TransportControls: View {
         @Bindable var model = model
         GlassEffectContainer(spacing: spacing) {
             HStack(spacing: spacing) {
-                if model.isDisplay {
+                switch speakerButton {
+                case .none:
                     // Speakers are chosen on the hub; keep the controls centered.
                     Color.clear.frame(width: 44, height: 44)
-                } else if model.usesSonos {
+                case .sonosSpeakers:
                     // Sonos rooms play the music: their own panel, in AirPlay's place.
                     SonosSpeakersButton()
-                } else {
-                // Open AirPlay picker: AirPlay sessions sometimes drop and need re-picking.
-                // Disabled (but kept for balance) when Spotify plays on another device, or on a Mac.
-                if airPlayApplies {
+                case .outputPicker:
+                    // Sonos rooms on the Wi‑Fi: "Where should music play?", whose This iPad row
+                    // has the AirPlay button.
+                    ThisDeviceOutputButton()
+                case .airPlay:
+                    // Open AirPlay picker: AirPlay sessions sometimes drop and need re-picking.
                     RoutePicker(tint: .white)
                         .frame(width: 44, height: 44)
                         .glassEffect(.regular.interactive(), in: Circle())
                         .accessibilityLabel("Choose speakers")
-                } else {
-                    // The AirPlay control ignores SwiftUI's disabled/opacity, so show a plain
-                    // dimmed icon instead (kept for balance).
+                case .airPlayUnavailable:
+                    // When Spotify plays on another device, or on a Mac. The AirPlay control
+                    // ignores SwiftUI's disabled/opacity, so show a plain dimmed icon instead
+                    // (kept for balance).
                     Image(systemName: "airplay.audio")
                         .font(.system(size: 17, weight: .semibold))
                         .foregroundStyle(.white.opacity(0.3))
@@ -684,7 +689,6 @@ private struct TransportControls: View {
                         .accessibilityLabel("Speakers")
                         .accessibilityValue(DeviceKind.isMac ? "Not available on a Mac" : "Not used: music plays on \(model.spotifyDeviceName ?? "another device")")
                         .help(DeviceKind.isMac ? AirPlayRow.macNote : "")
-                }
                 }
                 Group {
                     Button {
@@ -750,9 +754,51 @@ private struct TransportControls: View {
         }
     }
 
-    /// Not on a Mac, where the music ignores the app's AirPlay choice (`AirPlayRow.macNote`).
-    private var airPlayApplies: Bool {
-        !DeviceKind.isMac && !model.usesSonos && (model.provider != .spotify || model.spotifyPlaysOnThisDevice)
+    /// AirPlay doesn't apply on a Mac, where the music ignores the app's AirPlay choice
+    /// (`AirPlayRow.macNote`).
+    private var speakerButton: PartySpeakerButton {
+        PartySpeakerButton.choose(isDisplay: model.isDisplay, onSonos: model.usesSonos, isSpotify: model.provider == .spotify,
+                                  spotifyPlaysHere: model.spotifyPlaysOnThisDevice, isMac: DeviceKind.isMac,
+                                  sonosRoomsFound: model.sonosRoomsFound)
+    }
+}
+
+/// The party screen's speaker button for Apple Music on this device while Sonos rooms are on the
+/// Wi‑Fi (`PartySpeakerButton.outputPicker`): this device's symbol, as Spotify's device button
+/// shows its device's. It opens "Where should music play?": This iPad, with its AirPlay button,
+/// and the rooms.
+private struct ThisDeviceOutputButton: View {
+    @Environment(AppModel.self) private var model
+
+    var body: some View {
+        Button {
+            model.isPickingSpotifyDevice = true
+        } label: {
+            Image(systemName: ThisDeviceRow.symbol)
+                .font(.system(size: 15, weight: .semibold))
+                .frame(width: 44, height: 44)
+        }
+        .buttonStyle(.plain)
+        .glassEffect(.regular.interactive(), in: Circle())
+        .accessibilityLabel("Where music plays")
+        .accessibilityValue("This \(DeviceKind.noun)")
+    }
+}
+
+/// "Where should music play?" on an Apple Music zone's party screen, with the Sonos rooms, from
+/// the speaker button (`ThisDeviceOutputButton`). Presented here rather than on the button:
+/// ticking a room moves the music to Sonos, and the button gives way to Speakers while the picker
+/// stays open. Not on a display, nor in a Spotify zone, whose device button presents its own
+/// (Spotify Connect devices only).
+private struct PartyOutputPicker: ViewModifier {
+    @Environment(AppModel.self) private var model
+
+    func body(content: Content) -> some View {
+        if model.isDisplay || model.provider == .spotify {
+            content
+        } else {
+            content.outputPicker(includesSonos: true)
+        }
     }
 }
 

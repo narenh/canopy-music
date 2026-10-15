@@ -136,7 +136,8 @@ final class AppModel {
     let hostControl = HostControl()
     private var localFriendlyURL: URL?
     var errorMessage: String?
-    /// Shows "Where should music play?" (host Music section or the party screen's device button).
+    /// Shows "Where should music play?" (host Music section, or the party screen's device or
+    /// speaker button).
     var isPickingSpotifyDevice = false {
         didSet { if !isPickingSpotifyDevice { startsWhenDeviceChosen = false } }
     }
@@ -592,18 +593,14 @@ final class AppModel {
 
     /// The start screen's Music row, before Start only (a live zone's service changes only by
     /// ending it). Nothing is live, so this just swaps the private session. Spotify is signed in
-    /// first (the row's sheet does that), then asks where music plays, as setup does; Apple Music
-    /// asks for access if it hasn't yet, and a refusal shows in the row.
+    /// first (the row's sheet does that); where it plays is then picked from the Music section's
+    /// "Plays on" row, or asked at Start if no device is reachable. Apple Music asks for access if
+    /// it hasn't yet, and a refusal shows in the row.
     func switchService(to next: Provider) {
         guard zoneRole == .hub, !isLive, !isStartingZone, next != provider else { return }
         chooseProvider(next)
-        switch next {
-        case .spotify:
-            isPickingSpotifyDevice = true
-        case .appleMusic:
-            if MusicAuthorization.currentStatus == .notDetermined { Task { await requestAuthorization() } }
-        default:
-            break
+        if next == .appleMusic, MusicAuthorization.currentStatus == .notDetermined {
+            Task { await requestAuthorization() }
         }
     }
 
@@ -1499,6 +1496,10 @@ final class AppModel {
         }
     }
 
+    /// The zone's service can play on Sonos and the household has rooms: "Where should music
+    /// play?" lists them, and an Apple Music zone's party screen offers it (`PartySpeakerButton`).
+    var sonosRoomsFound: Bool { sonosService != nil && !sonos.rooms.isEmpty }
+
     /// Linked accounts found for the zone's service.
     var sonosAccountsForZone: [SonosAccount] { sonosController.accounts }
 
@@ -1522,7 +1523,9 @@ final class AppModel {
         sonosController.select(rooms: roomIDs)
     }
 
-    /// Back to this device (AirPlay), or for Spotify its Spotify Connect device. Start screen only.
+    /// Back to this device (AirPlay), or for Spotify its Spotify Connect device: This iPad in
+    /// "Where should music play?" (start screen or party screen). The session is rebuilt, and a
+    /// song playing carries on here.
     func useThisDevice() {
         sonosController.leave()
     }
@@ -1531,9 +1534,10 @@ final class AppModel {
         sonosController.isTicked(roomID)
     }
 
-    /// A room's row was tapped (start screen picker or the party screen's Speakers panel). On
-    /// Sonos and playing, it joins or leaves the group without a restart; the last room on the
-    /// start screen goes back to this device (the Speakers panel doesn't offer that).
+    /// A room's row was tapped ("Where should music play?" on the start or party screen, or the
+    /// party screen's Speakers panel). Off Sonos, the music moves there (a rebuild). On Sonos and
+    /// playing, it joins or leaves the group without a restart; the last room in "Where should
+    /// music play?" goes back to this device (the Speakers panel doesn't offer that).
     func toggleSonosRoom(_ roomID: String) {
         sonosController.toggle(roomID)
     }
@@ -1590,13 +1594,15 @@ final class AppModel {
     }
 
     /// Sonos discovery (the `_sonos._tcp` browse, and the household read again on its news) runs
-    /// where rooms can be chosen or the music plays on them: the zone list and start screen, and
-    /// a zone on Sonos. Not in a live zone on this device (or a Spotify Connect device), whose
-    /// party screen and phones offer no rooms, nor on a display. The rooms found stay listed.
+    /// where rooms can be chosen or the music plays on them: the zone list and start screen, a
+    /// zone on Sonos, and a live Apple Music zone on this device, whose party screen offers the
+    /// rooms too (`PartySpeakerButton.outputPicker`). Not in a live Spotify zone on a Spotify
+    /// Connect device, whose party screen and phones offer no rooms, nor on a display. The rooms
+    /// found stay listed.
     private func updateSonosDiscovery() {
         // From launch on (`startOnLaunch`), as before.
         guard hasStartedDiscovery else { return }
-        if zoneRole != .display, !isLive || sonosController.output != nil {
+        if zoneRole != .display, !isLive || sonosController.output != nil || provider == .appleMusic {
             sonos.start()
         } else {
             sonos.stop()
@@ -1649,7 +1655,10 @@ final class AppModel {
             // Rebuilt again meanwhile: that rebuild decides what plays.
             guard session === rebuilt else { return }
             await play()
-            if position > 1, session === rebuilt { session.seek(to: position) }
+            // In turn: the play is still staging the next song, and a plain seek then is dropped.
+            if position > 1, session === rebuilt, let song = rebuilt.state.current?.id {
+                await rebuilt.seekInTurn(to: position, on: song)
+            }
         }
     }
 
@@ -1670,6 +1679,31 @@ final class AppModel {
                                  transport: sonos.transport)
         engine.log = { print("[sonos-engine] \($0)") }
         session = PartySession(catalog: FixedCatalog(tracks: SonosFakeHousehold.songs), engine: engine)
+        session.phonesCanReorder = phoneReorderEnabled
+        configureHubSession()
+        connectHostControl()
+        try? await session.load(playlist: PlaylistSummary(id: "fake", name: "Saturday Night", kind: .library))
+        try? await session.play()
+        zoneRole = .hub
+        isLive = true
+        lock()
+        await restartServer()
+    }
+
+    /// `-sonosFakeParty 0`: the same party playing on this device instead (a timer, no audio), on
+    /// Apple Music (or Spotify, with `-spotifyState`), with the simulated household's rooms found,
+    /// so the party screen's "Where should music play?" can move it to them. Its queue is saved
+    /// where the service's is, so the move reads it back as a real one does
+    /// (`rebuildSessionForOutput`); the rebuilt session plays through the simulated household.
+    func startFakeDeviceParty() async {
+        while sonos.rooms.count < 3 || sonos.isRefreshing { try? await Task.sleep(for: .milliseconds(100)) }
+        if provider != .spotify {
+            provider = .appleMusic
+            authorization = .authorized
+        }
+        needsOnboarding = false
+        session.shutdown()
+        session = PartySession(catalog: FixedCatalog(tracks: SonosFakeHousehold.songs), engine: DemoPlaybackEngine(), storeURL: Self.storeURL(provider))
         session.phonesCanReorder = phoneReorderEnabled
         configureHubSession()
         connectHostControl()

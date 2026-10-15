@@ -861,8 +861,9 @@ private struct SettingsSheet: View {
 /// Settings' last section, collapsed until opened. Debug builds only: Release has no Advanced
 /// section, and no default server or token. The direct audio server (canopy-cmdlp) turns links
 /// guests paste into songs; empty fields use the defaults (`AppModel.linkDefaults`). Only a
-/// saved token's last four characters show. "Normalize audio" shows once Test Connection has
-/// worked for the URL and token in use (`AppModel.linkVerified`).
+/// saved token's last four characters show. "Normalize audio" shows once the connection check
+/// (run on opening, after changes, or by Test Connection) has worked for the URL and token in use
+/// (`AppModel.linkVerified`).
 private struct AdvancedSection: View {
     @Environment(AppModel.self) private var model
     @State private var expanded = ProcessInfo.processInfo.arguments.contains("-showAdvanced")
@@ -938,14 +939,7 @@ private struct AdvancedSection: View {
                     Toggle("Normalize audio", isOn: $model.linkNormalize)
                 }
                 HStack {
-                    Button("Test Connection") {
-                        isTesting = true
-                        testResult = nil
-                        Task {
-                            testResult = await model.testLinkConnection()
-                            isTesting = false
-                        }
-                    }
+                    Button("Test Connection") { Task { await test() } }
                     .disabled(isTesting || model.linkAddress.isEmpty)
                     if isTesting {
                         Spacer()
@@ -963,7 +957,28 @@ private struct AdvancedSection: View {
                 Text("Self-host the direct audio server. Most people can ignore this.")
             }
             .listRowBackground(Color.white.opacity(0.08))
+            // Checked by itself when opened, and again a moment after the URL or token changes,
+            // so "Normalize audio" shows without a tap on Test Connection (the result isn't kept
+            // across launches).
+            .task(id: CheckKey(address: model.linkAddress, token: model.linkTokenHint)) {
+                guard model.linksConfigured, !model.linkVerified else { return }
+                try? await Task.sleep(for: .milliseconds(800))
+                guard !Task.isCancelled, !isTesting else { return }
+                await test()
+            }
         }
+    }
+
+    private struct CheckKey: Equatable {
+        let address: String
+        let token: String?
+    }
+
+    private func test() async {
+        isTesting = true
+        testResult = nil
+        testResult = await model.testLinkConnection()
+        isTesting = false
     }
 
     private func saveToken() {

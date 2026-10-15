@@ -295,4 +295,63 @@ public struct QueueState: Codable, Equatable, Sendable {
         refill()
         version += 1
     }
+
+    // MARK: Links
+
+    /// cmdlp's latest on a link track (its download's progress, ready, failed): every copy of it in
+    /// Now Playing and Up next takes it. False when nothing changed.
+    @discardableResult
+    public mutating func updateLink(_ link: LinkTrack) -> Bool {
+        var changed = false
+        func update(_ item: inout QueueItem) {
+            guard item.track.link?.id == link.id, item.track.link != link else { return }
+            item.track.link = link
+            changed = true
+        }
+        if var item = current {
+            update(&item)
+            current = item
+        }
+        for index in upNext.indices { update(&upNext[index]) }
+        if changed { version += 1 }
+        return changed
+    }
+
+    /// A link whose download failed leaves Up next, locked next song or not: it will never play.
+    /// Returns what it removed.
+    @discardableResult
+    public mutating func removeLink(_ cmdlpID: String) -> [QueueItem] {
+        let removed = upNext.filter { $0.track.link?.id == cmdlpID }
+        guard !removed.isEmpty else { return [] }
+        if let locked = lockedNextID, removed.contains(where: { $0.id == locked }) { lockedNextID = nil }
+        upNext.removeAll { $0.track.link?.id == cmdlpID }
+        refill()
+        version += 1
+        return removed
+    }
+
+    /// Drops the current song without it counting as played (a link whose download failed): the
+    /// first song in Up next becomes current. Returns it.
+    @discardableResult
+    public mutating func dropCurrent() -> QueueItem? {
+        guard current != nil else { return nil }
+        current = upNext.isEmpty ? nil : upNext.removeFirst()
+        lockedNextID = nil
+        refill()
+        version += 1
+        return current
+    }
+
+    /// The current song is a link still downloading at its turn: the first song after it that
+    /// isn't still downloading plays instead, and the link goes right after that. False (and
+    /// nothing changes) when there's no such song.
+    @discardableResult
+    public mutating func postponeCurrent() -> Bool {
+        guard let link = current, let index = upNext.firstIndex(where: { $0.track.link?.status != .pending }) else { return false }
+        current = upNext.remove(at: index)
+        upNext.insert(link, at: 0)
+        lockedNextID = nil
+        version += 1
+        return true
+    }
 }

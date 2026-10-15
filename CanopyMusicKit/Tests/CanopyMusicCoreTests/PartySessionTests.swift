@@ -13,6 +13,10 @@ final class FakeEngine: PlaybackEngine {
 
     init(canReplaceStaged: Bool = true) { self.canReplaceStaged = canReplaceStaged }
 
+    /// Whether it says it plays link tracks (`LinkSessionTests`).
+    var playsLinks = false
+    var canPlayLinks: Bool { playsLinks }
+
     /// Thrown by the next `play`, then cleared.
     var playError: Error?
     /// Songs the player refuses every time (unavailable): `play` and `stage` throw for them.
@@ -24,10 +28,17 @@ final class FakeEngine: PlaybackEngine {
         playAttempts.append(track.id)
         if let playError { self.playError = nil; throw playError }
         if unplayable.contains(track.id) { throw URLError(.resourceUnavailable) }
+        // As `LinkHandoffEngine`: a link plays once its download is ready.
+        if let link = track.link, !link.isPlayable { throw LinkPlaybackError.notReady }
         playing = track; staged = nil; isPlaying = true
     }
     func stage(_ track: QueueTrack?) async throws {
         if let track, unplayable.contains(track.id) { throw URLError(.resourceUnavailable) }
+        if let link = track?.link, !link.isPlayable {
+            // Nothing staged after the current song then: it runs out.
+            staged = nil
+            throw LinkPlaybackError.notReady
+        }
         staged = track
     }
     func resume() async throws { isPlaying = true }

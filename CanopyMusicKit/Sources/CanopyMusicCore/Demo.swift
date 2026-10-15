@@ -329,4 +329,14 @@ public final class DemoPlaybackEngine: PlaybackEngine {
         }
     }
 }
+
+/// The demo's songs as the music side of a `LinkHandoffEngine` (debug builds' `-fakeCmdlp`), so
+/// link tracks can be tried in the simulator, where Apple Music can't play.
+extension DemoPlaybackEngine: HandoffSide {
+    public func prepare(_ track: QueueTrack?) async throws {}
+    public func handOff() {
+        isPlaying = false
+        ticker?.cancel()
+    }
+}
 #endif

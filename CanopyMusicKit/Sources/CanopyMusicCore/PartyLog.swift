@@ -59,7 +59,8 @@ public struct PartyLog: Codable, Equatable, Sendable {
             .map { PartySong(track: $0.track, requester: $0.requester) }
         var seen = Set<String>()
         return (played + pending).filter { song in
-            guard !onlyRequests || song.requester != nil else { return false }
+            // A song from a link isn't the service's to put in a playlist.
+            guard song.track.link == nil, !onlyRequests || song.requester != nil else { return false }
             return seen.insert(song.track.id).inserted
         }
     }

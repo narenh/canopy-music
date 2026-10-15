@@ -21,7 +21,13 @@ struct ZoneListView: View {
             ContentCap {
                 VStack(spacing: 0) {
                     Spacer(minLength: 24)
-                    LogoView(height: 44)
+                    // The centered "canopy music" lockup, as the phone page's splash and the TV's
+                    // zone list.
+                    Image("CanopyMusicLogoCentered")
+                        .resizable()
+                        .scaledToFit()
+                        .frame(height: 76)
+                        .accessibilityLabel("Canopy Music")
                         .padding(.bottom, 28)
                     List {
                         // Hidden until there's a zone to show. This iPad's own zone from last time

@@ -1,0 +1,119 @@
+import Foundation
+
+/// What's known of a library song's art from the service's listing of it (`LibraryArtworkHints`).
+public struct LibraryArtworkHint: Sendable, Equatable {
+    /// The song's own art: an image URL with `{w}` and `{h}` where its size goes.
+    public var template: String?
+    /// For a song without art of its own: another song's on the same library album.
+    public var albumTemplate: String?
+
+    public init(template: String? = nil, albumTemplate: String? = nil) {
+        self.template = template
+        self.albumTemplate = albumTemplate
+    }
+
+    /// `template` at `size` pixels square.
+    public static func url(_ template: String, size: Int) -> URL? {
+        URL(string: template.replacingOccurrences(of: "{w}", with: "\(size)").replacingOccurrences(of: "{h}", with: "\(size)"))
+    }
+}
+
+/// The art of library songs as the service listed them (a library playlist's tracks, a search),
+/// so the hub's relay (`/api/artwork/…`) downloads each image straight away rather than asking the
+/// service for the song again: Apple Music's library songs come with their artwork's URL template.
+/// A song without art of its own gets one of its album's (another song of the same name and artist
+/// that has some). Kept across launches in Caches, so a restored queue's art needs no lookups
+/// either; the `maxSongs` most recently listed.
+public actor LibraryArtworkHints {
+    /// A song as listed: its library id, its art's template (nil when it has none), and its album.
+    public struct Listing: Sendable, Equatable {
+        public var libraryID: String
+        public var template: String?
+        public var album: String
+        public var artist: String
+
+        public init(libraryID: String, template: String?, album: String, artist: String) {
+            self.libraryID = libraryID
+            self.template = template
+            self.album = album
+            self.artist = artist
+        }
+    }
+
+    private struct Entry: Codable {
+        var template: String?
+        var album: String?
+        var listed: Date
+    }
+
+    public static let maxSongs = 5000
+
+    public static let shared = LibraryArtworkHints(url: URL.cachesDirectory.appending(path: "library-artwork-hints.json"))
+
+    private let url: URL?
+    private let now: @Sendable () -> Date
+    private var songs: [String: Entry]
+    /// An album's art (`albumKey`): the first of its songs listed with some.
+    private var albums: [String: String] = [:]
+    private var changed = false
+
+    /// `url` nil keeps everything in memory only.
+    public init(url: URL?, now: @escaping @Sendable () -> Date = Date.init) {
+        self.url = url
+        self.now = now
+        songs = url.flatMap { try? Data(contentsOf: $0) }.flatMap { try? JSONDecoder().decode([String: Entry].self, from: $0) } ?? [:]
+        albums = Self.albums(of: songs)
+    }
+
+    private static func albums(of songs: [String: Entry]) -> [String: String] {
+        var albums: [String: String] = [:]
+        for entry in songs.values {
+            if let album = entry.album, let template = entry.template, albums[album] == nil { albums[album] = template }
+        }
+        return albums
+    }
+
+    /// Songs with the same album title and artist, ignoring case, accents and punctuation. nil
+    /// without a title.
+    public static func albumKey(album: String, artist: String) -> String? {
+        let title = SearchRanking.words(album)
+        guard !title.isEmpty else { return nil }
+        return title.joined(separator: " ") + "|" + SearchRanking.words(artist).joined(separator: " ")
+    }
+
+    public func record(_ listings: [Listing]) {
+        for listing in listings {
+            let album = Self.albumKey(album: listing.album, artist: listing.artist)
+            let old = songs[listing.libraryID]
+            if old?.template != listing.template || old?.album != album { changed = true }
+            songs[listing.libraryID] = Entry(template: listing.template, album: album, listed: now())
+            if let album, let template = listing.template, albums[album] == nil { albums[album] = template }
+        }
+        guard songs.count > Self.maxSongs else { return }
+        let keep = songs.sorted { $0.value.listed > $1.value.listed }.prefix(Self.maxSongs)
+        songs = Dictionary(uniqueKeysWithValues: keep.map { ($0.key, $0.value) })
+        albums = Self.albums(of: songs)
+        changed = true
+    }
+
+    /// nil for a song never listed.
+    public func hint(for libraryID: String) -> LibraryArtworkHint? {
+        guard let entry = songs[libraryID] else { return nil }
+        if let template = entry.template { return LibraryArtworkHint(template: template) }
+        return LibraryArtworkHint(albumTemplate: entry.album.flatMap { albums[$0] })
+    }
+
+    /// Writes to disk if anything changed since the last save (call once after a batch).
+    public func save() {
+        guard changed, let url else { return }
+        changed = false
+        do {
+            try FileManager.default.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
+            try JSONEncoder().encode(songs).write(to: url, options: .atomic)
+        } catch {
+            #if DEBUG
+            print("[artwork] couldn't save \(url.lastPathComponent): \(error)")
+            #endif
+        }
+    }
+}

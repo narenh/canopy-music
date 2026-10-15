@@ -55,6 +55,8 @@ struct AppleMusicCatalog: MusicCatalog {
     let cache: SongCache
     /// Which catalog song each unlabelled library track (iTunes Match / uploads) turned out to be.
     var memory: CatalogMatchMemory = .shared
+    /// Library songs' artwork templates as playlists and searches list them, for the hub's relay.
+    var artworkHints: LibraryArtworkHints = .shared
     /// How the most recent library playlist loads went, including which tracks were left out.
     var reports = PlaylistLoadReports()
     /// The songs of library albums a host's search named, by album (`searchLibrarySongs`).
@@ -300,6 +302,8 @@ struct AppleMusicCatalog: MusicCatalog {
         }
         let (loaded, report) = try await catalogSongs(for: resources, playlistID: id)
         await reports.record(report)
+        // Searches' art is kept with the next playlist's: they run as a host types.
+        await artworkHints.save()
         #if DEBUG
         if report.skippedCount > 0 || report.unlabelled > 0 {
             print("[match] playlist \(id): loaded \(report.loaded) of \(report.total); unlabelled \(report.unlabelled) (memory \(report.matchedFromMemory), search \(report.matchedBySearch), library only \(report.libraryOnly)); skipped \(report.skippedCount)")
@@ -329,6 +333,13 @@ struct AppleMusicCatalog: MusicCatalog {
         var report = PlaylistLoadReport(playlistID: playlistID)
         report.total = resources.count
         var slots: [Slot] = []
+        // Each library song's art as listed here, so the relay downloads it with no lookup.
+        await artworkHints.record(resources.compactMap { resource in
+            resource.libraryID.map {
+                LibraryArtworkHints.Listing(libraryID: $0, template: resource.attributes?.artwork?.url,
+                                            album: resource.attributes?.albumName ?? "", artist: resource.attributes?.artistName ?? "")
+            }
+        })
         for resource in resources {
             if let attached = resource.relationships?.catalog?.data.first {
                 report.withCatalogSong += 1
@@ -668,17 +679,32 @@ struct AppleMusicCatalog: MusicCatalog {
 
 // MARK: - Library artwork
 
-/// The art the hub relays for library songs (`/api/artwork/<library id>`, `LibraryArtwork`):
-/// the library's own, from the Apple Music API's library song or, on an iPad or Mac, MediaPlayer's
-/// copy of the song (same title and artist, the closest length); else, for a library copy of a
-/// catalog song, the catalog song's. Debug builds log which one each song got.
+/// The art the hub relays for library songs (`/api/artwork/<library id>`, `LibraryArtwork`).
+/// Songs a library playlist or a search listed come with their art's URL template
+/// (`artworkHint`), which the relay downloads itself. Otherwise: the library's own, from the Apple
+/// Music API's library song or, on an iPad or Mac, MediaPlayer's copy of the song (same title and
+/// artist, the closest length); else, for a library copy of a catalog song, the catalog song's;
+/// else its library album's. Debug builds log which one each song got, and how long it took.
 extension AppleMusicCatalog: LibraryArtworkSource {
+    func artworkHint(libraryID: String) async -> LibraryArtworkHint? {
+        await artworkHints.hint(for: libraryID)
+    }
+
     func artwork(libraryID: String, size: Int) async throws -> Data? {
-        let page: APIPage<LibrarySongResource>? = try? await fetch("/v1/me/library/songs/\(libraryID)?include=catalog")
+        let clock = ContinuousClock(), start = clock.now
+        // With its album too, for a song without art of its own; without, if the API won't.
+        var page: APIPage<LibrarySongResource>? = try? await fetch("/v1/me/library/songs/\(libraryID)?include=catalog,albums")
+        if page == nil { page = try? await fetch("/v1/me/library/songs/\(libraryID)?include=catalog") }
+        let lookup = clock.now - start
         let resource = page?.data.first
-        if let url = resource?.attributes?.artwork?.url(size: size), let data = await Self.download(url) {
-            Self.artworkLog(libraryID, "the library's (API)")
+        // "…: API 420 ms, image 180 ms, total 610 ms" (image: its download, or MediaPlayer's).
+        func found(_ data: Data, _ how: String, downloadStart: ContinuousClock.Instant) -> Data {
+            Self.artworkLog(libraryID, "\(how): API \(Self.ms(lookup)), image \(Self.ms(clock.now - downloadStart)), total \(Self.ms(clock.now - start))")
             return data
+        }
+        var downloadStart = clock.now
+        if let url = resource?.attributes?.artwork?.url(size: size), let data = await Self.download(url) {
+            return found(data, "the library's (API)", downloadStart: downloadStart)
         }
         #if os(iOS)
         var title = resource?.attributes?.name ?? ""
@@ -693,17 +719,25 @@ extension AppleMusicCatalog: LibraryArtworkSource {
                 duration = song.duration
             }
         }
+        downloadStart = clock.now
         if let data = await Self.mediaLibraryArtwork(title: title, artist: artist, duration: duration, size: size) {
-            Self.artworkLog(libraryID, "the library's (MediaPlayer)")
-            return data
+            return found(data, "the library's (MediaPlayer)", downloadStart: downloadStart)
         }
         #endif
+        downloadStart = clock.now
         if let url = resource?.relationships?.catalog?.data.first?.artwork?.url(width: size, height: size), let data = await Self.download(url) {
-            Self.artworkLog(libraryID, "its catalog song's")
-            return data
+            return found(data, "its catalog song's", downloadStart: downloadStart)
         }
-        Self.artworkLog(libraryID, resource == nil ? "none (the library song didn't load)" : "none")
+        downloadStart = clock.now
+        if let url = resource?.relationships?.albums?.data?.first?.attributes?.artwork?.url(size: size), let data = await Self.download(url) {
+            return found(data, "its library album's", downloadStart: downloadStart)
+        }
+        Self.artworkLog(libraryID, (resource == nil ? "none (the library song didn't load)" : "none") + ": total \(Self.ms(clock.now - start))")
         return nil
+    }
+
+    private static func ms(_ duration: Duration) -> String {
+        "\(Int((Double(duration.components.seconds) + Double(duration.components.attoseconds) / 1e18) * 1000)) ms"
     }
 
     private static func download(_ url: URL) async -> Data? {
@@ -836,7 +870,17 @@ private struct LibrarySongResource: Decodable {
     }
     struct Relationships: Decodable {
         struct Catalog: Decodable { var data: [Song] }
+        /// The library album, when asked for (`include=albums`). Optional throughout, so a
+        /// relationship that comes without its data never fails the song.
+        struct Albums: Decodable {
+            struct Album: Decodable {
+                struct Attributes: Decodable { var artwork: APIArtwork? }
+                var attributes: Attributes?
+            }
+            var data: [Album]?
+        }
         var catalog: Catalog?
+        var albums: Albums?
     }
     /// The library song id ("i.…").
     var id: String?

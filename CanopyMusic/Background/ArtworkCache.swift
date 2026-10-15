@@ -12,6 +12,17 @@ enum ArtworkURL {
     /// song's art is a path relative to it (`LibraryArtwork`). Displays get those paths made
     /// absolute against their zone's hub as they arrive (`ZoneConnection`), so they never use this.
     @MainActor static var relayBase: URL?
+    /// That server's relay itself (`PartyServer.libraryArtwork(at:)`), while it runs: the hub's own
+    /// views load its library art in process, not through its HTTP server, so they don't queue
+    /// behind URLSession's few connections to it.
+    @MainActor static var relay: (@Sendable (URL) async -> Data?)?
+
+    /// The relay, if `url` is one of its images (`relayBase` and a `LibraryArtwork` path).
+    @MainActor static func relay(for url: URL) -> (@Sendable (URL) async -> Data?)? {
+        guard let relay, let relayBase, url.host == relayBase.host, url.port == relayBase.port,
+              url.path.hasPrefix(LibraryArtwork.pathPrefix) else { return nil }
+        return relay
+    }
 
     @MainActor static func url(for track: QueueTrack?, large: Bool) -> URL? {
         let url = large ? track?.artworkURL ?? track?.thumbnailURL : track?.thumbnailURL ?? track?.artworkURL
@@ -167,8 +178,10 @@ final class ArtworkCache: BlurredArtworkSource {
 
     private func data(for url: URL) async -> Data? {
         if let task = downloads[url] { return await task.value }
+        let relay = ArtworkURL.relay(for: url)
         let task = Task<Data?, Never> {
             defer { downloads[url] = nil }
+            if let relay { return await relay(url) }
             return try? await URLSession.shared.data(from: url).0
         }
         downloads[url] = task

@@ -1146,7 +1146,7 @@ final class AppModel {
         await stopServerNow()
         // Only a live zone runs the phone server: the start screen has none.
         guard isLive, zoneRole == .hub else { return }
-        guard let (server, task) = await PartyServer.start(session: session) else {
+        guard let (server, task) = await PartyServer.start(session: session, artworkCache: .shared) else {
             localGuestURL = nil
             localFriendlyURL = nil
             return
@@ -1154,6 +1154,7 @@ final class AppModel {
         self.server = server
         serverTask = task
         ArtworkURL.relayBase = server.url(host: "127.0.0.1")
+        ArtworkURL.relay = { [server] url in await server.libraryArtwork(at: url) }
         refreshAddresses()
     }
 
@@ -1186,6 +1187,7 @@ final class AppModel {
         await server?.stop()
         server = nil
         ArtworkURL.relayBase = nil
+        ArtworkURL.relay = nil
         hostname.unregister()
         zoneAdvertiser.stop()
         localGuestURL = nil

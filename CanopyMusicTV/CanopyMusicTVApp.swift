@@ -725,7 +725,7 @@ final class TVModel {
         await stopServerNow()
         debugLog("starting server")
         let session = session
-        guard let (server, task) = await PartyServer.start(session: session) else {
+        guard let (server, task) = await PartyServer.start(session: session, artworkCache: .shared) else {
             debugLog("server failed to start")
             return
         }
@@ -741,6 +741,7 @@ final class TVModel {
         serverTask = task
         serverSession = session
         ArtworkURL.relayBase = server.url(host: "127.0.0.1")
+        ArtworkURL.relay = { [server] url in await server.libraryArtwork(at: url) }
         guard let ip = LocalNetwork.lanAddress() else { return }
         guestURL = server.url(host: ip)
         // Hand out the .local name only once it's confirmed ours: another zone may already have
@@ -775,6 +776,7 @@ final class TVModel {
         self.server = nil
         serverSession = nil
         ArtworkURL.relayBase = nil
+        ArtworkURL.relay = nil
         hostname.unregister()
         advertiser.stop()
         guestURL = nil

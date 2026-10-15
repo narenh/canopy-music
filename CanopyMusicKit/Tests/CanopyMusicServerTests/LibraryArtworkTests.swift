@@ -11,16 +11,27 @@ actor FakeLibraryArtwork: LibraryArtworkSource {
     private(set) var asked: [String] = []
     /// The art's size: bigger than any size served, so each is scaled down.
     let side: Int
+    /// What the songs were listed with (`artworkHint`); songs in `without` have no art of their own.
+    let hints: [String: LibraryArtworkHint]
+    let without: Set<String>
+    /// How long a lookup takes.
+    let delay: Duration
 
-    init(side: Int = 1600) {
+    init(side: Int = 1600, hints: [String: LibraryArtworkHint] = [:], without: Set<String> = [], delay: Duration = .zero) {
         self.side = side
+        self.hints = hints
+        self.without = without
+        self.delay = delay
     }
 
     func artwork(libraryID: String, size: Int) async throws -> Data? {
         asked.append("\(libraryID)@\(size)")
-        guard libraryID != "i.NoArt" else { return nil }
+        if delay > .zero { try await Task.sleep(for: delay) }
+        guard libraryID != "i.NoArt", !without.contains(libraryID) else { return nil }
         return Self.png(side: side)
     }
+
+    func artworkHint(libraryID: String) async -> LibraryArtworkHint? { hints[libraryID] }
 
     static func png(side: Int) -> Data {
         let context = CGContext(data: nil, width: side, height: side, bitsPerComponent: 8, bytesPerRow: 0,
@@ -83,8 +94,9 @@ struct LibraryArtworkTests {
         // An odd size gets the next one up; none gets the largest.
         #expect(pixelWidth(try await get("\(base)/i.bVl4FRZ1zY?size=500").data) == 600)
         #expect(pixelWidth(try await get("\(base)/i.bVl4FRZ1zY").data) == 1200)
+        // Found once, at the largest size; the others are scaled from it.
         let asked = await artwork.asked
-        #expect(asked == ["i.bVl4FRZ1zY@160", "i.bVl4FRZ1zY@600", "i.bVl4FRZ1zY@1200"])
+        #expect(asked == ["i.bVl4FRZ1zY@1200"])
     }
 
     @Test func neverScaledUp() async throws {
@@ -107,7 +119,7 @@ struct LibraryArtworkTests {
         // Not a library id: never asked.
         #expect(try await get("\(base)/1440857781?size=160").status == 404)
         #expect(try await get("\(base)/i.abc%2F..?size=160").status == 404)
-        #expect(await artwork.asked == ["i.NoArt@160"])
+        #expect(await artwork.asked == ["i.NoArt@1200"])
 
         // A service without library songs (Spotify) has nothing to relay.
         let other = PartySession(catalog: LibraryArtworkCatalog(artwork: nil), engine: DemoPlaybackEngine())

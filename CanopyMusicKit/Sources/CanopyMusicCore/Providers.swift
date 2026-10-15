@@ -37,6 +37,14 @@ public protocol LibraryArtworkSource: Sendable {
     /// The song's art as image data ImageIO can read, ideally at least `size` pixels square; the
     /// hub scales it. nil when the song has none (or isn't in the library).
     func artwork(libraryID: String, size: Int) async throws -> Data?
+    /// What the service already said of the song's art when it listed it (a playlist, a search):
+    /// its image's URL template, so the hub downloads it without asking the service again
+    /// (`LibraryArtworkHints`). nil when it hasn't listed the song; `artwork` then finds it.
+    func artworkHint(libraryID: String) async -> LibraryArtworkHint?
+}
+
+public extension LibraryArtworkSource {
+    func artworkHint(libraryID: String) async -> LibraryArtworkHint? { nil }
 }
 
 public extension MusicCatalog {

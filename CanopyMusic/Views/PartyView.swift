@@ -490,8 +490,11 @@ struct NowPlayingView: View {
                 HStack(alignment: .firstTextBaseline, spacing: 12) {
                     if item != nil {
                         EqualizerBars(isAnimating: session.isPlaying)
-                            .foregroundStyle(.white)
                             .frame(width: 24, height: 24)
+                            // On the title's baseline, as a SwiftUI shape would be (a UIKit
+                            // view's baseline isn't its bottom).
+                            .alignmentGuide(.firstTextBaseline) { $0[.bottom] }
+                            .accessibilityHidden(true)
                     }
                     Text(item?.track.title ?? "Nothing playing yet")
                         .font(.system(size: 36, weight: .bold))
@@ -683,28 +686,75 @@ private struct TransportControls: View {
     }
 }
 
-/// Four bars bouncing at different rates; they settle low when paused.
-struct EqualizerBars: View {
+/// Four white bars bouncing at different rates; they settle low when paused. Core Animation
+/// bounces them (`EqualizerBarsView`), so they take no main-thread time while they do.
+struct EqualizerBars: UIViewRepresentable {
     let isAnimating: Bool
-    private let speeds: [Double] = [5.1, 7.3, 4.2, 6.4]
-    private let phases: [Double] = [0, 1.7, 3.1, 0.8]
 
-    var body: some View {
-        TimelineView(.animation(paused: !isAnimating)) { context in
-            let t = context.date.timeIntervalSinceReferenceDate
-            GeometryReader { geo in
-                HStack(alignment: .bottom, spacing: geo.size.width * 0.12) {
-                    ForEach(speeds.indices, id: \.self) { i in
-                        let wave = (sin(t * speeds[i] + phases[i]) + 1) / 2
-                        let level = isAnimating ? 0.25 + 0.75 * wave : 0.25
-                        Capsule()
-                            .frame(height: max(2, geo.size.height * level))
-                    }
-                }
-                .frame(width: geo.size.width, height: geo.size.height, alignment: .bottom)
-            }
+    func makeUIView(context: Context) -> EqualizerBarsView { EqualizerBarsView() }
+
+    func updateUIView(_ view: EqualizerBarsView, context: Context) {
+        view.isAnimating = isAnimating
+    }
+}
+
+final class EqualizerBarsView: UIView {
+    /// Each bar follows a sine wave: radians a second, and where it starts.
+    private static let speeds: [Double] = [5.1, 7.3, 4.2, 6.4]
+    private static let phases: [Double] = [0, 1.7, 3.1, 0.8]
+    private let bars = speeds.map { _ in CALayer() }
+    private var laidOut: (size: CGSize, animating: Bool)?
+
+    var isAnimating = false {
+        didSet { if isAnimating != oldValue { setNeedsLayout() } }
+    }
+
+    override init(frame: CGRect) {
+        super.init(frame: frame)
+        isUserInteractionEnabled = false
+        isAccessibilityElement = false
+        for bar in bars {
+            bar.backgroundColor = UIColor.white.cgColor
+            bar.anchorPoint = CGPoint(x: 0.5, y: 1)
+            layer.addSublayer(bar)
         }
-        .accessibilityHidden(true)
+    }
+
+    required init?(coder: NSCoder) { fatalError("init(coder:) is not used") }
+
+    override func layoutSubviews() {
+        super.layoutSubviews()
+        let size = bounds.size
+        guard laidOut?.size != size || laidOut?.animating != isAnimating else { return }
+        laidOut = (size, isAnimating)
+        let spacing = size.width * 0.12
+        let width = (size.width - spacing * 3) / 4
+        let low = max(2, size.height * 0.25)
+        CATransaction.begin()
+        CATransaction.setDisableActions(true)
+        for (i, bar) in bars.enumerated() {
+            bar.removeAllAnimations()
+            bar.cornerRadius = width / 2
+            bar.position = CGPoint(x: (width + spacing) * CGFloat(i) + width / 2, y: size.height)
+            bar.bounds = CGRect(x: 0, y: 0, width: width, height: low)
+            guard isAnimating, size.height > low else { continue }
+            // From the wave's trough to its crest and back: a quarter to all of the height.
+            let speed = Self.speeds[i]
+            let bounce = CABasicAnimation(keyPath: "bounds.size.height")
+            bounce.fromValue = low
+            bounce.toValue = size.height
+            bounce.duration = .pi / speed
+            bounce.autoreverses = true
+            bounce.repeatCount = .infinity
+            // A sine wave's half from trough to crest (ease in and out, sine).
+            bounce.timingFunction = CAMediaTimingFunction(controlPoints: 0.37, 0, 0.63, 1)
+            // Where the wave is at its phase: the time since its trough (at -π/2).
+            bounce.timeOffset = (Self.phases[i] + .pi / 2).truncatingRemainder(dividingBy: 2 * .pi) / speed
+            bounce.isRemovedOnCompletion = false
+            bounce.preferredFrameRateRange = CAFrameRateRange(minimum: 20, maximum: 30, preferred: 30)
+            bar.add(bounce, forKey: "bounce")
+        }
+        CATransaction.commit()
     }
 }
 

@@ -631,7 +631,7 @@
   // The same list carries on, read-only (no handle or remove), with the rest of the playlist's
   // cycle, a page at a time as the end comes near. It isn't in snapshots; when the queue moves on,
   // the rows already shown are fetched again so the list stays in step.
-  const later = { rows: [], total: null, loading: false, generation: 0, version: null, refetchTimer: null };
+  const later = { rows: [], total: null, loading: false, generation: 0, version: null, refetchTimer: null, retryTimer: null, failures: 0 };
   const laterEls = new Map();
 
   function laterRow(row) {
@@ -680,6 +680,8 @@
   }
 
   async function loadMoreLater() {
+    clearTimeout(later.retryTimer);
+    later.retryTimer = null;
     if (later.loading || (later.total !== null && later.rows.length >= later.total) || !snap || !snap.upNext.length) return;
     later.loading = true;
     const generation = later.generation;
@@ -689,8 +691,15 @@
       later.rows.push(...page.rows.filter((r) => !laterEls.has(r.id)));
       later.total = page.total;
       later.version = page.version;
+      later.failures = 0;
       renderLater();
-    } catch {} finally {
+    } catch {
+      // The hub didn't answer (restarting, say): try again later, not straight away, which
+      // asked it over and over as fast as each request failed. The socket coming back asks
+      // at once.
+      if (generation === later.generation) later.retryTimer = setTimeout(loadMoreLater, retryDelay(later.failures++));
+      return;
+    } finally {
       later.loading = false;
     }
     // Still near the end (a tall screen, or a short page): keep going.
@@ -779,27 +788,46 @@
     return text ? JSON.parse(text) : null;
   }
 
+  /** How long to wait before asking an unreachable hub again, after `failures` tries in a row:
+   * doubling from 0.5 s to at most 4 s, each somewhere in its upper half, so a room of phones
+   * that lost the hub together don't all ask again at the same moment. */
+  function retryDelay(failures) {
+    const delay = Math.min(500 * 2 ** failures, 4000);
+    return delay / 2 + Math.random() * (delay / 2);
+  }
+
   let socket = null;
   let retries = 0;
   let offlineTimer = null;
+  let reconnectTimer = null;
   function connect() {
     if (socket && socket.readyState <= 1) return;
+    // One way back at a time: a connect from elsewhere (the page shown again) replaces the
+    // waiting one rather than start a second chain of retries.
+    clearTimeout(reconnectTimer);
+    reconnectTimer = null;
     // With the Host Control key, the hub adds what only hosts see (an Apple TV's music access).
     const key = hostKey ? `?key=${encodeURIComponent(hostKey)}` : "";
-    socket = new WebSocket(`${location.protocol === "https:" ? "wss" : "ws"}://${location.host}/ws${key}`);
-    socket.onopen = () => {
+    const ws = new WebSocket(`${location.protocol === "https:" ? "wss" : "ws"}://${location.host}/ws${key}`);
+    socket = ws;
+    ws.onopen = () => {
       retries = 0;
       clearTimeout(offlineTimer);
       $("offline").hidden = true;
+      // The rest of Up next, if it couldn't load while the hub was away.
+      if (later.retryTimer) loadMoreLater();
     };
-    socket.onmessage = (event) => applySnapshot(JSON.parse(event.data));
-    socket.onclose = () => {
+    ws.onmessage = (event) => applySnapshot(JSON.parse(event.data));
+    ws.onclose = () => {
+      if (ws !== socket) return;
       clearTimeout(offlineTimer);
       offlineTimer = setTimeout(() => { $("offline").hidden = false; }, 1500);
-      setTimeout(connect, Math.min(1000 * 2 ** retries++, 8000));
+      clearTimeout(reconnectTimer);
+      reconnectTimer = setTimeout(connect, retryDelay(retries++));
     };
   }
   document.addEventListener("visibilitychange", () => { if (!document.hidden) connect(); });
+  addEventListener("online", connect);
 
   // MARK: Queue interactions
 

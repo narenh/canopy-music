@@ -28,6 +28,8 @@ import Testing
         let household = SonosHousehold(transport: sim, fixedHosts: ["10.0.0.1", "10.0.0.2", "10.0.0.3"])
         let controller = SonosOutputController(household: household, defaults: defaults)
         controller.service = service
+        // Each reading asked for here is taken (sharing them has a test of its own).
+        controller.readingFreshness = 0
         household.onRefresh = { [weak controller] in controller?.householdRefreshed() }
         household.start()
         for _ in 0..<200 where household.players.count < 3 || household.isRefreshing {
@@ -266,6 +268,56 @@ import Testing
         let group = sim.requests.filter { $0.action == "SetGroupVolume" }
         #expect(group.allSatisfy { $0.host == "10.0.0.1" })
         session.shutdown()
+    }
+
+    /// The Speakers panel and every host phone's Devices list ask for a reading every 2 s: one
+    /// asked for within `readingFreshness` of the last is shared, not read again.
+    @Test func readingsAreSharedBetweenTheListsAsking() async throws {
+        let controller = await makeController()
+        controller.readingFreshness = 1.5
+        // Past the readings `makeController` took.
+        let start = Date().addingTimeInterval(100)
+        func volumeReads() -> Int { sim.requests.filter { $0.action == "GetVolume" }.count }
+        let before = volumeReads()
+        await controller.readRooms(now: start)
+        let one = volumeReads() - before
+        #expect(one > 0)
+        await controller.readRooms(now: start + 0.5)
+        await controller.readRooms(now: start + 1.4)
+        #expect(volumeReads() - before == one)
+        // A list on its own, every 2 s, still reads every time.
+        await controller.readRooms(now: start + 2)
+        #expect(volumeReads() - before == 2 * one)
+    }
+
+    /// Other zones are asked which rooms they play on every 3 s while rooms are being picked
+    /// (setup), every 10 s otherwise.
+    @MainActor final class Tally {
+        var count = 0
+        var settingUp = false
+    }
+
+    @Test func otherZonesAreAskedLessOnceSetUp() async throws {
+        let asked = Tally()
+        let exchange = SonosClaimExchange(timeout: .seconds(1)) { _ in
+            await MainActor.run { asked.count += 1 }
+            return (try JSONEncoder().encode(ZoneCheck(hub: nil, spotify: nil)), 200)
+        }
+        let household = SonosHousehold(transport: sim, fixedHosts: ["10.0.0.1"])
+        let controller = SonosOutputController(household: household, defaults: nil, claimExchange: exchange)
+        controller.peers = { [ZoneListing(id: "Den", name: "Den", kind: .tv, address: "10.0.0.60")] }
+        controller.isSettingUp = { asked.settingUp }
+        let start = Date()
+        await controller.refreshClaims(now: start)
+        await controller.refreshClaims(now: start + 5)
+        #expect(asked.count == 1)
+        await controller.refreshClaims(now: start + 10)
+        #expect(asked.count == 2)
+        asked.settingUp = true
+        await controller.refreshClaims(now: start + 12)
+        #expect(asked.count == 2)
+        await controller.refreshClaims(now: start + 13)
+        #expect(asked.count == 3)
     }
 
     // MARK: Discovery

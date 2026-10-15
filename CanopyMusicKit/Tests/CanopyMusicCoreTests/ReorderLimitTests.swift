@@ -112,8 +112,8 @@ import Testing
     // MARK: On the hub
 
     /// A hub with a few guests' songs in Up Next, the limit on at `allowance` and never refilling.
-    func makeHub(allowance: Int = 2) async throws -> PartySession {
-        let session = PartySession(catalog: StubCatalog(ids: ["a", "b", "c", "d", "e"]), engine: FakeEngine())
+    func makeHub(allowance: Int = 2, storeURL: URL? = nil) async throws -> PartySession {
+        let session = PartySession(catalog: StubCatalog(ids: ["a", "b", "c", "d", "e"]), engine: FakeEngine(), storeURL: storeURL)
         try await session.load(playlist: base)
         try await session.play()
         for (id, owner) in [("x", "sam"), ("y", "alex"), ("z", "sam")] {
@@ -192,6 +192,26 @@ import Testing
         #expect(session.move(song, after: nil, asClient: "sam") == .moved)
         session.reorderLimit.isOn = true
         #expect(session.move(song, after: last(session), asClient: "sam") == .moved)
+    }
+
+    /// A hub relaunched mid-party (a crash, an update) keeps what guests had spent, as it keeps
+    /// the queue; ending the party forgets it.
+    @Test func whatsSpentSurvivesARelaunchAndEndClearsIt() async throws {
+        let url = FileManager.default.temporaryDirectory.appendingPathComponent("canopy-\(UUID()).json")
+        defer {
+            try? FileManager.default.removeItem(at: url)
+            try? FileManager.default.removeItem(at: url.deletingLastPathComponent().appending(path: url.deletingPathExtension().lastPathComponent + "-reorders.json"))
+        }
+        let first = try await makeHub(allowance: 2, storeURL: url)
+        #expect(first.move(try id("y", in: first), after: nil, asClient: "sam") == .moved)
+        // The queue's save is debounced.
+        try await Task.sleep(for: .milliseconds(800))
+
+        let restored = PartySession(catalog: StubCatalog(ids: []), engine: FakeEngine(), storeURL: url)
+        #expect(restored.reorderSpends["sam"]?.spent == 1)
+        restored.end()
+        let next = PartySession(catalog: StubCatalog(ids: []), engine: FakeEngine(), storeURL: url)
+        #expect(next.reorderSpends.isEmpty)
     }
 
     /// Guests' pages work out their balance from the snapshot; the setting rides along for the

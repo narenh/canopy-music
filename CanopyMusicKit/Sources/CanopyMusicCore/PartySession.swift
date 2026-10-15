@@ -342,6 +342,11 @@ public final class PartySession {
             state = restored
             // A zone coming back after a relaunch: its music had started.
             isUnderWay = restored.current != nil || !restored.history.isEmpty
+            // And what its guests had spent of their reorders.
+            if let data = try? Data(contentsOf: Self.spendsURL(beside: storeURL)),
+               let spends = try? JSONDecoder().decode([String: ReorderSpend].self, from: data) {
+                reorderSpends = spends
+            }
         } else {
             state = QueueState()
         }
@@ -1005,10 +1010,28 @@ public final class PartySession {
             if remote == nil { broadcast() }
         }
     }
-    /// Reorders each guest has spent, by client ID, while `reorderLimit` is on (hub only). Kept
-    /// for the party, not saved: a relaunched hub starts everyone full. The app hands them on to
-    /// a session it rebuilds mid-party.
-    public var reorderSpends: [String: ReorderSpend] = [:]
+    /// Reorders each guest has spent, by client ID, while `reorderLimit` is on (hub only). Saved
+    /// beside the queue, so a hub relaunched mid-party (a crash, an update) doesn't hand everyone
+    /// a full balance again. The app hands them on to a session it rebuilds mid-party.
+    public var reorderSpends: [String: ReorderSpend] = [:] {
+        didSet { if reorderSpends != oldValue { saveReorderSpends() } }
+    }
+
+    /// Where `reorderSpends` is saved: beside the queue's file.
+    private static func spendsURL(beside storeURL: URL) -> URL {
+        storeURL.deletingLastPathComponent().appending(path: storeURL.deletingPathExtension().lastPathComponent + "-reorders.json")
+    }
+
+    /// Small and written only when someone reorders, so at once rather than debounced as the queue is.
+    private func saveReorderSpends() {
+        guard let storeURL else { return }
+        let url = Self.spendsURL(beside: storeURL)
+        if reorderSpends.isEmpty {
+            try? FileManager.default.removeItem(at: url)
+        } else if let data = try? JSONEncoder().encode(reorderSpends) {
+            try? data.write(to: url, options: .atomic)
+        }
+    }
 
     // MARK: Snapshots
 

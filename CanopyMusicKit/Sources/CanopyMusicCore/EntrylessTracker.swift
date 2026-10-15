@@ -41,6 +41,9 @@ public struct EntrylessTracker: Equatable, Sendable {
     /// A song that halts on its own before playing this far, or that hasn't played this long
     /// after the player moved on to it, "stopped early".
     public static let earlyStopWindow: TimeInterval = 3
+    /// A halt mid-song at a time under this, after the song had played on, was a skip past it
+    /// from outside (the player then sits at, or near, the start).
+    public static let skippedPastTime: TimeInterval = 2
 
     /// The current song's length, if known. Unknown, its end can't be told from a scrub back.
     public private(set) var duration: TimeInterval?
@@ -129,6 +132,15 @@ public struct EntrylessTracker: Equatable, Sendable {
             atItsEnd = sawPlaying && time == 0
         }
         if atItsEnd {
+            guard !hasStaged, !reportedEnd else { return nil }
+            reportedEnd = true
+            return .ended
+        }
+        // Halted mid-song with its time back at the start: a skip from outside the app (the
+        // AirPlay or Control Center Next) ran the player past the one song it has. A pause, ours
+        // or one from outside, keeps its time.
+        if sawPlaying, furthest >= Self.earlyStopWindow, time < Self.skippedPastTime,
+           time < previous.time - Self.jumpBack {
             guard !hasStaged, !reportedEnd else { return nil }
             reportedEnd = true
             return .ended

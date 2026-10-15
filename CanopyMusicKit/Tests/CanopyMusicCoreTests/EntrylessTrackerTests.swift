@@ -183,6 +183,27 @@ import Testing
         #expect(engine.events == ["stopped early at 2.0"])
     }
 
+    /// Nothing staged (a library song on tvOS), and Next from AirPlay or Control Center: the
+    /// player runs past its one song and halts back at the start. That's the song's end.
+    @Test func aSkipFromOutsidePastTheOnlySongEndsIt() {
+        var engine = Engine(FakePlayer(lengths: [200]))
+        engine.run(for: 60)
+        engine.player.playing = false
+        engine.player.time = 0.4
+        engine.run(for: 3)
+        #expect(engine.events == ["ended at 61.0"])
+    }
+
+    /// The same halt back at the start, before the song got going, is a failed start.
+    @Test func aHaltBackAtTheStartRightAwayIsAFailedStart() {
+        var engine = Engine(FakePlayer(lengths: [200]))
+        engine.run(for: 2)
+        engine.player.playing = false
+        engine.player.time = 0
+        engine.run(for: 3)
+        #expect(engine.events == ["stopped early at 3.0"])
+    }
+
     @Test func aPauseMidSongIsNothing() {
         var engine = Engine(FakePlayer(lengths: [200, 100]))
         engine.run(for: 60)

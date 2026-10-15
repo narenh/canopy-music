@@ -17,24 +17,37 @@ struct TVMotionArtworkView: View {
     var isPlaying: Bool
     var cornerRadius: CGFloat
 
+    /// The video found for the song, until it can start (not in Low Power Mode).
+    @State private var found: URL?
     @State private var url: URL?
     @State private var isShowing = false
+    /// The artwork's side, for the most video worth streaming.
+    @State private var side: CGFloat = 0
     @Environment(\.scenePhase) private var scenePhase
+    @Environment(\.screenCovered) private var screenCovered
+    @Environment(\.displayScale) private var displayScale
 
     var body: some View {
         ZStack {
+            // The artwork's size before there's a video, for `side`.
+            Color.clear
             if let url {
-                TVLoopingVideo(url: url, isActive: scenePhase != .background, isPlaying: isPlaying) {
+                TVLoopingVideo(
+                    url: url, pixels: side * displayScale,
+                    isActive: scenePhase != .background && !screenCovered && !LowPowerMode.shared.isOn, isPlaying: isPlaying
+                ) {
                     withAnimation(.easeIn(duration: 0.8)) { isShowing = true }
                 }
                 .id(url)
                 .opacity(isShowing ? 1 : 0)
             }
         }
+        .onGeometryChange(for: CGFloat.self, of: { max($0.size.width, $0.size.height) }) { side = $0 }
         .clipShape(RoundedRectangle(cornerRadius: cornerRadius, style: .continuous))
         .allowsHitTesting(false)
         .accessibilityHidden(true)
         .task(id: track?.id) {
+            found = nil
             url = nil
             isShowing = false
             guard MotionArtwork.isEnabled, let track else { return }
@@ -43,16 +56,34 @@ struct TVMotionArtworkView: View {
             // simulator (which can't reach Apple Music) or with any service.
             let args = ProcessInfo.processInfo.arguments
             if let i = args.firstIndex(of: "-motionArtworkTestURL"), i + 1 < args.count {
-                url = URL(string: args[i + 1])
+                found = URL(string: args[i + 1])
+                startIfReady()
                 return
             }
             #endif
             // Nil for Spotify and demo hubs. A display TV has its own (service only, Apple Music songs).
             guard let lookup = catalog.motionArtwork else { return }
-            let found = await lookup.videoURL(for: track)
+            let video = await lookup.videoURL(for: track)
             guard !Task.isCancelled else { return }
-            url = found
+            found = video
+            startIfReady()
         }
+        // Low Power Mode: the video fades out to the still art and goes; it comes back without.
+        .onChange(of: LowPowerMode.shared.isOn) { _, lowPower in
+            guard lowPower else {
+                // Back before it had gone: it fades back in.
+                if url != nil { withAnimation(.easeIn(duration: 0.8)) { isShowing = true } }
+                startIfReady()
+                return
+            }
+            withAnimation(.easeOut(duration: 0.8)) { isShowing = false } completion: {
+                if LowPowerMode.shared.isOn { url = nil }
+            }
+        }
+    }
+
+    private func startIfReady() {
+        if !LowPowerMode.shared.isOn, url == nil { url = found }
     }
 }
 
@@ -61,6 +92,8 @@ struct TVMotionArtworkView: View {
 /// own setting does that), and pauses while `isActive` is false.
 private struct TVLoopingVideo: UIViewRepresentable {
     let url: URL
+    /// The artwork's side in pixels: the most video worth streaming.
+    let pixels: CGFloat
     let isActive: Bool
     let isPlaying: Bool
     /// Called once, when the first frame is ready to show.
@@ -68,12 +101,13 @@ private struct TVLoopingVideo: UIViewRepresentable {
 
     func makeUIView(context: Context) -> TVLoopingVideoView {
         let view = TVLoopingVideoView()
-        view.start(url: url, onReady: onReady)
+        view.start(url: url, pixels: pixels, onReady: onReady)
         view.setActive(isActive, playing: isPlaying, animated: false)
         return view
     }
 
     func updateUIView(_ view: TVLoopingVideoView, context: Context) {
+        view.setMaximumResolution(pixels)
         view.setActive(isActive, playing: isPlaying, animated: true)
     }
 
@@ -95,13 +129,15 @@ private final class TVLoopingVideoView: UIView {
     /// Whether we want it playing (`setActive`), for the debug log.
     private var wantsToPlay = false
 
-    func start(url: URL, onReady: @escaping @MainActor () -> Void) {
+    func start(url: URL, pixels: CGFloat, onReady: @escaping @MainActor () -> Void) {
         self.onReady = onReady
         backgroundColor = .clear
         isUserInteractionEnabled = false
         let item = AVPlayerItem(url: url)
-        // The artwork is at most 600 pt (1200 px on a 4K TV); don't stream a 4K variant for it.
-        item.preferredMaximumResolution = CGSize(width: 1200, height: 1200)
+        // No bigger a variant than the artwork is drawn (`setMaximumResolution`).
+        maximumPixels = Self.maximum(pixels)
+        item.preferredMaximumResolution = CGSize(width: maximumPixels, height: maximumPixels)
+        motionLog("start, at most \(Int(maximumPixels)) px")
         let player = AVQueuePlayer()
         player.isMuted = true
         player.allowsExternalPlayback = false
@@ -128,7 +164,25 @@ private final class TVLoopingVideoView: UIView {
         }
     }
 
-    /// `active` false (the app's in the background) stops it at once. Otherwise it follows the
+    /// The video variant streamed is no bigger than the artwork's side in pixels (side × scale).
+    private var maximumPixels: CGFloat = 0
+
+    /// Before the artwork is laid out: its biggest, 600 pt at 2× on a 4K TV.
+    private static func maximum(_ pixels: CGFloat) -> CGFloat {
+        pixels > 0 ? pixels.rounded(.up) : 1200
+    }
+
+    /// A new size: later variants follow it.
+    func setMaximumResolution(_ pixels: CGFloat) {
+        let maximum = Self.maximum(pixels)
+        guard maximum != maximumPixels else { return }
+        maximumPixels = maximum
+        for item in looper?.loopingPlayerItems ?? [] {
+            item.preferredMaximumResolution = CGSize(width: maximum, height: maximum)
+        }
+    }
+
+    /// `active` false (the app's in the background, or the video can't be seen) stops it at once. Otherwise it follows the
     /// music: `animated`, the rate eases down to a stop or back up to normal speed over
     /// `rampDuration`, as Apple Music's motion artwork does; a stream that can't play slower than
     /// normal just pauses and plays.

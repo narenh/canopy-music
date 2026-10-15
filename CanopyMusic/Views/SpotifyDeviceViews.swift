@@ -100,9 +100,10 @@ struct SpotifyDeviceButton: View {
         .accessibilityValue(model.spotifyDeviceName.map { unavailable ? "\($0), not available" : $0 } ?? "Not chosen")
         // Spotify Connect devices only: the music moves to Sonos from the start screen.
         .outputPicker(includesSonos: false)
+        // Read again when it may have changed, else once a minute (`refreshSpotifyDevicesIfNeeded`).
         .task {
             while !Task.isCancelled {
-                await model.refreshSpotifyDevices()
+                await model.refreshSpotifyDevicesIfNeeded()
                 try? await Task.sleep(for: .seconds(10))
             }
         }

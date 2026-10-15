@@ -462,6 +462,55 @@ let base = PlaylistSummary(id: "p", name: "Base", kind: .library)
         let next = try #require(await snapshots.next())
         #expect(abs(next.playback.position - 95) < 0.01)
     }
+
+    /// The drift check runs only while someone listens, and starts again with the next listener.
+    @Test func driftCheckStopsWithTheLastListener() async throws {
+        let session = PartySession(catalog: StubCatalog(ids: ["a", "b"]), engine: FakeEngine())
+        #expect(!session.isCheckingDrift)
+        let stream = session.snapshots()
+        let reader = Task { for await _ in stream {} }
+        await settle()
+        #expect(session.isCheckingDrift)
+        reader.cancel()
+        let deadline = Date().addingTimeInterval(3)
+        while session.isCheckingDrift, Date() < deadline { try? await Task.sleep(for: .milliseconds(10)) }
+        #expect(!session.isCheckingDrift)
+        let again = session.snapshots()
+        let second = Task { for await _ in again {} }
+        defer { second.cancel() }
+        #expect(session.isCheckingDrift)
+    }
+
+    /// A change that changes nothing (adding the song playing, removing what isn't there) sends
+    /// nothing; the next real change is sent as ever.
+    @Test func aChangeThatChangesNothingIsntSent() async throws {
+        let session = PartySession(catalog: StubCatalog(ids: ["a", "b"]), engine: FakeEngine())
+        try await session.load(playlist: base)
+        try await session.play()
+        // Paused, so the drift check has nothing to resend while this runs.
+        session.pause()
+        await settle()
+        let received = SnapshotRecorder()
+        let stream = session.snapshots()
+        let reader = Task { for await snapshot in stream { received.snapshots.append(snapshot) } }
+        defer { reader.cancel() }
+        await settle()
+        #expect(received.snapshots.count == 1)
+        let current = try #require(session.state.current)
+        #expect(session.add(current.track, by: guest) == .nowPlaying)
+        #expect(!session.remove(UUID()))
+        await settle()
+        #expect(received.snapshots.count == 1)
+        session.add(track("x"), by: guest)
+        await settle()
+        #expect(received.snapshots.count == 2)
+        #expect(received.snapshots.last?.upNext.first?.track.id == "x")
+    }
+}
+
+@MainActor
+final class SnapshotRecorder {
+    var snapshots: [PartySnapshot] = []
 }
 
 @MainActor

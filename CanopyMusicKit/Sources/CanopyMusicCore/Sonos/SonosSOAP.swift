@@ -176,8 +176,9 @@ public struct SonosClient: Sendable {
 
     // MARK: Read-only
 
-    public func positionInfo() async throws -> SonosPositionInfo {
-        SonosParse.positionInfo(try await call(.avTransport, "GetPositionInfo", [Self.instance]))
+    /// `withItem` false: no track metadata unless it's needed for the length (`SonosParse.positionInfo`).
+    public func positionInfo(withItem: Bool = true) async throws -> SonosPositionInfo {
+        SonosParse.positionInfo(try await call(.avTransport, "GetPositionInfo", [Self.instance]), withItem: withItem)
     }
 
     public func transportState() async throws -> SonosTransportState? {

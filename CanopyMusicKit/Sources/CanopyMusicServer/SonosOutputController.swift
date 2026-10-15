@@ -114,6 +114,12 @@ public final class SonosOutputController {
     @ObservationIgnored private let defaults: UserDefaults?
     /// A host's phone asked for a reading while one was under way: it's skipped.
     @ObservationIgnored private var isReading = false
+    /// When the last reading started (`readRooms`).
+    @ObservationIgnored private var lastReadAt: Date?
+    /// A reading this recent is shared rather than taken again: the iPad's Speakers panel and
+    /// every host phone's Devices list each ask every 2 s, and each reading asks every room and
+    /// every other hub. Short enough that one list on its own still reads every time it asks.
+    @ObservationIgnored var readingFreshness: TimeInterval = 1.5
     /// Other hubs to ask for accounts (`GET /api/sonos/accounts`): the zones on the network
     /// other than this device's own. Set by the app.
     @ObservationIgnored public var peers: @MainActor () -> [ZoneListing] = { [] }
@@ -139,8 +145,10 @@ public final class SonosOutputController {
     public static let assumedSerial = 1
     static let askInterval: TimeInterval = 60
     /// Other zones are asked which rooms they play on at most this often (the lists read the
-    /// rooms every 2–4 s).
+    /// rooms every 2–4 s) while rooms are being picked (`isSettingUp`); less often otherwise
+    /// (the party's own Speakers), where another zone taking a room is rare.
     static let claimInterval: TimeInterval = 3
+    static let idleClaimInterval: TimeInterval = 10
     static let claimLifetime: TimeInterval = 15
 
     /// `defaults`: where the rooms and accounts are kept (nil keeps nothing, for a simulated household).
@@ -481,10 +489,13 @@ public final class SonosOutputController {
     }
 
     /// Reads volumes, groups and what each room is playing (while a speaker list shows). One at a
-    /// time: a reading asked for while one is under way is skipped.
-    public func readRooms() async {
+    /// time: a reading asked for while one is under way, or within `readingFreshness` of the last
+    /// one, is skipped (all the lists showing share the readings).
+    public func readRooms(now: Date = Date()) async {
         // What's known now still goes out (the music may have started since the last reading).
         guard !isReading else { return changed() }
+        if let lastReadAt, now.timeIntervalSince(lastReadAt) < readingFreshness { return changed() }
+        lastReadAt = now
         isReading = true
         defer { isReading = false }
         // Which rooms other zones play on, asked while the rooms are read.
@@ -591,11 +602,13 @@ public final class SonosOutputController {
     }
 
     /// Asks the other zones (`peers`) which rooms they play on (`GET /api/zone`), at most every
-    /// `claimInterval`, all at once, each within the exchange's timeout. A zone that misses an
-    /// answer keeps its last claim for `claimLifetime`; a zone no longer listed loses it.
+    /// `claimInterval` (`idleClaimInterval` once the zone is set up), all at once, each within
+    /// the exchange's timeout. A zone that misses an answer keeps its last claim for
+    /// `claimLifetime`; a zone no longer listed loses it.
     func refreshClaims(now: Date = Date()) async {
         guard !isAskingClaims else { return }
-        if let lastClaimsAsked, now.timeIntervalSince(lastClaimsAsked) < Self.claimInterval { return }
+        let interval = isSettingUp() ? Self.claimInterval : Self.idleClaimInterval
+        if let lastClaimsAsked, now.timeIntervalSince(lastClaimsAsked) < interval { return }
         lastClaimsAsked = now
         let zones = peers()
         let listed = Set(zones.map(\.address))

@@ -9,20 +9,33 @@ struct TakeoverView: View {
     let session: PartySession
     /// Bigger words on a TV, read from across the room.
     var scale: CGFloat = 1
+    /// Told when it comes on screen and goes, so what's under it can stop (`screenCovered`).
+    var onShowingChange: (Bool) -> Void = { _ in }
     let onDismiss: () -> Void
+
+    /// On screen: while lyrics are being sung, not during the intro or outro (`watch`).
+    @State private var showing = false
+    /// Frames are drawn while it shows and for its fade out.
+    @State private var drawing = false
+    /// The beat's clock, which stands still while the music's paused: when it paused, and how
+    /// long it has stood still before.
+    @State private var beatPausedAt: Date?
+    @State private var beatPaused: TimeInterval = 0
 
     var body: some View {
         let flood = Color(rgb: Self.floodColor(for: track))
         let window = Self.lyricWindow(lines)
-        TimelineView(.animation) { context in
+        // Every frame, but only while it's on screen and the music plays.
+        TimelineView(.animation(paused: !drawing || !session.isPlaying)) { context in
             let time = session.position
             // Only on screen while lyrics are being sung, not during the intro or outro.
-            let active = window.contains(time)
+            let active = showing
             let (line, progress) = currentLine(at: time)
             let words = line?.text.split(separator: " ").map(String.init) ?? []
             // Finish revealing a bit before the next line so the full line gets a moment on screen.
             let revealed = min(words.count, Int((progress / 0.75) * Double(words.count)) + 1)
-            let beat = (sin(context.date.timeIntervalSinceReferenceDate * .pi * 2 / 0.95) + 1) / 2
+            let beatTime = (beatPausedAt ?? context.date).timeIntervalSinceReferenceDate - beatPaused
+            let beat = (sin(beatTime * .pi * 2 / 0.95) + 1) / 2
 
             ZStack {
                 flood
@@ -45,6 +58,39 @@ struct TakeoverView: View {
             .accessibilityAction(named: "Close lyrics", onDismiss)
         }
         .ignoresSafeArea()
+        .task(id: session.isPlaying) { await watch(window) }
+        .task(id: showing) {
+            // Drawn on through the fade out, so the last line leaves as it did.
+            if showing { drawing = true; return }
+            try? await Task.sleep(for: .seconds(0.7))
+            if !Task.isCancelled { drawing = false }
+        }
+        .onChange(of: showing, initial: true) { onShowingChange(showing) }
+        .onDisappear { onShowingChange(false) }
+        .onChange(of: session.isPlaying, initial: true) { _, playing in
+            if playing, let pausedAt = beatPausedAt {
+                beatPaused += Date().timeIntervalSince(pausedAt)
+                beatPausedAt = nil
+            } else if !playing, beatPausedAt == nil {
+                beatPausedAt = Date()
+            }
+        }
+    }
+
+    /// Keeps `showing` up to date without drawing frames: right at the moment the lyrics start or
+    /// end, and a few times a second in between (twice while paused) to catch seeks.
+    private func watch(_ window: Range<TimeInterval>) async {
+        while !Task.isCancelled {
+            let time = session.position
+            let now = window.contains(time)
+            if now != showing { showing = now }
+            var wait: TimeInterval = 0.5
+            if session.isPlaying {
+                let edge = time < window.lowerBound ? window.lowerBound : time < window.upperBound ? window.upperBound : .infinity
+                wait = min(0.25, max(edge - time, 0.01))
+            }
+            try? await Task.sleep(for: .seconds(wait))
+        }
     }
 
     /// Whether the takeover is on screen at `time` (it hides for the intro and outro).

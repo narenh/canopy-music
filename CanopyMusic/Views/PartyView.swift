@@ -69,7 +69,8 @@ struct PartyView: View {
                 .frame(maxWidth: .infinity)
             }
         }
-        .background { ThemedBackground(track: shown?.track, theme: theme) }
+        // The art drifts while the music plays; paused, it stands still where it is.
+        .background { ThemedBackground(track: shown?.track, theme: theme, moves: session.isPlaying) }
         .overlay { FlightLayer(flights: flights, destinations: rowFrames, fallback: fallbackDestination) }
         .environment(\.artworkTheme, theme)
         // The song's colours change with the background, over the same 2 s.
@@ -119,7 +120,7 @@ struct PartyView: View {
             .padding(.bottom, 12)
 
             ZStack {
-                NowPlayingView(session: session, slider: slider)
+                NowPlayingView(session: session, slider: slider, isHidden: searchActive)
                     .opacity(searchActive ? 0 : 1)
                     .scaleEffect(searchActive ? 0.96 : 1)
                 if searchActive {
@@ -415,6 +416,8 @@ struct NowPlayingView: View {
     /// The song change: the art, text and progress slide to the next song's, as on the Apple TV;
     /// the controls below stay where they are. `PartyView`'s, so the background goes with it.
     let slider: SongSlider
+    /// The search results are over it: its video pauses.
+    var isHidden = false
     @Environment(AppModel.self) private var model
     @Environment(\.displayScale) private var displayScale
 
@@ -483,7 +486,7 @@ struct NowPlayingView: View {
                 .overlay {
                     MotionArtworkView(
                         track: item?.track, catalog: session.catalog, isPlaying: session.isPlaying && live,
-                        waits: !live || slider.isSliding, cornerRadius: 18
+                        waits: !live || slider.isSliding, cornerRadius: 18, isHidden: isHidden
                     )
                 }
                 .frame(width: side, height: side)
@@ -492,8 +495,11 @@ struct NowPlayingView: View {
                 HStack(alignment: .firstTextBaseline, spacing: 12) {
                     if item != nil {
                         EqualizerBars(isAnimating: session.isPlaying)
-                            .foregroundStyle(.white)
                             .frame(width: 24, height: 24)
+                            // On the title's baseline, as a SwiftUI shape would be (a UIKit
+                            // view's baseline isn't its bottom).
+                            .alignmentGuide(.firstTextBaseline) { $0[.bottom] }
+                            .accessibilityHidden(true)
                     }
                     Text(item?.track.title ?? "Nothing playing yet")
                         .font(.system(size: 36, weight: .bold))
@@ -685,28 +691,75 @@ private struct TransportControls: View {
     }
 }
 
-/// Four bars bouncing at different rates; they settle low when paused.
-struct EqualizerBars: View {
+/// Four white bars bouncing at different rates; they settle low when paused. Core Animation
+/// bounces them (`EqualizerBarsView`), so they take no main-thread time while they do.
+struct EqualizerBars: UIViewRepresentable {
     let isAnimating: Bool
-    private let speeds: [Double] = [5.1, 7.3, 4.2, 6.4]
-    private let phases: [Double] = [0, 1.7, 3.1, 0.8]
 
-    var body: some View {
-        TimelineView(.animation(paused: !isAnimating)) { context in
-            let t = context.date.timeIntervalSinceReferenceDate
-            GeometryReader { geo in
-                HStack(alignment: .bottom, spacing: geo.size.width * 0.12) {
-                    ForEach(speeds.indices, id: \.self) { i in
-                        let wave = (sin(t * speeds[i] + phases[i]) + 1) / 2
-                        let level = isAnimating ? 0.25 + 0.75 * wave : 0.25
-                        Capsule()
-                            .frame(height: max(2, geo.size.height * level))
-                    }
-                }
-                .frame(width: geo.size.width, height: geo.size.height, alignment: .bottom)
-            }
+    func makeUIView(context: Context) -> EqualizerBarsView { EqualizerBarsView() }
+
+    func updateUIView(_ view: EqualizerBarsView, context: Context) {
+        view.isAnimating = isAnimating
+    }
+}
+
+final class EqualizerBarsView: UIView {
+    /// Each bar follows a sine wave: radians a second, and where it starts.
+    private static let speeds: [Double] = [5.1, 7.3, 4.2, 6.4]
+    private static let phases: [Double] = [0, 1.7, 3.1, 0.8]
+    private let bars = speeds.map { _ in CALayer() }
+    private var laidOut: (size: CGSize, animating: Bool)?
+
+    var isAnimating = false {
+        didSet { if isAnimating != oldValue { setNeedsLayout() } }
+    }
+
+    override init(frame: CGRect) {
+        super.init(frame: frame)
+        isUserInteractionEnabled = false
+        isAccessibilityElement = false
+        for bar in bars {
+            bar.backgroundColor = UIColor.white.cgColor
+            bar.anchorPoint = CGPoint(x: 0.5, y: 1)
+            layer.addSublayer(bar)
         }
-        .accessibilityHidden(true)
+    }
+
+    required init?(coder: NSCoder) { fatalError("init(coder:) is not used") }
+
+    override func layoutSubviews() {
+        super.layoutSubviews()
+        let size = bounds.size
+        guard laidOut?.size != size || laidOut?.animating != isAnimating else { return }
+        laidOut = (size, isAnimating)
+        let spacing = size.width * 0.12
+        let width = (size.width - spacing * 3) / 4
+        let low = max(2, size.height * 0.25)
+        CATransaction.begin()
+        CATransaction.setDisableActions(true)
+        for (i, bar) in bars.enumerated() {
+            bar.removeAllAnimations()
+            bar.cornerRadius = width / 2
+            bar.position = CGPoint(x: (width + spacing) * CGFloat(i) + width / 2, y: size.height)
+            bar.bounds = CGRect(x: 0, y: 0, width: width, height: low)
+            guard isAnimating, size.height > low else { continue }
+            // From the wave's trough to its crest and back: a quarter to all of the height.
+            let speed = Self.speeds[i]
+            let bounce = CABasicAnimation(keyPath: "bounds.size.height")
+            bounce.fromValue = low
+            bounce.toValue = size.height
+            bounce.duration = .pi / speed
+            bounce.autoreverses = true
+            bounce.repeatCount = .infinity
+            // A sine wave's half from trough to crest (ease in and out, sine).
+            bounce.timingFunction = CAMediaTimingFunction(controlPoints: 0.37, 0, 0.63, 1)
+            // Where the wave is at its phase: the time since its trough (at -π/2).
+            bounce.timeOffset = (Self.phases[i] + .pi / 2).truncatingRemainder(dividingBy: 2 * .pi) / speed
+            bounce.isRemovedOnCompletion = false
+            bounce.preferredFrameRateRange = CAFrameRateRange(minimum: 20, maximum: 30, preferred: 30)
+            bar.add(bounce, forKey: "bounce")
+        }
+        CATransaction.commit()
     }
 }
 
@@ -724,9 +777,9 @@ private struct ProgressBar: View {
     @State private var isScrubbing = false
 
     var body: some View {
-        // Every frame while playing so the bar grows smoothly (a seek just jumps); twice a second
-        // while paused, to catch seeks.
-        TimelineView(.animation(minimumInterval: session.isPlaying ? nil : 0.5)) { _ in
+        // Four times a second while playing, for the time labels and to catch seeks; the fill
+        // moves smoothly in between by itself (`ProgressFill`). Twice a second while paused.
+        TimelineView(.periodic(from: .now, by: session.isPlaying ? 0.25 : 0.5)) { _ in
             let total = max(duration ?? 0, 1)
             let live = itemID == session.nowPlaying?.id
             let elapsed = scrub.map { $0 * total } ?? held.show(live ? session.position : nil)
@@ -735,12 +788,13 @@ private struct ProgressBar: View {
             // there's none, and from the first moment past it a dot, which grows. At once, not
             // with the scrubbing's spring.
             let started = duration != nil && elapsed > 0
+            // Runs on by itself only while the song shown is playing and no finger holds it.
+            let moving = scrub == nil && live && session.isPlaying ? duration : nil
             VStack(spacing: 6) {
                 GeometryReader { geo in
                     ZStack(alignment: .leading) {
                         Capsule().fill(.white.opacity(0.18))
-                        Capsule().fill(.white)
-                            .frame(width: max(geo.size.width * min(elapsed / total, 1), thickness))
+                        ProgressFill(fraction: min(elapsed / total, 1), duration: moving)
                             .opacity(started ? 1 : 0)
                             .animation(nil, value: started)
                     }

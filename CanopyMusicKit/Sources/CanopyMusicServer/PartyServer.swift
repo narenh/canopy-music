@@ -13,6 +13,7 @@ public final class PartyServer: Sendable {
     private let session: PartySession
     private let server: HTTPServer
     private let libraryArtwork = LibraryArtworkRelay()
+    private let snapshotEncoder = SnapshotEncoder()
 
     public init(session: PartySession, port: UInt16 = 8080) {
         self.session = session
@@ -474,9 +475,10 @@ public final class PartyServer: Sendable {
 
         // Displays (`/ws?display=1`) also get the guest Wi‑Fi, to show its QR code; phones don't.
         // Hosts' pages (`/ws?key=<Host Control key>`) also get what only hosts see.
-        await server.appendRoute("GET /ws?display=1", to: .webSocket(SnapshotSocket(session: session, includesWifi: true)))
+        let encoder = snapshotEncoder
+        await server.appendRoute("GET /ws?display=1", to: .webSocket(SnapshotSocket(session: session, includesWifi: true, encoder: encoder)))
         await server.appendRoute("GET /ws") { request in
-            try await WebSocketHTTPHandler.webSocket(SnapshotSocket(session: session, hostKey: request.query["key"])).handleRequest(request)
+            try await WebSocketHTTPHandler.webSocket(SnapshotSocket(session: session, hostKey: request.query["key"], encoder: encoder)).handleRequest(request)
         }
 
         #if DEBUG
@@ -798,13 +800,25 @@ struct SnapshotSocket: WSMessageHandler {
     var includesWifi = false
     /// The Host Control key the page connected with, if any.
     var hostKey: String?
+    /// Shared by the server's sockets, so each snapshot is encoded once per kind of page.
+    var encoder: SnapshotEncoder
+
+    /// Pages that connected the same way get the same snapshots: guests', displays', and hosts'
+    /// with the same key.
+    var kind: String { hostKey.map { "host:\($0)" } ?? (includesWifi ? "display" : "guest") }
 
     func makeMessages(for client: AsyncStream<WSMessage>) async throws -> AsyncStream<WSMessage> {
         let snapshots = await session.snapshots(includingWifi: includesWifi, hostKey: hostKey)
+        let kind = kind, encoder = encoder
         return AsyncStream { continuation in
             let pump = Task {
+                var last: PartySnapshot?
                 for await snapshot in snapshots {
-                    if let data = try? JSONEncoder.api.encode(snapshot), let text = String(data: data, encoding: .utf8) {
+                    // Nothing this page would show differently (a change only hosts see, on a
+                    // guest's page; the same snapshot again): not sent.
+                    if let last, snapshot.showsTheSame(as: last) { continue }
+                    last = snapshot
+                    if let text = encoder.text(for: snapshot, kind: kind) {
                         continuation.yield(.text(text))
                     }
                 }
@@ -821,6 +835,42 @@ struct SnapshotSocket: WSMessageHandler {
                 drain.cancel()
             }
         }
+    }
+}
+
+/// Encodes snapshots for the sockets: a snapshot sent to every page of a kind (each guest's
+/// gets the same one) is encoded once, not once per page, by one encoder.
+final class SnapshotEncoder: @unchecked Sendable {
+    private let lock = NSLock()
+    private let encoder = JSONEncoder.api
+    private var latest: [String: (snapshot: PartySnapshot, text: String)] = [:]
+    /// How many snapshots it has encoded (tests).
+    private(set) var encodes = 0
+
+    func text(for snapshot: PartySnapshot, kind: String) -> String? {
+        lock.lock()
+        defer { lock.unlock() }
+        if let cached = latest[kind], cached.snapshot == snapshot { return cached.text }
+        guard let data = try? encoder.encode(snapshot), let text = String(data: data, encoding: .utf8) else { return nil }
+        encodes += 1
+        // One per kind; host keys change rarely, but old ones aren't kept for ever.
+        if latest.count > 16 { latest = [:] }
+        latest[kind] = (snapshot, text)
+        return text
+    }
+}
+
+extension PartySnapshot {
+    /// Whether a page holding `previous` would show the same from this one: everything equal,
+    /// and the playback time where `previous` already puts it now (to within `tolerance`; the
+    /// drift check resends once it's a second out).
+    func showsTheSame(as previous: PartySnapshot, tolerance: TimeInterval = 0.25) -> Bool {
+        guard playback.isPlaying == previous.playback.isPlaying else { return false }
+        var same = self
+        same.playback = previous.playback
+        guard same == previous else { return false }
+        let elapsed = playback.isPlaying ? playback.capturedAt.timeIntervalSince(previous.playback.capturedAt) : 0
+        return abs(previous.playback.position + elapsed - playback.position) <= tolerance
     }
 }
 
@@ -848,20 +898,21 @@ extension HTTPResponse {
     }
 }
 
+// Made once, not per use (both are Sendable, and nothing changes their settings).
 extension JSONEncoder {
-    static var api: JSONEncoder {
+    static let api: JSONEncoder = {
         let encoder = JSONEncoder()
         encoder.dateEncodingStrategy = .millisecondsSince1970
         return encoder
-    }
+    }()
 }
 
 extension JSONDecoder {
-    static var api: JSONDecoder {
+    static let api: JSONDecoder = {
         let decoder = JSONDecoder()
         decoder.dateDecodingStrategy = .millisecondsSince1970
         return decoder
-    }
+    }()
 }
 
 extension String {

@@ -23,6 +23,8 @@ struct ArtworkBackground: View {
     /// The TV shows the song's colours as a gradient until its art is ready, or when it has none;
     /// the iPad shows only the base colour then.
     var colorsUntilLoaded = false
+    /// Whether the art drifts: while the music plays and the background can be seen.
+    var moves = true
 
     var body: some View {
         ZStack {
@@ -30,7 +32,7 @@ struct ArtworkBackground: View {
             // while it drifts (one drift for every song, so a change doesn't jolt it), and the
             // shade cross-fades over that, still.
             Rectangle().fill(theme.base)
-            ArtworkDrift {
+            ArtworkDrift(moves: moves) {
                 BlurredArtworkLayer(track: track, url: artworkURL, source: source, colorsUntilLoaded: colorsUntilLoaded)
                     .opacity(0.5)
                     .id(track?.id)
@@ -138,11 +140,16 @@ enum BlurredArtwork {
 
 /// The background art's slow drift (`BackgroundDrift` has the maths): `content` is laid out as a
 /// square as big as the window's longer side, centred, and moved, turned and scaled so no edge
-/// of it ever shows, in any window shape. It keeps going while paused and through song changes;
-/// Reduce Motion stops it (the art then rests at 1.3×, centred).
+/// of it ever shows, in any window shape. It keeps going through song changes, and stands still
+/// where it is while `moves` is false (the music paused, or hidden) or in Low Power Mode, carrying
+/// on from there (`DriftClock`); Reduce Motion stops it (the art then rests at 1.3×, centred).
 struct ArtworkDrift<Content: View>: View {
+    var moves = true
     @ViewBuilder let content: Content
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @Environment(\.screenCovered) private var screenCovered
+    /// This drift, to `DriftClock`.
+    @State private var id = UUID()
 
     /// How far it drifts: 1 normally. Debug builds: `-driftStrength <multiplier>` (0 is off).
     static var strength: Double {
@@ -178,14 +185,15 @@ struct ArtworkDrift<Content: View>: View {
 
     var body: some View {
         let strength = reduceMotion ? 0 : Self.strength
+        let runs = moves && !screenCovered && !LowPowerMode.shared.isOn && strength > 0
         GeometryReader { geo in
             let (width, height) = (Double(geo.size.width), Double(geo.size.height))
             let side = BackgroundDrift.artSide(width: width, height: height)
             // 30 frames a second on the TV (mains powered); 12 on the iPad, where redrawing the
             // full-screen art every frame costs battery and the motion is slow enough not to show it.
-            TimelineView(.animation(minimumInterval: Self.frameInterval, paused: strength == 0)) { timeline in
+            TimelineView(.animation(minimumInterval: Self.frameInterval, paused: !runs)) { timeline in
                 let pose = BackgroundDrift.pose(
-                    at: timeline.date.timeIntervalSinceReferenceDate * Self.speed,
+                    at: DriftClock.shared.time(at: timeline.date) * Self.speed,
                     strength: strength, width: width, height: height
                 )
                 content
@@ -197,6 +205,42 @@ struct ArtworkDrift<Content: View>: View {
             }
         }
         .clipped()
+        .onAppear { DriftClock.shared.set(id, running: runs) }
+        .onChange(of: runs) { DriftClock.shared.set(id, running: runs) }
+        .onDisappear { DriftClock.shared.set(id, running: false) }
+    }
+}
+
+extension EnvironmentValues {
+    /// Something opaque covers the whole party screen (the lyrics takeover): what's under it (the
+    /// background's drift, the animated art) stops until it goes. Not the sheets: on the TV and
+    /// the iPad alike they float over the party screen, which shows around and through them.
+    @Entry var screenCovered = false
+}
+
+/// The drift's time (`ArtworkDrift`): real time, except that it stands still while no drift
+/// moves, so a drift that stopped carries on from where it was instead of jumping ahead. One for
+/// the app, so a screen coming in (host mode, the party screen) picks up the same pose.
+@MainActor final class DriftClock {
+    static let shared = DriftClock()
+    /// The time when it last stopped (or started), and since when it has run (nil: stopped).
+    private var base = Date().timeIntervalSinceReferenceDate
+    private var runningSince: Date?
+    /// The drifts that are moving.
+    private var running: Set<UUID> = []
+
+    func time(at date: Date) -> TimeInterval {
+        guard let runningSince else { return base }
+        return base + max(0, date.timeIntervalSince(runningSince))
+    }
+
+    func set(_ drift: UUID, running isRunning: Bool) {
+        let wasRunning = !running.isEmpty
+        if isRunning { running.insert(drift) } else { running.remove(drift) }
+        guard running.isEmpty == wasRunning else { return }
+        let now = Date()
+        base = time(at: now)
+        runningSince = running.isEmpty ? nil : now
     }
 }
 

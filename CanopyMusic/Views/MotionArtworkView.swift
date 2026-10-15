@@ -16,6 +16,8 @@ struct MotionArtworkView: View {
     /// (`NowPlayingView`), so only one player runs. One that's showing stays (paused, as it leaves).
     var waits = false
     var cornerRadius: CGFloat
+    /// Now Playing can't be seen (the search results are over it): the video pauses.
+    var isHidden = false
 
     /// The video found for the song, until it can start (`waits`).
     @State private var found: URL?
@@ -25,8 +27,12 @@ struct MotionArtworkView: View {
     /// app's UIKit scene delegate it reads `.background` even in the foreground, which kept the
     /// video paused on its first frame.
     @State private var inBackground = UIApplication.shared.applicationState == .background
+    /// The artwork's side, for the most video worth streaming.
+    @State private var side: CGFloat = 0
 
     @Environment(AppModel.self) private var model
+    @Environment(\.screenCovered) private var screenCovered
+    @Environment(\.displayScale) private var displayScale
 
     /// Whether the video can play without pausing the music. A display plays no music, so it
     /// always can. On an iPad hub on iOS 27 the video is cut off from the audio session
@@ -41,14 +47,20 @@ struct MotionArtworkView: View {
 
     var body: some View {
         ZStack {
+            // The artwork's size before there's a video, for `side`.
+            Color.clear
             if let url {
-                LoopingVideo(url: url, isActive: !inBackground, isPlaying: isPlaying) {
+                LoopingVideo(
+                    url: url, pixels: side * displayScale,
+                    isActive: !inBackground && !isHidden && !screenCovered && !LowPowerMode.shared.isOn, isPlaying: isPlaying
+                ) {
                     withAnimation(.easeIn(duration: 0.8)) { isShowing = true }
                 }
                 .id(url)
                 .opacity(isShowing ? 1 : 0)
             }
         }
+        .onGeometryChange(for: CGFloat.self, of: { max($0.size.width, $0.size.height) }) { side = $0 }
         .clipShape(RoundedRectangle(cornerRadius: cornerRadius, style: .continuous))
         .allowsHitTesting(false)
         .accessibilityHidden(true)
@@ -76,10 +88,22 @@ struct MotionArtworkView: View {
             startIfReady()
         }
         .onChange(of: waits) { startIfReady() }
+        // Low Power Mode: the video fades out to the still art and goes; it comes back without.
+        .onChange(of: LowPowerMode.shared.isOn) { _, lowPower in
+            guard lowPower else {
+                // Back before it had gone: it fades back in.
+                if url != nil { withAnimation(.easeIn(duration: 0.8)) { isShowing = true } }
+                startIfReady()
+                return
+            }
+            withAnimation(.easeOut(duration: 0.8)) { isShowing = false } completion: {
+                if LowPowerMode.shared.isOn { url = nil }
+            }
+        }
     }
 
     private func startIfReady() {
-        if !waits, url == nil { url = found }
+        if !waits, !LowPowerMode.shared.isOn, url == nil { url = found }
     }
 }
 
@@ -88,6 +112,8 @@ struct MotionArtworkView: View {
 /// pauses while `isActive` is false, and follows the music's play/pause (`isPlaying`).
 private struct LoopingVideo: UIViewRepresentable {
     let url: URL
+    /// The artwork's side in pixels: the most video worth streaming.
+    let pixels: CGFloat
     let isActive: Bool
     let isPlaying: Bool
     /// Called once, when the first frame is ready to show.
@@ -95,12 +121,13 @@ private struct LoopingVideo: UIViewRepresentable {
 
     func makeUIView(context: Context) -> LoopingVideoView {
         let view = LoopingVideoView()
-        view.start(url: url, onReady: onReady)
+        view.start(url: url, pixels: pixels, onReady: onReady)
         view.setActive(isActive, playing: isPlaying, animated: false)
         return view
     }
 
     func updateUIView(_ view: LoopingVideoView, context: Context) {
+        view.setMaximumResolution(pixels)
         view.setActive(isActive, playing: isPlaying, animated: true)
     }
 
@@ -126,13 +153,15 @@ private final class LoopingVideoView: UIView {
     private var canPlay = false
     private var requested = (active: false, playing: false)
 
-    func start(url: URL, onReady: @escaping @MainActor () -> Void) {
+    func start(url: URL, pixels: CGFloat, onReady: @escaping @MainActor () -> Void) {
         self.onReady = onReady
         backgroundColor = .clear
         isUserInteractionEnabled = false
         let item = AVPlayerItem(url: url)
-        // The artwork is at most about 700 pt; don't stream a 4K variant for it.
-        item.preferredMaximumResolution = CGSize(width: 1440, height: 1440)
+        // No bigger a variant than the artwork is drawn (`setMaximumResolution`).
+        maximumPixels = Self.maximum(pixels)
+        item.preferredMaximumResolution = CGSize(width: maximumPixels, height: maximumPixels)
+        motionLog("start, at most \(Int(maximumPixels)) px")
         let player = AVQueuePlayer()
         player.isMuted = true
         player.allowsExternalPlayback = false
@@ -171,7 +200,7 @@ private final class LoopingVideoView: UIView {
         }
     }
 
-    /// `active` false (the app's in the background) stops it at once. Otherwise it follows the
+    /// `active` false (the app's in the background, or the video can't be seen) stops it at once. Otherwise it follows the
     /// music: `animated`, the rate eases down to a stop or back up to normal speed over
     /// `rampDuration`, as Apple Music's motion artwork does; a stream that can't play slower than
     /// normal just pauses and plays.
@@ -193,6 +222,24 @@ private final class LoopingVideoView: UIView {
         if wanted, player.rate == 0 { player.rate = 0.05 }
         rampTimer = Timer.scheduledTimer(withTimeInterval: 1.0 / 60, repeats: true) { [weak self] _ in
             MainActor.assumeIsolated { self?.rampStep() }
+        }
+    }
+
+    /// The video variant streamed is no bigger than the artwork's side in pixels (side × scale).
+    private var maximumPixels: CGFloat = 0
+
+    /// Before the artwork is laid out: what it used to be, about 700 pt at 2×.
+    private static func maximum(_ pixels: CGFloat) -> CGFloat {
+        pixels > 0 ? pixels.rounded(.up) : 1440
+    }
+
+    /// A new size (a window resized): later variants follow it.
+    func setMaximumResolution(_ pixels: CGFloat) {
+        let maximum = Self.maximum(pixels)
+        guard maximum != maximumPixels else { return }
+        maximumPixels = maximum
+        for item in looper?.loopingPlayerItems ?? [] {
+            item.preferredMaximumResolution = CGSize(width: maximum, height: maximum)
         }
     }
 

@@ -34,6 +34,7 @@ import Testing
         let household = SonosHousehold(transport: sim, fixedHosts: hosts)
         let controller = SonosOutputController(household: household, defaults: defaults ?? self.defaults, exchange: exchange)
         controller.service = service
+        controller.readingFreshness = 0
         household.onRefresh = { [weak controller] in controller?.householdRefreshed() }
         guard !hosts.isEmpty else { return controller }
         household.start()

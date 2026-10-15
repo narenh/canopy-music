@@ -527,25 +527,48 @@ final class AppModel {
         if let id = me.id { spotifyAuth.setAccount(userID: id) }
     }
 
+    /// When the device list was last read, and whether that read failed (`refreshSpotifyDevicesIfNeeded`).
+    @ObservationIgnored private var spotifyDevicesReadAt = Date.distantPast
+    @ObservationIgnored private var spotifyDevicesReadFailed = false
+
+    /// The party and start screens' check, every few seconds: the list is read again only when it
+    /// may have changed, so a party with its device in place asks Spotify once a minute (it was
+    /// every 10 s). At once when the chosen device isn't listed, the last read failed, or Spotify's
+    /// player turned up on another device (or none) at the engine's last reading.
+    func refreshSpotifyDevicesIfNeeded() async {
+        let playerDevice = (session.engine as? SpotifyEngine)?.playerDevice
+        let playerMoved = playerDevice.map { $0 != spotifyDeviceID } ?? false
+        guard !spotifyDevicesLoaded || !spotifyDeviceAvailable || spotifyDevicesReadFailed || playerMoved
+              || Date().timeIntervalSince(spotifyDevicesReadAt) >= 60 else { return }
+        await refreshSpotifyDevices()
+    }
+
     /// Quietly refreshes the device list; failures keep the last list rather than alerting.
+    /// Only what changed is set, so the screens showing it don't redraw for nothing.
     func refreshSpotifyDevices() async {
         struct Reply: Decodable { var devices: [SpotifyDevice] }
-        guard spotifyAuth.isSignedIn,
-              let reply = try? await spotifyAPI.get("/me/player/devices", as: Reply.self) else { return }
+        guard spotifyAuth.isSignedIn else { return }
+        spotifyDevicesReadAt = Date()
+        guard let reply = try? await spotifyAPI.get("/me/player/devices", as: Reply.self) else {
+            spotifyDevicesReadFailed = true
+            return
+        }
+        spotifyDevicesReadFailed = false
         let wasAvailable = spotifyDevicesLoaded && spotifyDeviceAvailable
-        spotifyDevices = reply.devices.filter { $0.id != nil }
+        let devices = reply.devices.filter { $0.id != nil }
+        if devices != spotifyDevices { spotifyDevices = devices }
         #if DEBUG
         print("[spotify-devices] " + reply.devices.map { "\($0.name) type=\($0.type) active=\($0.is_active) volume=\($0.supports_volume.map(String.init) ?? "?")" }.joined(separator: " | "))
         #endif
-        spotifyDevicesLoaded = true
+        if !spotifyDevicesLoaded { spotifyDevicesLoaded = true }
         // Spotify plays on one device per account. If playback moved (e.g. picked in the Spotify
         // app), follow it, so commands don't pull it back and the AirPlay button is right.
         if let active = spotifyDevices.first(where: \.is_active), active.id != spotifyDeviceID {
             spotifyDeviceID = active.id
         }
         if let id = spotifyDeviceID, let device = spotifyDevices.first(where: { $0.id == id }) {
-            spotifyDeviceName = device.name
-            spotifyDeviceType = device.type
+            if device.name != spotifyDeviceName { spotifyDeviceName = device.name }
+            if device.type != spotifyDeviceType { spotifyDeviceType = device.type }
         }
         #if DEBUG
         print("[spotify-devices] chosen=\(spotifyDeviceName ?? "nil") type=\(spotifyDeviceType ?? "nil")")
@@ -657,11 +680,15 @@ final class AppModel {
         case display
     }
 
-    private(set) var zoneRole: ZoneRole
+    private(set) var zoneRole: ZoneRole {
+        didSet { if zoneRole != oldValue { updateSonosDiscovery() } }
+    }
     var isDisplay: Bool { zoneRole == .display }
     /// The zone has started (or came back after a crash): it's recorded, the phone server runs,
     /// and it's announced with its `.local` name. False on the start screen, where nothing is.
-    private(set) var isLive = false
+    private(set) var isLive = false {
+        didSet { if isLive != oldValue { updateSonosDiscovery() } }
+    }
     /// Start was pressed and the music is starting (the button shows a spinner).
     private(set) var isStartingZone = false
     var zoneName: String {
@@ -893,7 +920,8 @@ final class AppModel {
         // Zones on the network: the list, and checking for another zone on this Spotify account.
         zoneBrowser.start()
         // Sonos rooms for the output picker and the phone's Devices (read-only until a room is chosen and played).
-        sonos.start()
+        hasStartedDiscovery = true
+        updateSonosDiscovery()
         // A sign-in from before zones announced their account (or one made offline).
         if spotifyAuth.isSignedIn, spotifyAuth.accountFingerprint == nil {
             Task { await refreshSpotifyProfile() }
@@ -1378,9 +1406,26 @@ final class AppModel {
 
     /// What a host's phone shows of the rooms (hosts' snapshots). Not on a display.
     private func publishSonosSetup() {
+        // The output may have moved onto Sonos rooms or off them.
+        updateSonosDiscovery()
         guard zoneRole != .display else { return }
         session.sonosSetup = sonosController.setup()
     }
+
+    /// Sonos discovery (the `_sonos._tcp` browse, and the household read again on its news) runs
+    /// where rooms can be chosen or the music plays on them: the zone list and start screen, and
+    /// a zone on Sonos. Not in a live zone on this device (or a Spotify Connect device), whose
+    /// party screen and phones offer no rooms, nor on a display. The rooms found stay listed.
+    private func updateSonosDiscovery() {
+        // From launch on (`startOnLaunch`), as before.
+        guard hasStartedDiscovery else { return }
+        if zoneRole != .display, !isLive || sonosController.output != nil {
+            sonos.start()
+        } else {
+            sonos.stop()
+        }
+    }
+    @ObservationIgnored private var hasStartedDiscovery = false
 
     /// Discovery has news: rooms may have new addresses, accounts may have turned up
     /// (`SonosOutputController.householdRefreshed`).

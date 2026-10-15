@@ -154,6 +154,19 @@ struct SonosTransportReplyTests {
         #expect(SonosURI.canopyTrackID(of: try #require(info.trackURI)) == "spotify:track:3eXYltBvZSCOs6fM1La6ho")
     }
 
+    /// The engine's polls skip the track's metadata: Sonos gives the length itself.
+    @Test func positionWithoutTheItem() throws {
+        let reply = try SonosFixture.soap("position_info_queue")
+        let info = SonosParse.positionInfo(reply, withItem: false)
+        #expect(info.item == nil)
+        #expect(info.duration == 158)
+        #expect(info.trackURI == SonosParse.positionInfo(reply).trackURI)
+        // No length in the reply: the item's is the stand-in, so it's parsed after all.
+        var noLength = reply
+        noLength["TrackDuration"] = nil
+        #expect(SonosParse.positionInfo(noLength, withItem: false).item?.title == "KGB")
+    }
+
     @Test func positionOnSpotifyConnect() throws {
         let info = SonosParse.positionInfo(try SonosFixture.soap("position_info_spotify_connect"))
         #expect(info.duration == nil)

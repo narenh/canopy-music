@@ -32,6 +32,7 @@ import Testing
         }
         let controller = SonosOutputController(household: household, defaults: defaults ?? Self.freshDefaults(), claimExchange: exchange)
         controller.service = service
+        controller.readingFreshness = 0
         if claims != nil { controller.peers = { [Self.iPadZone] } }
         household.onRefresh = { [weak controller] in controller?.householdRefreshed() }
         household.start()

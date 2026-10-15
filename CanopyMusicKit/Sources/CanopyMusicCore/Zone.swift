@@ -141,6 +141,34 @@ public struct UpcomingPage: Codable, Equatable, Sendable {
     public static let empty = UpcomingPage(playlistName: nil, total: 0, offset: 0, rows: [], version: 0)
 }
 
+// A display loads the hub's relayed library artwork (`LibraryArtwork`) from that hub: what it
+// takes from the hub has the relative paths made absolute against the hub's address.
+
+public extension UpcomingPage {
+    func resolvingArtwork(against base: URL) -> UpcomingPage {
+        var page = self
+        page.rows = rows.map { row in
+            var row = row
+            row.thumbnailURL = QueueTrack(id: row.trackID, title: "", artist: "", thumbnailURL: row.thumbnailURL)
+                .resolvingArtwork(against: base).thumbnailURL
+            return row
+        }
+        return page
+    }
+}
+
+public extension PartySnapshot {
+    func resolvingArtwork(against base: URL) -> PartySnapshot {
+        var snapshot = self
+        snapshot.current = current?.resolvingArtwork(against: base)
+        snapshot.upNext = upNext.map { $0.resolvingArtwork(against: base) }
+        snapshot.history = history?.map { $0.resolvingArtwork(against: base) }
+        snapshot.externalCurrent = externalCurrent?.resolvingArtwork(against: base)
+        snapshot.foreignUpcoming = foreignUpcoming?.map { $0.resolvingArtwork(against: base) }
+        return snapshot
+    }
+}
+
 /// Search for a display goes to the hub, so every result is playable there.
 struct RemoteCatalog: MusicCatalog {
     let search: @Sendable (String) async throws -> [QueueTrack]

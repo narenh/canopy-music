@@ -28,11 +28,18 @@ public struct QueueTrack: Codable, Hashable, Sendable, Identifiable {
     /// artwork ask for that exact album rather than searching by name. Optional in JSON: saved
     /// queues and snapshots from before it decode without it, and older peers ignore it.
     public var albumID: String?
+    /// Set for a song that's only in the hub account's own iCloud Music Library (an upload with
+    /// no Apple Music catalog entry): its library id ("i.…"), which `id` is too, so the same song
+    /// counts as already queued wherever it came from. Players fetch it from the library rather
+    /// than the catalog, and its artwork comes through the hub (`LibraryArtwork`). nil for
+    /// catalog songs. Optional in JSON: older saved queues and peers leave it out.
+    public var libraryID: String?
 
     public init(
         id: String, title: String, artist: String, album: String = "",
         duration: TimeInterval? = nil, artworkURL: URL? = nil, thumbnailURL: URL? = nil,
-        colors: ArtworkColors? = nil, isExplicit: Bool = false, albumID: String? = nil
+        colors: ArtworkColors? = nil, isExplicit: Bool = false, albumID: String? = nil,
+        libraryID: String? = nil
     ) {
         self.id = id
         self.title = title
@@ -44,10 +51,26 @@ public struct QueueTrack: Codable, Hashable, Sendable, Identifiable {
         self.colors = colors
         self.isExplicit = isExplicit
         self.albumID = albumID
+        self.libraryID = libraryID
+    }
+
+    /// A song only in the hub account's library: `id` and `libraryID` are its library id, and its
+    /// artwork is the hub's relay (`LibraryArtwork.url`), relative, so each page and display loads
+    /// it from the hub it got the song from.
+    public static func libraryOnly(
+        libraryID: String, title: String, artist: String, album: String = "",
+        duration: TimeInterval? = nil, colors: ArtworkColors? = nil, isExplicit: Bool = false
+    ) -> QueueTrack {
+        QueueTrack(
+            id: libraryID, title: title, artist: artist, album: album, duration: duration,
+            artworkURL: LibraryArtwork.url(libraryID: libraryID, size: LibraryArtwork.largeSize),
+            thumbnailURL: LibraryArtwork.url(libraryID: libraryID, size: LibraryArtwork.thumbnailSize),
+            colors: colors, isExplicit: isExplicit, libraryID: libraryID
+        )
     }
 
     private enum CodingKeys: String, CodingKey {
-        case id, title, artist, album, duration, artworkURL, thumbnailURL, colors, isExplicit, albumID
+        case id, title, artist, album, duration, artworkURL, thumbnailURL, colors, isExplicit, albumID, libraryID
     }
 
     public init(from decoder: Decoder) throws {
@@ -62,6 +85,55 @@ public struct QueueTrack: Codable, Hashable, Sendable, Identifiable {
         colors = try container.decodeIfPresent(ArtworkColors.self, forKey: .colors)
         isExplicit = try container.decode(Bool.self, forKey: .isExplicit)
         albumID = try container.decodeIfPresent(String.self, forKey: .albumID)
+        libraryID = try container.decodeIfPresent(String.self, forKey: .libraryID)
+    }
+}
+
+/// Artwork for songs only in the hub account's library (`QueueTrack.libraryID`). They have no
+/// public image URL: only the hub can load their art (through MusicKit), so it serves it at
+/// `/api/artwork/<library id>?size=<px>`. Tracks carry that path relative: the web page loads it
+/// from the hub that served the page, a display resolves it against its hub's address
+/// (`resolvingArtwork(against:)`), and the hub's own views against its own server.
+public enum LibraryArtwork {
+    public static let pathPrefix = "/api/artwork/"
+    /// Now Playing's size and a row's, as catalog songs' `artworkURL` and `thumbnailURL`.
+    public static let largeSize = 1200
+    public static let thumbnailSize = 160
+
+    public static func url(libraryID: String, size: Int) -> URL? {
+        URL(string: "\(pathPrefix)\(libraryID)?size=\(size)")
+    }
+
+    /// An Apple Music library id as the library gives it: "i." and letters and digits. Nothing
+    /// else goes into a relay path or a Sonos URI.
+    public static func isLibraryID(_ id: String) -> Bool {
+        guard id.hasPrefix("i."), id.count <= 64 else { return false }
+        let rest = id.dropFirst(2)
+        return !rest.isEmpty && rest.allSatisfy { $0.isASCII && ($0.isLetter || $0.isNumber) }
+    }
+}
+
+public extension QueueTrack {
+    /// With relative artwork (a hub's relay, `LibraryArtwork`) made absolute against `base`, the
+    /// hub's address. Absolute URLs (catalog art) are left as they are.
+    func resolvingArtwork(against base: URL) -> QueueTrack {
+        var track = self
+        track.artworkURL = artworkURL.map { Self.resolve($0, against: base) }
+        track.thumbnailURL = thumbnailURL.map { Self.resolve($0, against: base) }
+        return track
+    }
+
+    private static func resolve(_ url: URL, against base: URL) -> URL {
+        guard url.scheme == nil else { return url }
+        return URL(string: url.relativeString, relativeTo: base)?.absoluteURL ?? url
+    }
+}
+
+public extension QueueItem {
+    func resolvingArtwork(against base: URL) -> QueueItem {
+        var item = self
+        item.track = track.resolvingArtwork(against: base)
+        return item
     }
 }
 

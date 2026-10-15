@@ -173,6 +173,14 @@ final class AppModel {
             session.phonesCanReorder = phoneReorderEnabled
         }
     }
+    /// "Limit reorders": how often each guest can reorder while they can at all. Off by default.
+    var reorderLimit: ReorderLimit {
+        didSet {
+            guard reorderLimit != oldValue else { return }
+            reorderLimit.save(to: defaults)
+            session.reorderLimit = reorderLimit
+        }
+    }
 
     /// Whether guests can queue from their phones. The server keeps running either way: host phones
     /// and displays use it too.
@@ -292,6 +300,7 @@ final class AppModel {
         wifiSimpleQR = defaults.bool(forKey: "wifiSimpleQR")
         phoneQueueEnabled = defaults.object(forKey: "phoneQueueEnabled") as? Bool ?? true
         phoneReorderEnabled = defaults.object(forKey: "phoneReorderEnabled") as? Bool ?? true
+        reorderLimit = ReorderLimit(defaults: defaults)
         // The `.local` address follows the zone name.
         hostname = FriendlyHostname(name: FriendlyHostname.localName(forZone: zoneName))
         defaults.removeObject(forKey: "localName") // the old editable address
@@ -1043,6 +1052,7 @@ final class AppModel {
         session.configureHub(kind: .ipad, device: DeviceKind.device, id: deviceID, zoneName: zoneName, serviceName: provider == .none ? nil : provider.title)
         session.displaysCanControl = displaysCanControl
         session.phonesCanQueue = phoneQueueEnabled
+        session.reorderLimit = reorderLimit
         session.wifi = WifiDetails(ssid: wifiSSID, password: wifiPassword, simpleQR: wifiSimpleQR)
         // The engine's rooms, as they join and leave, are the output; hosts' phones get the
         // volume row and Devices (only rooms and volumes: moving off Sonos is the start screen's).
@@ -1100,6 +1110,7 @@ final class AppModel {
             guard let self else { return }
             if let name = self.session.zoneName, name != self.zoneName { self.zoneName = name }
             if self.session.phonesCanReorder != self.phoneReorderEnabled { self.phoneReorderEnabled = self.session.phonesCanReorder }
+            if self.session.reorderLimit != self.reorderLimit { self.reorderLimit = self.session.reorderLimit }
             if self.session.displaysCanControl != self.displaysCanControl { self.displaysCanControl = self.session.displaysCanControl }
             if self.session.phonesCanQueue != self.phoneQueueEnabled { self.phoneQueueEnabled = self.session.phonesCanQueue }
             // The party page's Crossfade button (on Sonos).
@@ -1492,9 +1503,12 @@ final class AppModel {
         let wasPlaying = session.isPlaying
         let position = session.engine.currentTime
         let hadSong = session.state.current != nil
+        // The same party carries on: guests keep the reorders they've spent.
+        let reorderSpends = session.reorderSpends
         session.shutdown()
         session = Self.makeSession(provider, spotify: spotifyAPI, sonos: sonosController.makeEngine())
         session.phonesCanReorder = phoneReorderEnabled
+        session.reorderSpends = reorderSpends
         configureHubSession()
         connectHostControl()
         applyCrossfade()

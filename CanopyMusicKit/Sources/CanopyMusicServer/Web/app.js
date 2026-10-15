@@ -1120,7 +1120,7 @@
    * take a while (the hub answers 202 until it's done), so it says so meanwhile. */
   async function lookUpLink(term, link, signal) {
     results = [];
-    renderResults(term, "Looking up the link…");
+    renderResults(term, "Checking link…", true);
     try {
       for (;;) {
         const res = await fetch("/api/link", {
@@ -1169,7 +1169,7 @@
     }
   }
 
-  function renderResults(term, errorText) {
+  function renderResults(term, errorText, spinning = false) {
     const list = $("results");
     list.innerHTML = "";
     for (const track of results) {
@@ -1214,6 +1214,7 @@
     const empty = $("results-empty");
     empty.hidden = results.length > 0 || !term;
     empty.textContent = errorText || `No songs found for “${term || ""}”.`;
+    if (spinning) { const s = document.createElement("span"); s.className = "spinner"; empty.prepend(s); }
     updateResultButtons();
   }
 

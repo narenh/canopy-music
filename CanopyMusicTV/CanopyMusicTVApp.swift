@@ -93,6 +93,12 @@ final class TVModel {
     @ObservationIgnored let deviceID: String
     @ObservationIgnored private var server: PartyServer?
     @ObservationIgnored private var serverTask: Task<Void, Error>?
+    /// The session `server` serves.
+    @ObservationIgnored private weak var serverSession: PartySession?
+    /// The last start or stop of the phone server asked for (`serverOperation`). Each runs after
+    /// the ones before it: a stop landing mid-start left that server running, and two starts
+    /// both bound a port.
+    @ObservationIgnored private var lastServerOperation: Task<Void, Never>?
     /// The `.local` address, which follows the zone name (as on the iPad).
     @ObservationIgnored private let hostname = FriendlyHostname(name: "music")
     @ObservationIgnored private let advertiser = ZoneAdvertiser()
@@ -620,11 +626,7 @@ final class TVModel {
         spotify.signIn.cancel()
         session.shutdown()
         session = PartySession(catalog: DemoOrEmptyCatalog(), engine: SilentEngine())
-        serverTask?.cancel()
-        serverTask = nil
-        let server = server
-        Task { await server?.stop() }
-        self.server = nil
+        stopServer()
         hostname.unregister()
         advertiser.stop()
         guestURL = nil
@@ -662,34 +664,62 @@ final class TVModel {
             wasBackgrounded = false
             guard role == .hub else { return }
             debugLog("back from the background: restarting the server")
-            serverTask?.cancel()
-            serverTask = nil
-            let old = server
-            server = nil
-            // No QR codes until the new server is up (`startServer` sets these again).
+            // No QR codes until the new server is up (`startServerNow` sets these again).
             guestURL = nil
             friendlyURL = nil
-            hostname.unregister()
-            advertiser.stop()
-            Task {
-                await old?.stop()
-                guard role == .hub, server == nil else { return }
-                await startServer()
+            serverOperation {
+                await self.stopServerNow()
+                await self.startServerNow()
             }
         default:
             break
         }
     }
 
+    /// Queues a start or stop of the phone server behind those asked for before it. The task
+    /// isn't the caller's, so a caller that goes away (the zone list) doesn't cancel it.
+    @discardableResult
+    private func serverOperation(_ operation: @escaping @MainActor () async -> Void) -> Task<Void, Never> {
+        let previous = lastServerOperation
+        let task = Task { @MainActor in
+            await previous?.value
+            await operation()
+        }
+        lastServerOperation = task
+        return task
+    }
+
+    /// Starts the phone server for this hub's zone, in turn; returns once it has run.
     private func startServer() async {
+        await serverOperation { await self.startServerNow() }.value
+    }
+
+    private func stopServer() {
+        serverOperation { await self.stopServerNow() }
+    }
+
+    /// Nothing if the zone has closed, or its server is already running.
+    private func startServerNow() async {
+        guard role == .hub else { return }
+        if server != nil, serverSession === session { return }
+        await stopServerNow()
         debugLog("starting server")
+        let session = session
         guard let (server, task) = await PartyServer.start(session: session) else {
             debugLog("server failed to start")
+            return
+        }
+        // The zone closed (or another opened) while the port was bound: not its server.
+        guard role == .hub, session === self.session else {
+            debugLog("zone closed while its server started; stopping it")
+            task.cancel()
+            await server.stop()
             return
         }
         debugLog("server on \(server.port)")
         self.server = server
         serverTask = task
+        serverSession = session
         guard let ip = LocalNetwork.lanAddress() else { return }
         guestURL = server.url(host: ip)
         // Hand out the .local name only once it's confirmed ours: another zone may already have
@@ -713,6 +743,21 @@ final class TVModel {
         debugLog("host \(hostURL?.absoluteString ?? "-")")
         #endif
         advertise()
+    }
+
+    /// Nothing if no server is running.
+    private func stopServerNow() async {
+        guard let server else { return }
+        debugLog("stopping server")
+        serverTask?.cancel()
+        serverTask = nil
+        self.server = nil
+        serverSession = nil
+        hostname.unregister()
+        advertiser.stop()
+        guestURL = nil
+        friendlyURL = nil
+        await server.stop()
     }
 
     /// Announces this zone; called again when the song or name changes. Not until a host has

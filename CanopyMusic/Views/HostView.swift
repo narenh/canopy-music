@@ -677,6 +677,7 @@ private struct SettingsSheet: View {
     @State private var savingPlaylist = false
     #if DEBUG
     @State private var debugSignInPage = false
+    @State private var debugLinkTest = false
     #endif
 
     var body: some View {
@@ -786,6 +787,12 @@ private struct SettingsSheet: View {
                     }
                     .listRowBackground(Color.white.opacity(0.08))
                 }
+                #if DEBUG
+                Section("Debug") {
+                    NavigationLink("Link test") { LinkTestView().environment(model) }
+                }
+                .listRowBackground(Color.white.opacity(0.08))
+                #endif
             }
             .scrollContentBackground(.hidden)
             .endZoneConfirmation(isPresented: $confirmingEnd) { dismiss() }
@@ -794,11 +801,15 @@ private struct SettingsSheet: View {
             .onAppear { if ProcessInfo.processInfo.arguments.contains("-showSave") { savingPlaylist = true } }
             // `-showSignInPage`: Settings › Spotify › Sign-in page, for screenshots.
             .navigationDestination(isPresented: $debugSignInPage) { SpotifySignInPageSettings().environment(model) }
+            // `-showLinkTest`: Settings › Debug › Link test, for screenshots (it plays nothing
+            // until a button is tapped).
+            .navigationDestination(isPresented: $debugLinkTest) { LinkTestView().environment(model) }
             .task {
-                guard ProcessInfo.processInfo.arguments.contains("-showSignInPage") else { return }
+                let args = ProcessInfo.processInfo.arguments
+                guard args.contains("-showSignInPage") || args.contains("-showLinkTest") else { return }
                 // Once the sheet has finished coming up (a push during it is dropped).
                 try? await Task.sleep(for: .seconds(2.5))
-                debugSignInPage = true
+                if args.contains("-showSignInPage") { debugSignInPage = true } else { debugLinkTest = true }
             }
             #endif
             .navigationTitle("Settings")

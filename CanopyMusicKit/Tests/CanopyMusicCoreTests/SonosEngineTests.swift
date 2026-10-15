@@ -283,6 +283,36 @@ final class EventRecorder {
     var events: [PlaybackEvent] = []
 }
 
+/// The engine's own poll pace (`PollPacing.sonos`), read with a made-up clock: quick after a
+/// command and near the end, slower mid-song, slow paused. Its polls read no track metadata.
+@MainActor
+@Suite struct SonosPollPaceTests {
+    @Test func pacesBySongAndCommand() async throws {
+        let fake = FakeSonos()
+        let engine = SonosEngine(target: sonosTarget, reference: SonosTrackReference(service: .spotify, accountSerial: 4), transport: fake)
+        defer { engine.shutDown() }
+        try await engine.play(spotifyTrack("a")) // 180 s long
+        let start = Date()
+        #expect(engine.nextPollInterval(now: start) == .seconds(1))
+        #expect(engine.nextPollInterval(now: start + 10) == .milliseconds(2500))
+        #expect(engine.nextPollInterval(now: start + 176) == .seconds(1))
+        engine.pause()
+        let paused = Date()
+        #expect(engine.nextPollInterval(now: paused + 1) == .seconds(1))
+        #expect(engine.nextPollInterval(now: paused + 5) == .seconds(10))
+        // A poll's reading, once the pause has reached the speaker.
+        await settle()
+        fake.position = 170
+        try await engine.applyLatestObservation()
+        #expect(engine.nextPollInterval(now: Date() + 60) == .seconds(10))
+        try await engine.resume()
+        let resumed = Date()
+        // 10 s left: near the end.
+        #expect(engine.nextPollInterval(now: resumed + 5) == .seconds(1))
+        #expect(engine.nextPollInterval(now: resumed + 0.5) == .seconds(1))
+    }
+}
+
 @MainActor
 final class LogRecorder {
     var lines: [String] = []

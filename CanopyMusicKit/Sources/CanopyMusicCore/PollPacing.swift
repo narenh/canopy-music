@@ -38,7 +38,14 @@ public struct PollPacing: Equatable, Sendable {
     public static func appleMusic(crossfade: Bool, crossfadeLength: TimeInterval? = nil) -> PollPacing {
         let fade = crossfade ? crossfadeLength ?? defaultCrossfade : 0
         return PollPacing(midSong: .seconds(1), nearEnd: .milliseconds(400), nearEndWindow: 4 + fade,
-                   afterCommand: .milliseconds(400), afterCommandWindow: 2, idle: .seconds(3))
+                          afterCommand: .milliseconds(400), afterCommandWindow: 2, idle: .seconds(3))
+    }
+
+    /// A Sonos group (two SOAP requests a read): near the end and after a command, as often as
+    /// it always was while playing. Sonos's crossfade has a length of its own.
+    public static func sonos(crossfade: Bool) -> PollPacing {
+        PollPacing(midSong: .milliseconds(2500), nearEnd: .seconds(1), nearEndWindow: 6 + (crossfade ? defaultCrossfade : 0),
+                   afterCommand: .seconds(1), afterCommandWindow: 3, idle: .seconds(10))
     }
 
     /// The wait before the next read. `remaining`: seconds left in the song (nil when unknown);

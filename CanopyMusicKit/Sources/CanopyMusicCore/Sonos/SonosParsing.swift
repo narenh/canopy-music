@@ -122,12 +122,15 @@ public enum SonosParse {
 
     // MARK: Transport
 
-    public static func positionInfo(_ reply: [String: String]) -> SonosPositionInfo {
-        let metadata = reply["TrackMetaData"].flatMap { $0 == "NOT_IMPLEMENTED" ? nil : $0 }
+    /// `withItem` false skips parsing the track's DIDL-Lite metadata (a second XML parse) unless
+    /// the reply has no `TrackDuration`, whose stand-in is the item's (the engine's polls).
+    public static func positionInfo(_ reply: [String: String], withItem: Bool = true) -> SonosPositionInfo {
+        let duration = SonosTime.seconds(reply["TrackDuration"])
+        let metadata = withItem || duration == nil ? reply["TrackMetaData"].flatMap { $0 == "NOT_IMPLEMENTED" ? nil : $0 } : nil
         return SonosPositionInfo(
             track: Int(reply["Track"] ?? "") ?? 0,
             trackURI: reply["TrackURI"].flatMap { $0.isEmpty ? nil : $0 },
-            duration: SonosTime.seconds(reply["TrackDuration"]),
+            duration: duration,
             position: SonosTime.seconds(reply["RelTime"]),
             item: metadata.flatMap { didlItems($0).first }
         )

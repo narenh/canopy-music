@@ -49,6 +49,17 @@ import Testing
         #expect(apple.interval(playing: true, remaining: nil, sinceCommand: longAgo) == .seconds(1))
     }
 
+    @Test func sonosReadsLessMidSongAndPaused() {
+        let sonos = PollPacing.sonos(crossfade: false)
+        #expect(sonos.interval(playing: true, remaining: 120, sinceCommand: longAgo) == .milliseconds(2500))
+        // Near the end, and after a command, as it always was while playing.
+        #expect(sonos.interval(playing: true, remaining: 5, sinceCommand: longAgo) == .seconds(1))
+        #expect(sonos.interval(playing: true, remaining: 120, sinceCommand: 1) == .seconds(1))
+        #expect(sonos.interval(playing: false, remaining: nil, sinceCommand: 2) == .seconds(1))
+        #expect(sonos.interval(playing: false, remaining: nil, sinceCommand: longAgo) == .seconds(10))
+        #expect(PollPacing.sonos(crossfade: true).interval(playing: true, remaining: 15, sinceCommand: longAgo) == .seconds(1))
+    }
+
     @Test func fixedIgnoresEverything() {
         let fixed = PollPacing.fixed(.milliseconds(50))
         #expect(fixed.interval(playing: true, remaining: 1, sinceCommand: 0) == .milliseconds(50))

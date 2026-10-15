@@ -195,8 +195,9 @@ public enum SonosPlaybackRules {
 /// one from a music-service account linked in the Sonos app (`SonosTrackReference`). It owns the
 /// group's Sonos queue while it plays: the current song, then the staged one after it.
 ///
-/// Events come from polling `GetPositionInfo` and `GetTransportInfo` (about once a second while
-/// playing, every few seconds paused). UPnP event subscriptions aren't used.
+/// Events come from polling `GetPositionInfo` and `GetTransportInfo` (`PollPacing.sonos`: once a
+/// second near a song's end and after a command, every 2.5 s mid-song, every 10 s paused). UPnP
+/// event subscriptions aren't used.
 @MainActor
 public final class SonosEngine: PlaybackEngine {
     public let canReplaceStaged = true
@@ -263,13 +264,18 @@ public final class SonosEngine: PlaybackEngine {
     private var settleUntil = Date.distantPast
     private var lastPlaying: Bool?
     private var poller: Task<Void, Never>?
+    /// A poll is reading the speakers: a command doesn't start the loop over under it.
+    private var isPolling = false
+    private var lastCommandAt = Date.distantPast
 
     private var cachedPlaying = false
     private var cachedTime: TimeInterval = 0
     private var cachedAt = Date()
+    /// The song's length as last read, for pacing.
+    private var cachedDuration: TimeInterval?
 
-    /// Poll spacing. Tests shorten it.
-    public var pollInterval: (playing: Duration, paused: Duration) = (.seconds(1), .seconds(3))
+    /// Fixed poll spacing instead of `PollPacing.sonos` (tests).
+    public var pollInterval: (playing: Duration, paused: Duration)?
     /// Debug output (`[sonos-engine] …`); nil is silent.
     public var log: (@MainActor (String) -> Void)?
 
@@ -347,8 +353,10 @@ public final class SonosEngine: PlaybackEngine {
             throw error
         }
         cache(playing: true, time: 0)
+        cachedDuration = track.duration
         log?("play \(track.title) at #\(currentNumber ?? 0) in \(target.name)")
         startPolling()
+        noteCommand()
     }
 
     /// A refused account step: 800 only once the live layout has confirmed the room leads its
@@ -484,6 +492,7 @@ public final class SonosEngine: PlaybackEngine {
             throw error
         }
         cache(playing: true, time: cachedTime)
+        noteCommand()
     }
 
     public func pause() {
@@ -491,6 +500,7 @@ public final class SonosEngine: PlaybackEngine {
         cache(playing: false, time: currentTime)
         guard hasStarted else { return }
         settleUntil = Date().addingTimeInterval(1)
+        noteCommand()
         guard lostControl else {
             Task { [client] in try? await client.pause() }
             return
@@ -518,6 +528,7 @@ public final class SonosEngine: PlaybackEngine {
         }
         // Picked up at once rather than at the next poll.
         _ = try? await applyLatestObservation()
+        noteCommand()
     }
 
     public func restartCurrent() { seek(to: 0) }
@@ -526,6 +537,7 @@ public final class SonosEngine: PlaybackEngine {
         cache(playing: cachedPlaying, time: time)
         guard hasStarted, !lostControl else { return }
         settleUntil = Date().addingTimeInterval(1)
+        noteCommand()
         Task { [client] in try? await client.seek(to: time) }
     }
 
@@ -623,6 +635,7 @@ public final class SonosEngine: PlaybackEngine {
             defer { busy -= 1 }
             try await SonosClient(transport: transport, host: room.host).setTransportURI(SonosURI.joinGroup(of: target.coordinator.id))
             log?("\(room.name) joining \(target.coordinator.name)")
+            noteCommand()
         }
         target.joining.append(room)
     }
@@ -676,6 +689,7 @@ public final class SonosEngine: PlaybackEngine {
             log?("\(room.name) handed the group to \(next.name)")
             await adoptQueueAfterHandoff()
         }
+        noteCommand()
         await silence(leaving, name: room.name)
     }
 
@@ -842,15 +856,36 @@ public final class SonosEngine: PlaybackEngine {
     // MARK: Polling
 
     private func startPolling() {
-        guard poller == nil else { return }
+        guard poller == nil, !isShutDown else { return }
         poller = Task { [weak self] in
             while !Task.isCancelled {
-                let interval = self.map { $0.cachedPlaying ? $0.pollInterval.playing : $0.pollInterval.paused } ?? .seconds(1)
+                guard let interval = self?.nextPollInterval() else { return }
                 try? await Task.sleep(for: interval)
-                guard let self else { return }
+                guard !Task.isCancelled, let self else { return }
+                self.isPolling = true
                 await self.poll()
+                self.isPolling = false
             }
         }
+    }
+
+    /// The wait before the next poll (`PollPacing.sonos`, or `pollInterval` in tests).
+    func nextPollInterval(now: Date = Date()) -> Duration {
+        if let pollInterval { return cachedPlaying ? pollInterval.playing : pollInterval.paused }
+        let elapsed = cachedPlaying ? cachedTime + now.timeIntervalSince(cachedAt) : cachedTime
+        let remaining = (cachedDuration ?? currentTrack?.duration).map { $0 - elapsed }
+        return PollPacing.sonos(crossfade: crossfade == true)
+            .interval(playing: cachedPlaying, remaining: remaining, sinceCommand: now.timeIntervalSince(lastCommandAt))
+    }
+
+    /// A command went to the speakers: the next polls come at the quick pace, the first of them
+    /// without waiting out a long paused-state wait. Not under a poll that's reading.
+    private func noteCommand() {
+        lastCommandAt = Date()
+        guard poller != nil, !isPolling else { return }
+        poller?.cancel()
+        poller = nil
+        startPolling()
     }
 
     /// Stops polling for good (the session dropped this engine).
@@ -890,13 +925,14 @@ public final class SonosEngine: PlaybackEngine {
     /// Reads the player and acts on it. True when it moved on to the staged song.
     @discardableResult
     func applyLatestObservation() async throws -> Bool {
-        var info = try await client.positionInfo()
+        // Only the length is wanted from the track's metadata, and only when Sonos doesn't say it.
+        var info = try await client.positionInfo(withItem: false)
         // Our coordinator is a member of a group led by another of our rooms: the group changed
         // hands outside Canopy Music, and the rest goes to the new coordinator.
         if let leaderID = info.trackURI.flatMap(SonosURI.coordinator(ofMemberURI:)), leaderID != target.coordinator.id,
            let leader = target.rooms.first(where: { $0.id == leaderID }) {
             await follow(to: leader)
-            info = try await client.positionInfo()
+            info = try await client.positionInfo(withItem: false)
         }
         let state = try await client.transportState()
         return apply(SonosPlaybackRules.Observation(info, state: state))
@@ -914,6 +950,7 @@ public final class SonosEngine: PlaybackEngine {
         let playing = !lostControl && step != .lostControl && SonosPlaybackRules.isPlaying(observation.state)
         // Before any event: the session snapshots the time as it handles them.
         cache(playing: playing, time: ours ? (observation.position ?? 0) : cachedTime)
+        if ours { cachedDuration = observation.duration }
         if observation.state == .playing, observation.trackID == currentTrack?.id { sawPlaying = true }
 
         var advanced = false

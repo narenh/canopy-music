@@ -194,8 +194,8 @@ private struct SonosTakeoverDialog: ViewModifier {
     }
 }
 
-/// The tick at the end of a room's row: a dark check on white when ticked (quieter than a
-/// coloured fill on dark glass), a quiet ring when not, a spinner while it joins.
+/// The tick at the end of a room's row: a white disc with the check cut out when ticked
+/// (quieter than a coloured fill on dark glass), a quiet ring when not, a spinner while it joins.
 struct SonosCheck: View {
     let ticked: Bool
     let joining: Bool
@@ -205,9 +205,10 @@ struct SonosCheck: View {
             if joining {
                 ProgressView().controlSize(.small)
             } else if ticked {
+                // Monochrome: the check is cut out of the white disc, so the glass shows through.
                 Image(systemName: "checkmark.circle.fill")
-                    .symbolRenderingMode(.palette)
-                    .foregroundStyle(.black, .white)
+                    .symbolRenderingMode(.monochrome)
+                    .foregroundStyle(.white)
             } else {
                 Image(systemName: "circle")
                     .foregroundStyle(.secondary)

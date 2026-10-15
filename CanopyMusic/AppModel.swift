@@ -466,18 +466,14 @@ final class AppModel {
 
     /// The start screen's Music row, before Start only (a live zone's service changes only by
     /// ending it). Nothing is live, so this just swaps the private session. Spotify is signed in
-    /// first (the row's sheet does that), then asks where music plays, as setup does; Apple Music
-    /// asks for access if it hasn't yet, and a refusal shows in the row.
+    /// first (the row's sheet does that); where it plays is then picked from the Music section's
+    /// "Plays on" row, or asked at Start if no device is reachable. Apple Music asks for access if
+    /// it hasn't yet, and a refusal shows in the row.
     func switchService(to next: Provider) {
         guard zoneRole == .hub, !isLive, !isStartingZone, next != provider else { return }
         chooseProvider(next)
-        switch next {
-        case .spotify:
-            isPickingSpotifyDevice = true
-        case .appleMusic:
-            if MusicAuthorization.currentStatus == .notDetermined { Task { await requestAuthorization() } }
-        default:
-            break
+        if next == .appleMusic, MusicAuthorization.currentStatus == .notDetermined {
+            Task { await requestAuthorization() }
         }
     }
 

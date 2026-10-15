@@ -197,12 +197,39 @@ public final class PartyServer: Sendable {
             if requester.origin == .phone, !(await session.phonesCanQueue), !(await session.isHost(key: body.key)) {
                 return HTTPResponse(statusCode: .forbidden)
             }
+            // A song from a link (a phone's pick from `/api/link`): the hub fills in its audio.
+            if body.track.link != nil {
+                do {
+                    return try .json(AddReply(try await session.addLink(body.track, by: requester, id: body.itemId ?? UUID())))
+                } catch {
+                    return .linkRefused(error)
+                }
+            }
             let result = if let itemId = body.itemId {
                 await session.add(body.track, by: requester, id: itemId)
             } else {
                 await session.add(body.track, by: requester)
             }
             return try .json(AddReply(result))
+        }
+
+        // A link pasted into a phone's search (only once the hub has cmdlp, `PartySnapshot.links`):
+        // looked up, and answered as one song for the phone's results, without its audio's address.
+        // 202 while the lookup is still running: the phone asks again, and joins it. 409 with the
+        // sentence to show when it can't be queued. Phones only: displays never ask.
+        await server.appendRoute("POST /api/link") { request in
+            let body = try JSONDecoder.api.decode(LinkBody.self, from: await request.bodyData)
+            if !(await session.phonesCanQueue), !(await session.isHost(key: body.key)) {
+                return HTTPResponse(statusCode: .forbidden)
+            }
+            do {
+                guard let track = try await session.resolveLink(String(body.url.prefix(2048))) else {
+                    return HTTPResponse(statusCode: .accepted, headers: [.cacheControl: "no-store"])
+                }
+                return try .json(track)
+            } catch {
+                return .linkRefused(error)
+            }
         }
 
         await server.appendRoute("POST /api/move") { request in
@@ -613,6 +640,13 @@ struct AddBody: Decodable {
     var key: String?
     var itemId: UUID?
     var origin: String?
+}
+
+struct LinkBody: Decodable {
+    var url: String
+    var clientId: String?
+    /// Host Control key, so a host can paste a link while queueing from phones is off.
+    var key: String?
 }
 
 struct DisplayHello: Decodable {
@@ -1086,6 +1120,13 @@ extension String {
 }
 
 extension HTTPResponse {
+    /// A link that can't be queued: 409 with the sentence the phone shows (`{"error": …}`).
+    static func linkRefused(_ error: any Error) -> HTTPResponse {
+        let refusal = LinkRefusal(resolving: error)
+        return HTTPResponse(statusCode: .conflict, headers: [.contentType: "application/json", .cacheControl: "no-store"],
+                            body: (try? JSONEncoder().encode(["error": refusal.message])) ?? Data())
+    }
+
     /// The music service failed. Debug builds say why in the body, since the hub's own console is
     /// hard to reach on an Apple TV.
     static func serviceFailed(_ error: Error) -> HTTPResponse {

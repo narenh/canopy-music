@@ -9,8 +9,21 @@ import Foundation
 // `-hostKey <key>`: open http://localhost:8080/?host=<key> for the host pages (the pickers).
 // `-tvSetup`: a new Apple TV zone, before its first host has chosen a playlist (the setup sheet).
 // The demo catalog's flags work here too (`-lazyCounts`, `-staleCounts`, `-manyPlaylists`).
+// `-fakeCmdlp`: a stand-in for canopy-cmdlp at http://127.0.0.1:3002 (`FakeCmdlp`), and the demo
+// zone takes links through it (paste e.g. https://youtube.com/watch?v=abc). `-onlyCmdlp`: only
+// that, for a hub in the simulator (Settings › Links: http://127.0.0.1:3002, any token).
 let args = ProcessInfo.processInfo.arguments
-let session = PartySession(catalog: DemoCatalog(), engine: DemoPlaybackEngine())
+if args.contains("-onlyCmdlp") {
+    try await FakeCmdlp(port: 3002).run()
+}
+let fakeCmdlp = args.contains("-fakeCmdlp")
+if fakeCmdlp { Task { try await FakeCmdlp(port: 3002).run() } }
+let session = PartySession(catalog: DemoCatalog(), engine: fakeCmdlp
+    ? LinkHandoffEngine(music: DemoPlaybackEngine(), links: DemoPlaybackEngine()) : DemoPlaybackEngine())
+if fakeCmdlp {
+    session.linkZone = LinkZone.make(prefix: "dev")
+    session.linkService = CmdlpClient(baseURL: URL(string: "http://127.0.0.1:3002")!, token: "dev")
+}
 if let i = args.firstIndex(of: "-hostKey"), i + 1 < args.count { session.hostKey = args[i + 1] }
 if args.contains("-tvSetup") {
     session.configureHub(kind: .tv, zoneName: "Living Room", serviceName: "Apple Music")

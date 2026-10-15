@@ -278,6 +278,9 @@
 
   // MARK: Rendering
 
+  /** The last `notice` toasted (undefined until the first snapshot). */
+  let shownNotice;
+
   function applySnapshot(next) {
     if (dragging) { pendingSnap = next; return; }
     // A different hub now answers at this address (the old one left and another took the name):
@@ -300,6 +303,12 @@
     if (next.sonos !== undefined) sonosSetup = next.sonos;
     // The Crossfade button showed what was asked; the hub says so now.
     if (crossfadeWanted !== null && next.crossfade === crossfadeWanted) crossfadeWanted = null;
+    // Something everyone hears about once (a link that couldn't download); not one from before
+    // this page opened.
+    if (next.notice && next.notice.id !== shownNotice) {
+      if (shownNotice !== undefined) toast(next.notice.text, 5000);
+      shownNotice = next.notice.id;
+    } else if (shownNotice === undefined) shownNotice = null;
     render();
     openSettingsFromLink();
     hideSplash();
@@ -532,7 +541,7 @@
     title.textContent = item.track.title;
     const sub = document.createElement("p");
     sub.className = "row-sub";
-    sub.textContent = item.track.artist;
+    sub.textContent = rowSub(item.track);
     meta.append(title, sub);
     li.append(art, meta);
 
@@ -573,10 +582,21 @@
     for (const e of entries) { if (e.isIntersecting) onScreen.add(e.target); else onScreen.delete(e.target); }
   });
 
+  /** A row's second line: the artist, and while a song from a link downloads, how far it's got. */
+  function rowSub(track) {
+    const link = track.link;
+    if (!link || link.status !== "pending") return track.artist;
+    const progress = link.stage === "queued" ? "Waiting to download"
+      : link.stage === "converting" ? "Converting"
+      : link.percent != null ? `Downloading ${Math.floor(link.percent)}%` : "Downloading";
+    // First, so a narrow row cuts the artist rather than the progress.
+    return track.artist ? `${progress} · ${track.artist}` : progress;
+  }
+
   /** Everything fillRow draws from, so a row is rebuilt only when it would look different. */
   function rowSignature(item) {
     const t = item.track, label = requesterLabel(item);
-    return [t.title, t.artist, t.thumbnailURL || t.artworkURL || "", t.colors ? t.colors.background + t.colors.secondary : "",
+    return [t.title, rowSub(t), t.thumbnailURL || t.artworkURL || "", t.colors ? t.colors.background + t.colors.secondary : "",
       snap.lockedNextID === item.id, isForeign(item), label ? `${label.text}${label.mine}` : "", hosting(), snap.canReorder !== false].join("|");
   }
 
@@ -1086,11 +1106,55 @@
     if (event.key === "Enter") { event.preventDefault(); clearTimeout(searchTimer); runSearch(); $("search-input").blur(); }
   });
 
+  /** A whole query that's one http(s) address: a link to look up as a song, once the hub takes
+   * links (`snap.links`). Otherwise it's searched for, as any text. */
+  function linkIn(term) {
+    if (!snap || !snap.links || /\s/.test(term) || term.length > 2048) return null;
+    try {
+      const url = new URL(term);
+      return (url.protocol === "http:" || url.protocol === "https:") && url.hostname.includes(".") ? url.href : null;
+    } catch { return null; }
+  }
+
+  /** Looks a pasted link up on the hub: one result, or the hub's sentence for why not. A lookup can
+   * take a while (the hub answers 202 until it's done), so it says so meanwhile. */
+  async function lookUpLink(term, link, signal) {
+    results = [];
+    renderResults(term, "Looking up the link…");
+    try {
+      for (;;) {
+        const res = await fetch("/api/link", {
+          method: "POST", headers: { "Content-Type": "application/json" }, signal,
+          body: JSON.stringify({ url: link, clientId, key: hosting() ? hostKey : undefined }),
+        });
+        if (res.status === 202) {
+          await new Promise((done) => setTimeout(done, 1000));
+          if (signal.aborted) return;
+          continue;
+        }
+        if (!res.ok) {
+          const reply = await res.json().catch(() => null);
+          renderResults(term, (reply && reply.error) || "That link can't be added right now.");
+          return;
+        }
+        results = [await res.json()];
+        renderResults(term);
+        return;
+      }
+    } catch (error) {
+      if (error.name === "AbortError") return;
+      results = [];
+      renderResults(term, "That link can't be looked up right now. Try again in a moment.");
+    }
+  }
+
   async function runSearch() {
     const term = $("search-input").value.trim();
     if (searchAbort) searchAbort.abort();
     if (!term) { results = []; renderResults(); return; }
     searchAbort = new AbortController();
+    const link = linkIn(term);
+    if (link) return lookUpLink(term, link, searchAbort.signal);
     try {
       // Hosts also find the hub's own library songs.
       const key = hosting() ? `&key=${encodeURIComponent(hostKey)}` : "";
@@ -1136,7 +1200,9 @@
       }
       const sub = document.createElement("p");
       sub.className = "row-sub";
-      sub.textContent = track.album ? `${track.artist} · ${track.album}` : track.artist;
+      // A song from a link: where it's from ("YouTube") in place of the album.
+      const from = track.link ? (track.link.service !== track.artist ? track.link.service : null) : track.album;
+      sub.textContent = from ? `${track.artist} · ${from}` : track.artist;
       meta.append(title, sub);
       const button = document.createElement("button");
       button.type = "button";
@@ -1194,10 +1260,11 @@
       }
       delete button.dataset.busy;
       setButton(button, "Queued", true);
-    } catch {
+    } catch (error) {
       delete button.dataset.busy;
       setButton(button, "Add", false);
-      toast("Couldn't add that. Try again.");
+      // A link the hub refused says why ("Links can't play in this zone.").
+      toast((error.reason && error.reason.error) || "Couldn't add that. Try again.", error.reason ? 4000 : 2200);
     }
   });
 

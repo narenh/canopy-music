@@ -23,7 +23,7 @@ struct MotionArtworkView: View {
     var onShowing: (Bool) -> Void = { _ in }
 
     /// The video found for the song, until it can start (`waits`).
-    @State private var found: URL?
+    @State private var found: Found?
     @State private var url: URL?
     @State private var isShowing = false
     /// Whether the app is in the background (the video stops there). Not `scenePhase`: under this
@@ -79,8 +79,13 @@ struct MotionArtworkView: View {
             // simulator (which can't reach Apple Music) or with any service.
             let args = ProcessInfo.processInfo.arguments
             if let i = args.firstIndex(of: "-motionArtworkTestURL"), i + 1 < args.count {
-                found = URL(string: args[i + 1])
-                startIfReady()
+                // `-motionArtworkTestDelay <seconds>`: as if the lookup took that long, to try a
+                // lookup that answers after the page has slid in.
+                if let d = args.firstIndex(of: "-motionArtworkTestDelay"), d + 1 < args.count, let seconds = Double(args[d + 1]) {
+                    try? await Task.sleep(for: .seconds(seconds))
+                    guard !Task.isCancelled else { return }
+                }
+                found = URL(string: args[i + 1]).map { Found(url: $0, trackID: track.id) }
                 return
             }
             #endif
@@ -96,9 +101,12 @@ struct MotionArtworkView: View {
             }
             guard !Task.isCancelled else { return }
             motionLog("lookup \"\(track.title)\" (\(track.id), album \(track.albumID ?? "unknown")): \(video?.absoluteString ?? "none")")
-            found = video
-            startIfReady()
+            found = video.map { Found(url: $0, trackID: track.id) }
         }
+        // Started from here, not from the task: the task holds this view as it was when the song
+        // changed, so `waits` there could still say the page was sliding in. A lookup that
+        // answered after the page landed then never started its video.
+        .onChange(of: found) { startIfReady() }
         .onChange(of: waits) { startIfReady() }
         .onChange(of: isShowing) { _, showing in onShowing(showing) }
         // Low Power Mode: the video fades out to the still art and goes; it comes back without.
@@ -116,7 +124,24 @@ struct MotionArtworkView: View {
     }
 
     private func startIfReady() {
-        if !waits, !LowPowerMode.shared.isOn, url == nil { url = found }
+        guard url == nil else { return }
+        guard let found else {
+            motionLog("not starting \"\(track?.title ?? "nothing")\": no video (yet)")
+            return
+        }
+        if waits {
+            motionLog("not starting \"\(track?.title ?? "nothing")\": waits (sliding, or not the song playing)")
+        } else if LowPowerMode.shared.isOn {
+            motionLog("not starting \"\(track?.title ?? "nothing")\": Low Power Mode")
+        } else {
+            url = found.url
+        }
+    }
+
+    /// A video found, and the song it's for: a new song with the same video is still a change.
+    private struct Found: Equatable {
+        let url: URL
+        let trackID: QueueTrack.ID
     }
 }
 

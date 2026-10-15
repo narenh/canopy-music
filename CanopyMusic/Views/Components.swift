@@ -39,11 +39,13 @@ struct ArtworkView: View {
 struct ThemedBackground: View {
     let track: QueueTrack?
     let theme: ArtworkTheme
+    /// Whether the art drifts (`ArtworkBackground.moves`).
+    var moves = true
 
     var body: some View {
         ArtworkBackground(
             track: track, artworkURL: ArtworkURL.url(for: track, large: true),
-            theme: theme, source: ArtworkCache.shared
+            theme: theme, source: ArtworkCache.shared, moves: moves
         )
         .animation(.linear(duration: 2), value: track?.id)
     }

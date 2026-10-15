@@ -69,7 +69,8 @@ struct PartyView: View {
                 .frame(maxWidth: .infinity)
             }
         }
-        .background { ThemedBackground(track: shown?.track, theme: theme) }
+        // The art drifts while the music plays; paused, it stands still where it is.
+        .background { ThemedBackground(track: shown?.track, theme: theme, moves: session.isPlaying) }
         .overlay { FlightLayer(flights: flights, destinations: rowFrames, fallback: fallbackDestination) }
         .environment(\.artworkTheme, theme)
         // The song's colours change with the background, over the same 2 s.

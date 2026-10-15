@@ -1015,18 +1015,35 @@ public final class PartySession {
         continuation.yield(snap)
         if remote == nil { startDriftCheck() }
         continuation.onTermination = { [weak self] _ in
-            Task { @MainActor in self?.listeners[id] = nil }
+            Task { @MainActor in self?.removeListener(id) }
         }
         return stream
     }
 
+    /// With the last listener gone, so is the drift check (it starts again with the next).
+    private func removeListener(_ id: UUID) {
+        listeners[id] = nil
+        guard listeners.isEmpty else { return }
+        driftTask?.cancel()
+        driftTask = nil
+    }
+
+    /// For tests: the drift check is running.
+    var isCheckingDrift: Bool { driftTask != nil }
+
     // MARK: Internals
 
+    /// Every real change counts the version up; one that changed nothing (a move to where the
+    /// song already is, a lock already in place) isn't sent or saved. Staging is still checked:
+    /// a stage that failed is retried on the next change, however small.
     @discardableResult
     private func mutate<Result>(_ body: (inout QueueState) -> Result) -> Result {
+        let version = state.version
         let result = body(&state)
-        broadcast()
-        scheduleSave()
+        if state.version != version {
+            broadcast()
+            scheduleSave()
+        }
         Task { await syncStaging() }
         return result
     }
@@ -1610,14 +1627,19 @@ public final class PartySession {
 
     /// Listeners work out the playback time from the last snapshot, but the player's time also
     /// moves without an event: a song starts only once it has buffered, a seek lands late, or the
-    /// system seeks. So while anyone is listening, resend when the real time has drifted.
+    /// system seeks. So while anyone is listening, resend when the real time has drifted. With
+    /// nobody listening it stops (`removeListener`), and the next listener starts it again.
     private func startDriftCheck() {
         guard driftTask == nil else { return }
         driftTask = Task { [weak self] in
             while !Task.isCancelled {
                 try? await Task.sleep(for: .seconds(2))
-                guard let self else { return }
-                guard !self.listeners.isEmpty, let sent = self.lastSentPlayback else { continue }
+                guard !Task.isCancelled, let self else { return }
+                guard !self.listeners.isEmpty else {
+                    self.driftTask = nil
+                    return
+                }
+                guard let sent = self.lastSentPlayback else { continue }
                 let expected = sent.isPlaying ? sent.position + Date().timeIntervalSince(sent.capturedAt) : sent.position
                 if sent.isPlaying != self.engine.isPlaying || abs(self.position - expected) > Self.driftTolerance {
                     self.broadcast()

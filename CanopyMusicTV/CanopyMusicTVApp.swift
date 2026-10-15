@@ -12,8 +12,17 @@ import UIKit
 /// shows it as a display. See docs/multi-device.md.
 @main
 struct CanopyMusicTVApp: App {
-    @State private var model = TVModel()
+    @State private var model: TVModel
     @Environment(\.scenePhase) private var scenePhase
+
+    init() {
+        #if DEBUG
+        // As on the iPad: each debug line out at once when stdout is a pipe (`devicectl …
+        // --console`), not in 4 KB batches that leave the last lines unseen.
+        setvbuf(stdout, nil, _IOLBF, 0)
+        #endif
+        _model = State(initialValue: TVModel())
+    }
 
     var body: some Scene {
         scene

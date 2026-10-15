@@ -193,7 +193,7 @@ private final class TVLoopingVideoView: UIView {
         wantsToPlay = wanted
         rampTimer?.invalidate()
         rampTimer = nil
-        let canRamp = animated && active && (player.currentItem?.canPlaySlowForward ?? false)
+        let canRamp = Self.eases && animated && active && (player.currentItem?.canPlaySlowForward ?? false)
         guard canRamp else {
             if wanted { player.play() } else { player.pause() }
             return
@@ -205,8 +205,9 @@ private final class TVLoopingVideoView: UIView {
         }
     }
 
-    /// Trying 0.3 s with the slow-down curve flipped (was 0.25 s; 1 s eased out looked choppy,
-    /// 0.75 s too long, 0.5 s too noticeable on busy artwork).
+    /// Off, to try: the video stops and starts at once with the music. Easing the rate stuttered
+    /// on busy artwork at every length tried (0.25–1 s, eased in or out), like dropped frames.
+    static let eases = false
     static let rampDuration: TimeInterval = 0.3
     private var rampTimer: Timer?
     private var ramp: (from: Double, to: Double, start: Date)?

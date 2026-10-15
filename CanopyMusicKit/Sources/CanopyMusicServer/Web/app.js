@@ -425,8 +425,7 @@
     const current = nowPlaying(snap);
     applyTheme(current && current.track);
 
-    // The host can turn off reordering from phones (host control can always reorder).
-    document.querySelector(".list-head .hint").hidden = snap.canReorder === false && !hosting();
+    renderReorderHint();
     $("transport").hidden = !hosting();
     renderVolumeBar();
     const queueOff = snap.canQueue === false && !hosting();
@@ -458,6 +457,64 @@
     renderQueue();
     updateResultButtons();
     updateProgress();
+  }
+
+  // MARK: Reorder limits
+
+  /** "Limit reorders" as the hub has it (older hubs send none: never limited). */
+  const reorderLimit = () => (snap && snap.reorderLimit) || { isOn: false, allowance: 3, refillMinutes: 15 };
+
+  /** This phone's reorders under "Limit reorders": how many are left, and when the next one comes
+   * back (ms, or null); null when it isn't limited (the limit's off, reordering is off, or this
+   * is a host). Worked out as the hub does (`ReorderLimit`), from what the snapshot says it has
+   * spent, so the count and countdown move on between snapshots. The hub decides in the end. */
+  function myReorders() {
+    const limit = reorderLimit();
+    if (!limit.isOn || snap.canReorder === false || hosting()) return null;
+    const spend = snap.reorderSpends && snap.reorderSpends[clientId];
+    let spent = spend ? Math.min(spend.spent, limit.allowance) : 0;
+    let since = spend ? spend.since : 0;
+    const interval = limit.refillMinutes * 60000;
+    if (interval && spent > 0) {
+      const refills = Math.floor((Date.now() - since) / interval);
+      if (refills > 0) { spent = Math.max(0, spent - refills); since += refills * interval; }
+    }
+    return { left: limit.allowance - spent, nextRefill: interval && spent > 0 ? since + interval : null };
+  }
+
+  /** Whether this page can drag songs: reordering is on (hosts always can) and, under "Limit
+   * reorders", this phone has one left. */
+  function canDrag() {
+    if (hosting()) return true;
+    if (snap.canReorder === false) return false;
+    const mine = myReorders();
+    return !mine || mine.left > 0;
+  }
+  /** `canDrag()` as of the last `renderQueue`, for its rows. */
+  let dragAllowed = true;
+
+  /** Up next's hint: "Drag to reorder", or under the limit this phone's balance. With none left
+   * the handles go, and it says when the next one comes back ("No reorders left" when they
+   * don't refill). It moves on by itself: each minute of the countdown, and as one comes back. */
+  let reorderTimer = null;
+  function renderReorderHint() {
+    const hint = $("reorder-hint");
+    clearTimeout(reorderTimer);
+    const mine = myReorders();
+    hint.hidden = snap.canReorder === false && !hosting();
+    hint.classList.toggle("out", !!mine && mine.left === 0);
+    if (!mine) { hint.textContent = "Drag to reorder"; return; }
+    const untilRefill = mine.nextRefill === null ? null : mine.nextRefill - Date.now();
+    if (mine.left > 0) hint.textContent = mine.left === 1 ? "1 reorder left" : `${mine.left} reorders left`;
+    else if (untilRefill === null) hint.textContent = "No reorders left";
+    else hint.textContent = `You can reorder in ${Math.max(1, Math.ceil(untilRefill / 60000))} min`;
+    if (untilRefill === null) return;
+    const wait = mine.left === 0 ? (untilRefill % 60000 || 60000) : untilRefill;
+    reorderTimer = setTimeout(() => {
+      if (!snap || dragging) return; // the next snapshot catches up
+      renderReorderHint();
+      renderQueue();
+    }, Math.max(0, wait) + 50);
   }
 
   function requesterLabel(item) {
@@ -556,7 +613,7 @@
       lock.title = foreign ? `Queued on ${snap.service || "Spotify"}` : "Up next. Locked in.";
       lock.innerHTML = icons.lock;
       li.append(lock);
-    } else if (snap.canReorder !== false || hosting()) {
+    } else if (dragAllowed) {
       const handle = document.createElement("button");
       handle.type = "button";
       handle.className = "icon-btn handle";
@@ -577,11 +634,12 @@
   function rowSignature(item) {
     const t = item.track, label = requesterLabel(item);
     return [t.title, t.artist, t.thumbnailURL || t.artworkURL || "", t.colors ? t.colors.background + t.colors.secondary : "",
-      snap.lockedNextID === item.id, isForeign(item), label ? `${label.text}${label.mine}` : "", hosting(), snap.canReorder !== false].join("|");
+      snap.lockedNextID === item.id, isForeign(item), label ? `${label.text}${label.mine}` : "", hosting(), dragAllowed].join("|");
   }
 
   function renderQueue() {
     const list = $("queue");
+    dragAllowed = canDrag();
     // Spotify's own queue first (it plays first), then the zone's Up next.
     const items = [...foreignItems(snap), ...snap.upNext];
     const rows = list.children;
@@ -808,6 +866,7 @@
     if (!res.ok) {
       const text = await res.text().catch(() => "");
       const error = new Error(`${path} ${res.status} ${text.slice(0, 600)}`);
+      error.status = res.status;
       if (res.status === 409) { try { error.reason = JSON.parse(text); } catch {} }
       throw error;
     }
@@ -906,7 +965,7 @@
 
   $("queue").addEventListener("pointerdown", (event) => {
     const handle = event.target.closest(".handle");
-    if (!handle || !snap || (snap.canReorder === false && !hosting())) return;
+    if (!handle || !snap || !canDrag()) return;
     event.preventDefault();
     const list = $("queue");
     const li = handle.closest(".row");
@@ -994,7 +1053,13 @@
       const [moved] = items.splice(items.findIndex((i) => i.id === id), 1);
       items.splice(Math.max(0, d.to - foreignItems(snap).length), 0, moved);
       snap = { ...snap, upNext: items };
-      api("/api/move", { id, after, key: hosting() ? hostKey : undefined }).catch(() => toast("Couldn't move that one"));
+      // The client ID says whose reorder it is, under "Limit reorders". Refused (none left, as
+      // the hub counts them), the hub's order comes back.
+      api("/api/move", { id, after, clientId, key: hosting() ? hostKey : undefined }).catch((error) => {
+        const out = error.status === 403 && reorderLimit().isOn && !hosting();
+        toast(out ? "No reorders left" : "Couldn't move that one");
+        api("/api/state").then(applySnapshot).catch(() => {});
+      });
     }
     if (pendingSnap) { const next = pendingSnap; pendingSnap = null; applySnapshot(next); }
   }
@@ -2636,6 +2701,7 @@
     $("settings-player-issue").textContent = snap.playerIssue || "";
     $("settings-queue").checked = snap.canQueue !== false;
     $("settings-reorder").checked = snap.canReorder !== false;
+    fillReorderLimit();
     $("settings-displays").checked = snap.displaysCanControl !== false;
     // Apple TV hubs only (an iPad never sleeps).
     $("settings-screen").hidden = snap.hubKind !== "tv";
@@ -2647,6 +2713,56 @@
     fillWifi();
     fillPartyRow();
   }
+
+  /** "Limit reorders", under Reorder from phones (and only while that's on; older hubs don't
+   * have it), with its Initial balance and Refill while it's on, and the rule under them. */
+  function fillReorderLimit() {
+    const limit = reorderLimit();
+    const limiting = snap.canReorder !== false && limit.isOn;
+    $("settings-limit-row").hidden = snap.canReorder === false || !snap.reorderLimit;
+    $("settings-limit").checked = limit.isOn;
+    for (const id of ["settings-allowance-row", "settings-refill-row", "settings-limit-note"]) $(id).hidden = !limiting;
+    $("settings-allowance").textContent = limit.allowance;
+    for (const button of document.querySelectorAll("[data-allowance]")) {
+      const next = limit.allowance + Number(button.dataset.allowance);
+      button.disabled = next < 1 || next > 10;
+    }
+    $("settings-refill").textContent = refillLabel(limit.refillMinutes);
+    $("settings-refill-select").value = String(limit.refillMinutes);
+    $("settings-limit-note").textContent = reorderLimitNote(limit);
+  }
+
+  /** Refill's choices, as the iPad's picker has them (`ReorderLimit.refillChoices`); 0 is never. */
+  const refillChoices = [5, 10, 15, 30, 0];
+  const refillLabel = (minutes) => minutes > 0 ? `Every ${minutes} min` : "Never";
+  for (const minutes of refillChoices) $("settings-refill-select").add(new Option(refillLabel(minutes), String(minutes)));
+
+  /** The rule, as the iPad's footer says it (`ReorderLimit.summary`). */
+  function reorderLimitNote(limit) {
+    const times = limit.allowance === 1 ? "once" : `${limit.allowance} times`;
+    const rule = limit.refillMinutes <= 0 ? `Each person can reorder ${times} for the whole party.`
+      : limit.allowance === 1 ? `Each person can reorder once every ${limit.refillMinutes} minutes.`
+      : `Each person can reorder ${times} and gets another every ${limit.refillMinutes} minutes, up to ${limit.allowance}.`;
+    return `${rule} Hosts and displays aren't limited.`;
+  }
+
+  /** Sends the whole limit with one value changed, shown at once (so quick taps on − and + each
+   * count from the last); the hub's own comes back if it didn't take it. */
+  async function saveReorderLimit(change) {
+    const next = { ...reorderLimit(), ...change };
+    snap = { ...snap, reorderLimit: next };
+    fillReorderLimit();
+    renderReorderHint();
+    if (!(await saveSetting({ reorderLimit: next }))) api("/api/state").then(applySnapshot).catch(() => {});
+  }
+  $("settings-limit").addEventListener("change", (event) => saveReorderLimit({ isOn: event.target.checked }));
+  for (const button of document.querySelectorAll("[data-allowance]")) {
+    button.addEventListener("click", () => {
+      const allowance = Math.min(10, Math.max(1, reorderLimit().allowance + Number(button.dataset.allowance)));
+      if (allowance !== reorderLimit().allowance) saveReorderLimit({ allowance });
+    });
+  }
+  $("settings-refill-select").addEventListener("change", (event) => saveReorderLimit({ refillMinutes: Number(event.target.value) }));
 
   /** Saving is offered once someone has added a song (played or still in Up next); until then the
    * party is just the base playlist, nothing worth saving. */

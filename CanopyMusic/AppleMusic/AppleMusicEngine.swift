@@ -40,6 +40,9 @@ final class AppleMusicEngine: PlaybackEngine {
     private var reportedEnd = false
     /// Guards against reading the brief `.stopped` right after `play` as the end of the queue.
     private var sawPlaying = false
+    /// The time of the last reading while playing, for an end the player reports at the start
+    /// of the song (`handle`). nil after a seek, until it plays on.
+    private var lastPlayingTime: TimeInterval?
     private var isReplacingQueue = false
     /// Set by a `play` that failed or was given up on (`PartySession.engineCallTimeout`): the
     /// player's connection may have dropped, and reading it then blocks the main thread
@@ -198,6 +201,7 @@ final class AppleMusicEngine: PlaybackEngine {
         reportedEnd = false
         pausedByUs = false
         sawPlaying = false
+        lastPlayingTime = nil
         // A read still out was of the song before.
         readGeneration += 1
         isReading = false
@@ -367,6 +371,7 @@ final class AppleMusicEngine: PlaybackEngine {
     func restartCurrent() {
         cache(playing: cachedPlaying, time: 0)
         tracker.moved(to: 0, at: Date())
+        lastPlayingTime = nil
         _player?.restartCurrentEntry()
         noteCommand()
     }
@@ -374,6 +379,7 @@ final class AppleMusicEngine: PlaybackEngine {
     func seek(to time: TimeInterval) {
         cache(playing: cachedPlaying, time: time)
         tracker.moved(to: time, at: Date())
+        lastPlayingTime = nil
         _player?.playbackTime = time
         noteCommand()
     }
@@ -448,19 +454,34 @@ final class AppleMusicEngine: PlaybackEngine {
         }
         if let verdict { act(on: verdict, entry: reading.entryID) }
 
-        if status == .playing { sawPlaying = true }
+        let playedTo = lastPlayingTime
+        if status == .playing {
+            sawPlaying = true
+            lastPlayingTime = time
+        }
         if status != lastStatus {
-            log("status \(String(describing: lastStatus)) -> \(status) t=\(Int(time))")
+            let end = cachedDuration.map { " of \(Int($0))\(duration == nil ? " (from the library)" : "")" } ?? ""
+            let before = playedTo.map { String(format: ", last playing at %.1f", $0) } ?? ""
+            log("status \(String(describing: lastStatus)) -> \(status) t=\(String(format: "%.1f", time))\(end)\(before)")
             lastStatus = status
             onEvent?(.statusChanged)
         }
 
         // The player stops (or pauses on its own at the end of the last entry) when nothing was staged.
-        if sawPlaying, !reportedEnd, stagedTrackID == nil, !pausedByUs, currentEntryID != nil, status == .stopped || status == .paused,
-           let duration, time == 0 || time >= duration - 1.5 {
-            reportedEnd = true
-            log("reachedEnd")
-            onEvent?(.reachedEnd)
+        if sawPlaying, !reportedEnd, stagedTrackID == nil, !pausedByUs, status == .stopped || status == .paused {
+            let atEnd = currentEntryID != nil && duration.map { time == 0 || time >= $0 - 1.5 } ?? false
+            // A library song on the Apple TV (debug builds' library identity) pauses at its end
+            // back near its start (seen at t=1): it was playing within the last few seconds, and
+            // now its time has gone back. Its length may only be the library's.
+            var wentBackFromEnd = false
+            if let playedTo, let length = cachedDuration {
+                wentBackFromEnd = playedTo >= length - 3 && time < playedTo - 2
+            }
+            if atEnd || wentBackFromEnd {
+                reportedEnd = true
+                log(atEnd ? "reachedEnd" : "reachedEnd (went back to the start from the end)")
+                onEvent?(.reachedEnd)
+            }
         }
     }
 

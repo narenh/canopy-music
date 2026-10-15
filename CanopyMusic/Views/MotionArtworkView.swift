@@ -45,10 +45,10 @@ struct MotionArtworkView: View {
     /// always can. On an iPad hub on iOS 27 the video is cut off from the audio session
     /// (`LoopingVideoView.start`); a Mac hub on macOS 27 has no cut-off but was seen not to pause.
     /// Before 27 a hub keeps the still art: a paused party is far worse than art that doesn't move.
-    /// To try: paused, the video (stopped at once, `LoopingVideoView.eases` off) fades to the
-    /// still art over `pauseFade`, and back in as the music plays.
+    /// To try: paused, the video fades to the still art over `pauseFade`, still moving until it's
+    /// gone, then stops (`LoopingVideoView.eases` off); it plays and fades back in with the music.
     static let fadesWhilePaused = true
-    static let pauseFade: TimeInterval = 0.4
+    static let pauseFade: TimeInterval = 0.5
 
     static func leavesMusicAlone(isDisplay: Bool) -> Bool {
         if isDisplay { return true }
@@ -356,7 +356,19 @@ private final class LoopingVideoView: UIView {
         let canRamp = Self.eases && animated && active && (player.currentItem?.canPlaySlowForward ?? false)
         motionLog("\(wanted ? "play" : "pause") at \(String(format: "%.3f", player.currentTime().seconds)) s (active: \(active), music playing: \(playing), \(canRamp ? "eased" : "at once"))")
         guard canRamp else {
-            if wanted { player.play() } else { player.pause() }
+            if wanted {
+                player.play()
+            } else if animated, active, MotionArtworkView.fadesWhilePaused {
+                // The music paused: it keeps moving while it fades to the still art, then stops.
+                rampTimer = Timer.scheduledTimer(withTimeInterval: MotionArtworkView.pauseFade, repeats: false) { [weak self] _ in
+                    MainActor.assumeIsolated {
+                        self?.rampTimer = nil
+                        self?.player?.pause()
+                    }
+                }
+            } else {
+                player.pause()
+            }
             return
         }
         ramp = (from: Double(player.rate), to: wanted ? 1 : 0, start: Date())

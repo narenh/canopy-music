@@ -27,10 +27,10 @@ struct TVMotionArtworkView: View {
     @Environment(\.screenCovered) private var screenCovered
     @Environment(\.displayScale) private var displayScale
 
-    /// To try, as the iPad's (`MotionArtworkView.fadesWhilePaused`): paused, the video (stopped at
-    /// once, `TVLoopingVideoView.eases` off) fades to the still art, and back in as it plays.
+    /// To try, as the iPad's (`MotionArtworkView.fadesWhilePaused`): paused, the video fades to
+    /// the still art, still moving until it's gone, then stops; it plays and fades back in.
     static let fadesWhilePaused = true
-    static let pauseFade: TimeInterval = 0.4
+    static let pauseFade: TimeInterval = 0.5
 
     var body: some View {
         ZStack {
@@ -203,7 +203,19 @@ private final class TVLoopingVideoView: UIView {
         rampTimer = nil
         let canRamp = Self.eases && animated && active && (player.currentItem?.canPlaySlowForward ?? false)
         guard canRamp else {
-            if wanted { player.play() } else { player.pause() }
+            if wanted {
+                player.play()
+            } else if animated, active, TVMotionArtworkView.fadesWhilePaused {
+                // The music paused: it keeps moving while it fades to the still art, then stops.
+                rampTimer = Timer.scheduledTimer(withTimeInterval: TVMotionArtworkView.pauseFade, repeats: false) { [weak self] _ in
+                    MainActor.assumeIsolated {
+                        self?.rampTimer = nil
+                        self?.player?.pause()
+                    }
+                }
+            } else {
+                player.pause()
+            }
             return
         }
         ramp = (from: Double(player.rate), to: wanted ? 1 : 0, start: Date())

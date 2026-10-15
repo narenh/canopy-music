@@ -45,6 +45,11 @@ struct MotionArtworkView: View {
     /// always can. On an iPad hub on iOS 27 the video is cut off from the audio session
     /// (`LoopingVideoView.start`); a Mac hub on macOS 27 has no cut-off but was seen not to pause.
     /// Before 27 a hub keeps the still art: a paused party is far worse than art that doesn't move.
+    /// To try: paused, the video (stopped at once, `LoopingVideoView.eases` off) fades to the
+    /// still art over `pauseFade`, and back in as the music plays.
+    static let fadesWhilePaused = true
+    static let pauseFade: TimeInterval = 0.2
+
     static func leavesMusicAlone(isDisplay: Bool) -> Bool {
         if isDisplay { return true }
         // On a Mac this is macOS 27 (an iPad app's iOS version follows the Mac's).
@@ -82,6 +87,9 @@ struct MotionArtworkView: View {
                 }
                 .id(url)
                 .opacity(isShowing ? 1 : 0)
+                // Paused, the stopped video fades quickly to the still art, and back as it plays.
+                .opacity(isPlaying || !Self.fadesWhilePaused ? 1 : 0)
+                .animation(.easeInOut(duration: Self.pauseFade), value: isPlaying)
             }
         }
         .onGeometryChange(for: CGFloat.self, of: { max($0.size.width, $0.size.height) }) { side = $0 }

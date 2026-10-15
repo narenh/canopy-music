@@ -27,6 +27,11 @@ struct TVMotionArtworkView: View {
     @Environment(\.screenCovered) private var screenCovered
     @Environment(\.displayScale) private var displayScale
 
+    /// To try, as the iPad's (`MotionArtworkView.fadesWhilePaused`): paused, the video (stopped at
+    /// once, `TVLoopingVideoView.eases` off) fades to the still art, and back in as it plays.
+    static let fadesWhilePaused = true
+    static let pauseFade: TimeInterval = 0.2
+
     var body: some View {
         ZStack {
             // The artwork's size before there's a video, for `side`.
@@ -40,6 +45,9 @@ struct TVMotionArtworkView: View {
                 }
                 .id(url)
                 .opacity(isShowing ? 1 : 0)
+                // Paused, the stopped video fades quickly to the still art, and back as it plays.
+                .opacity(isPlaying || !Self.fadesWhilePaused ? 1 : 0)
+                .animation(.easeInOut(duration: Self.pauseFade), value: isPlaying)
             }
         }
         .onGeometryChange(for: CGFloat.self, of: { max($0.size.width, $0.size.height) }) { side = $0 }

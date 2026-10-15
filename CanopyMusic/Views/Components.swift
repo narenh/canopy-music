@@ -96,6 +96,19 @@ struct ExplicitBadge: View {
     }
 }
 
+/// A search result that's this hub's own library copy (`QueueTrack.libraryID`), as `ExplicitBadge`.
+struct LibraryBadge: View {
+    var body: some View {
+        Text("Library")
+            .font(.system(size: 10, weight: .bold))
+            .foregroundStyle(.black.opacity(0.8))
+            .padding(.horizontal, 4)
+            .frame(height: 15)
+            .background(.white.opacity(0.55), in: RoundedRectangle(cornerRadius: 3))
+            .accessibilityLabel("In your library")
+    }
+}
+
 extension EnvironmentValues {
     /// What an unnamed request from the hub itself is labelled: "iPad", or the kind of Mac the
     /// hub is when its snapshots say (`PartySession.hubDevice`). Set at the root.

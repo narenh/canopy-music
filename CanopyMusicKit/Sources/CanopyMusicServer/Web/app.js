@@ -1036,7 +1036,9 @@
     if (!term) { results = []; renderResults(); return; }
     searchAbort = new AbortController();
     try {
-      const res = await fetch(`/api/search?q=${encodeURIComponent(term)}`, { signal: searchAbort.signal });
+      // Hosts also find the hub's own library songs.
+      const key = hosting() ? `&key=${encodeURIComponent(hostKey)}` : "";
+      const res = await fetch(`/api/search?q=${encodeURIComponent(term)}${key}`, { signal: searchAbort.signal });
       if (!res.ok) throw new Error(`${res.status}`);
       results = await res.json();
       renderResults(term);
@@ -1068,6 +1070,13 @@
         badge.textContent = "E";
         badge.title = "Explicit";
         title.append(" ", badge);
+      }
+      // The hub's own library copy (a host's search): its art and titles are the library's.
+      if (track.libraryID) {
+        const tag = document.createElement("span");
+        tag.className = "library-tag";
+        tag.textContent = "Library";
+        title.append(" ", tag);
       }
       const sub = document.createElement("p");
       sub.className = "row-sub";

@@ -3,6 +3,11 @@ import Foundation
 /// Search and playlists for one music service.
 public protocol MusicCatalog: Sendable {
     func searchSongs(_ term: String) async throws -> [QueueTrack]
+    /// A host's search: `searchSongs`, with the account's own library songs as its library copies
+    /// (`QueueTrack.libraryID`), songs only in the library included, each song once
+    /// (`LibraryDuplicates`). `includingLibrary` false is `searchSongs`. Catalogs without library
+    /// songs answer as `searchSongs`.
+    func searchSongs(_ term: String, includingLibrary: Bool) async throws -> [QueueTrack]
     func libraryPlaylists() async throws -> [PlaylistSummary]
     func searchPlaylists(_ term: String) async throws -> [PlaylistSummary]
     func tracks(in playlist: PlaylistSummary) async throws -> [QueueTrack]
@@ -35,6 +40,7 @@ public protocol LibraryArtworkSource: Sendable {
 }
 
 public extension MusicCatalog {
+    func searchSongs(_ term: String, includingLibrary: Bool) async throws -> [QueueTrack] { try await searchSongs(term) }
     var motionArtwork: MotionArtworkLookup? { nil }
     var libraryArtwork: (any LibraryArtworkSource)? { nil }
     func songCount(of playlist: PlaylistSummary) async throws -> Int? { playlist.songCount }

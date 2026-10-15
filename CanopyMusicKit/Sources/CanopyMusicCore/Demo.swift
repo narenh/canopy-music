@@ -1,7 +1,9 @@
 #if DEBUG
 // Demo provider: debug builds only (simulator, previews, the Mac dev server).
 
+import CoreGraphics
 import Foundation
+import ImageIO
 
 /// Fake catalog for the simulator and previews, where MusicKit playback isn't available.
 public struct DemoCatalog: MusicCatalog {
@@ -69,11 +71,33 @@ public struct DemoCatalog: MusicCatalog {
 
     public func searchSongs(_ term: String) async throws -> [QueueTrack] {
         try await Task.sleep(for: .milliseconds(250))
-        let needle = term.lowercased()
-        return Self.allTracks.filter {
-            $0.title.lowercased().contains(needle) || $0.artist.lowercased().contains(needle)
-        }
+        return Self.allTracks.filter { Self.matches($0, term) }
     }
+
+    /// Hosts also find the demo library: its copy of "Dreams" in place of the catalog's, and two
+    /// uploads only in the library ("harbour", "paper"), with art from `DemoLibraryArtwork`.
+    public func searchSongs(_ term: String, includingLibrary: Bool) async throws -> [QueueTrack] {
+        let catalog = try await searchSongs(term)
+        guard includingLibrary else { return catalog }
+        let library = Self.librarySongs.filter { Self.matches($0.track, term) }
+        return LibraryDuplicates.collapse(library.map { .library($0) } + catalog.map { .catalog($0) })
+    }
+
+    private static func matches(_ track: QueueTrack, _ term: String) -> Bool {
+        let needle = term.lowercased()
+        return track.title.lowercased().contains(needle) || track.artist.lowercased().contains(needle)
+    }
+
+    static let librarySongs: [LibraryDuplicates.LibraryResult] = [
+        .init(track: track(1).libraryCopy(libraryID: "i.DemoDreams1", title: "Dreams (2004 Remaster)", artist: nil, album: nil),
+              isAppleMusicCopy: false, hasArtwork: true),
+        .init(track: .libraryOnly(libraryID: "i.DemoUpload1", title: "Harbour Lights (Live at the Lido)", artist: "The Tidelines",
+                                  album: "Bootlegs", duration: 30), isAppleMusicCopy: false, hasArtwork: true),
+        .init(track: .libraryOnly(libraryID: "i.DemoUpload3", title: "Paper Planes (Demo)", artist: "Juniper Row",
+                                  album: "Demos 2009", duration: 30), isAppleMusicCopy: false, hasArtwork: false),
+    ]
+
+    public var libraryArtwork: (any LibraryArtworkSource)? { DemoLibraryArtwork() }
 
     /// Song counts come with the list, as Spotify's do. `-lazyCounts` leaves them out, as Apple
     /// Music's library list does, so rows count themselves (`songCount(of:)`). `-staleCounts`
@@ -181,6 +205,35 @@ enum DemoSavedPlaylists {
     static func add(_ playlist: Saved) {
         let next = [playlist] + all()
         UserDefaults.standard.set(try? JSONEncoder().encode(next), forKey: key)
+    }
+}
+
+/// The demo library's art, as the hub relays it (`/api/artwork/…`): a square of one of the demo
+/// colours per song, or none for the songs the demo library has no art for.
+struct DemoLibraryArtwork: LibraryArtworkSource {
+    func artwork(libraryID: String, size: Int) async throws -> Data? {
+        guard let index = DemoCatalog.librarySongs.firstIndex(where: { $0.track.libraryID == libraryID }),
+              DemoCatalog.librarySongs[index].hasArtwork else { return nil }
+        let colors = DemoCatalog.palette[(index + 3) % DemoCatalog.palette.count]
+        let side = max(16, min(size, 1200))
+        guard let space = CGColorSpace(name: CGColorSpace.sRGB),
+              let context = CGContext(data: nil, width: side, height: side, bitsPerComponent: 8, bytesPerRow: 0, space: space,
+                                      bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue) else { return nil }
+        context.setFillColor(Self.color(colors.background))
+        context.fill(CGRect(x: 0, y: 0, width: side, height: side))
+        context.setFillColor(Self.color(colors.secondary))
+        context.fillEllipse(in: CGRect(x: side / 4, y: side / 4, width: side / 2, height: side / 2))
+        guard let image = context.makeImage() else { return nil }
+        let data = NSMutableData()
+        guard let destination = CGImageDestinationCreateWithData(data, "public.png" as CFString, 1, nil) else { return nil }
+        CGImageDestinationAddImage(destination, image, nil)
+        return CGImageDestinationFinalize(destination) ? data as Data : nil
+    }
+
+    private static func color(_ hex: String) -> CGColor {
+        let value = Int(hex.dropFirst(), radix: 16) ?? 0
+        return CGColor(red: CGFloat((value >> 16) & 0xFF) / 255, green: CGFloat((value >> 8) & 0xFF) / 255,
+                       blue: CGFloat(value & 0xFF) / 255, alpha: 1)
     }
 }
 

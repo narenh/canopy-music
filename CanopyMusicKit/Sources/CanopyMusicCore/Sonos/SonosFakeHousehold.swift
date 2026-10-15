@@ -88,6 +88,12 @@ public struct SonosFakeCatalog: MusicCatalog {
         try await demo.searchSongs(term).map(sonosTrack)
     }
 
+    public func searchSongs(_ term: String, includingLibrary: Bool) async throws -> [QueueTrack] {
+        try await demo.searchSongs(term, includingLibrary: includingLibrary).map(sonosTrack)
+    }
+
+    public var libraryArtwork: (any LibraryArtworkSource)? { demo.libraryArtwork }
+
     public func libraryPlaylists() async throws -> [PlaylistSummary] { try await demo.libraryPlaylists() }
     public func searchPlaylists(_ term: String) async throws -> [PlaylistSummary] { try await demo.searchPlaylists(term) }
 

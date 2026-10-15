@@ -143,11 +143,13 @@ public final class PartyServer: Sendable {
             return HTTPResponse(statusCode: .ok, headers: [.contentType: "image/jpeg", .cacheControl: "max-age=86400"], body: data)
         }
 
+        // Hosts (`key`) also find the hub's own library songs (`searchShowsLibrary`).
         await server.appendRoute("GET /api/search") { request in
             let term = request.query["q"]?.trimmingCharacters(in: .whitespaces) ?? ""
             guard !term.isEmpty else { return try .json([QueueTrack]()) }
+            let library = Self.searchShowsLibrary(isHost: await session.isHost(key: request.query["key"]))
             do {
-                return try .json(try await session.catalog.searchSongs(term))
+                return try .json(try await session.catalog.searchSongs(term, includingLibrary: library))
             } catch {
                 return .serviceFailed(error)
             }
@@ -716,6 +718,13 @@ struct HostSonosBody: Decodable {
 }
 
 extension PartyServer {
+    /// Whether guests' searches (phones without Host Control, and displays) find the hub's own
+    /// library songs too, as hosts' do. `true` opens them to everyone.
+    static let guestsSearchTheLibrary = false
+
+    /// Whether a search from the page includes the hub's library (`MusicCatalog.searchSongs(_:includingLibrary:)`).
+    static func searchShowsLibrary(isHost: Bool) -> Bool { isHost || guestsSearchTheLibrary }
+
     @MainActor
     static func playback(_ body: PlaybackBody, session: PartySession) async -> HTTPResponse {
         switch body.action {

@@ -57,6 +57,8 @@ struct AppleMusicCatalog: MusicCatalog {
     var memory: CatalogMatchMemory = .shared
     /// How the most recent library playlist loads went, including which tracks were left out.
     var reports = PlaylistLoadReports()
+    /// The songs of library albums a host's search named, by album (`searchLibrarySongs`).
+    private let albumTracks = LibraryAlbumTracks()
     /// Animated album artwork for Now Playing (see `MotionArtwork`).
     let motionArtwork: MotionArtworkLookup? = MotionArtworkLookup(
         fetchReportingURL: AppleMusicCatalog.catalogData,
@@ -88,7 +90,7 @@ struct AppleMusicCatalog: MusicCatalog {
     /// `includingLibrary` (a host's search): the library's songs come as its own copies (its art
     /// and titles), songs only in the library too, and each song once (`LibraryDuplicates`).
     func searchSongs(_ term: String, includingLibrary: Bool) async throws -> [QueueTrack] {
-        async let librarySongs = try? searchLibrarySongs(term)
+        async let librarySongs = try? searchLibrarySongs(term, byAlbum: includingLibrary)
         async let typedSongs = catalogSearch(term)
         let suggestions = try? await MusicCatalogSearchSuggestionsRequest(term: term, includingTopResultsOfTypes: [Song.self]).response()
         let topSongs: [Song] = suggestions?.topResults.compactMap {
@@ -128,13 +130,46 @@ struct AppleMusicCatalog: MusicCatalog {
     }
 
     /// Library search via the Apple Music API, mapped to catalog songs (https artwork, playable by
-    /// id) where they have one; the rest are songs only in the library.
-    private func searchLibrarySongs(_ term: String) async throws -> [LoadedTrack] {
+    /// id) where they have one; the rest are songs only in the library. `byAlbum` (a host's
+    /// search): the songs of the library albums the words name too, which the song search doesn't
+    /// find by album title (`LibraryAlbumSearch`), from the same request; each album's tracks are
+    /// fetched once and kept a while (`LibraryAlbumTracks`), so typing on costs nothing more.
+    private func searchLibrarySongs(_ term: String, byAlbum: Bool) async throws -> [LoadedTrack] {
         let encoded = term.replacingOccurrences(of: " ", with: "+")
             .addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? term
-        let response: LibrarySearchResponse = try await fetch("/v1/me/library/search?term=\(encoded)&types=library-songs&limit=10&include=catalog")
+        let types = byAlbum ? "library-songs,library-albums" : "library-songs"
+        let response: LibrarySearchResponse = try await fetch("/v1/me/library/search?term=\(encoded)&types=\(types)&limit=10&include=catalog")
+        var resources = response.results.librarySongs?.data ?? []
+        if byAlbum {
+            let albums = (response.results.libraryAlbums?.data ?? []).map {
+                LibraryAlbumSearch.Album(id: $0.id, name: $0.attributes?.name ?? "", artist: $0.attributes?.artistName ?? "")
+            }
+            let wanted = LibraryAlbumSearch.albumsToExpand(albums, for: term)
+            let tracks = await withTaskGroup(of: (String, [LibrarySongResource]).self) { group in
+                for album in wanted {
+                    group.addTask { (album.id, await albumTracks.tracks(of: album.id) { try await libraryAlbumSongs(id: $0) }) }
+                }
+                var tracks: [String: [LibrarySongResource]] = [:]
+                for await (id, songs) in group { tracks[id] = songs }
+                return tracks
+            }
+            var seen = Set(resources.compactMap(\.id))
+            resources += LibraryAlbumSearch.songs(of: wanted, from: tracks).filter { $0.id.map { seen.insert($0).inserted } ?? true }
+            #if DEBUG
+            if !albums.isEmpty {
+                print("[search] \"\(term)\": library albums \(albums.count), expanded \(wanted.map(\.name)) (\(tracks.values.map(\.count).reduce(0, +)) songs)")
+            }
+            #endif
+        }
         // Uses remembered matches for uploads but doesn't search for them: this runs as you type.
-        return try await catalogSongs(for: response.results.librarySongs?.data ?? [], searchUnlabelled: false).loaded
+        return try await catalogSongs(for: resources, searchUnlabelled: false).loaded
+    }
+
+    /// A library album's songs, with their catalog songs, up to 100 (one page; a search adds
+    /// `LibraryAlbumSearch.maxSongs` at most).
+    private func libraryAlbumSongs(id: String) async throws -> [LibrarySongResource] {
+        let page: APIPage<LibrarySongResource> = try await fetch("/v1/me/library/albums/\(id)/tracks?limit=100&include=catalog")
+        return page.data
     }
 
     func searchPlaylists(_ term: String) async throws -> [PlaylistSummary] {
@@ -744,9 +779,47 @@ private struct LibraryPlaylistResource: Decodable {
 private struct LibrarySearchResponse: Decodable {
     struct Results: Decodable {
         var librarySongs: APIPage<LibrarySongResource>?
-        enum CodingKeys: String, CodingKey { case librarySongs = "library-songs" }
+        var libraryAlbums: APIPage<LibraryAlbumResource>?
+        enum CodingKeys: String, CodingKey {
+            case librarySongs = "library-songs"
+            case libraryAlbums = "library-albums"
+        }
     }
     var results: Results
+}
+
+private struct LibraryAlbumResource: Decodable {
+    struct Attributes: Decodable {
+        var name: String?
+        var artistName: String?
+    }
+    /// The library album id ("l.…").
+    var id: String
+    var attributes: Attributes?
+}
+
+/// Library albums' songs, by album id, for a host's search as they type (`searchLibrarySongs`):
+/// each album fetched once however many keystrokes ask at once, and kept `lifetime`, so the next
+/// keystrokes add no request. An album that fails to load is asked again next time.
+private actor LibraryAlbumTracks {
+    static let lifetime: TimeInterval = 10 * 60
+    static let maxAlbums = 50
+
+    private var albums: [String: (songs: [LibrarySongResource], at: Date)] = [:]
+    private var loading: [String: Task<[LibrarySongResource]?, Never>] = [:]
+
+    func tracks(of id: String, load: @escaping @Sendable (String) async throws -> [LibrarySongResource]) async -> [LibrarySongResource] {
+        if let kept = albums[id], Date().timeIntervalSince(kept.at) < Self.lifetime { return kept.songs }
+        let task = loading[id] ?? Task { try? await load(id) }
+        loading[id] = task
+        let songs = await task.value
+        loading[id] = nil
+        guard let songs else { return [] }
+        if albums.count >= Self.maxAlbums { albums = albums.filter { Date().timeIntervalSince($0.value.at) < Self.lifetime } }
+        if albums.count >= Self.maxAlbums { albums = [:] }
+        albums[id] = (songs, Date())
+        return songs
+    }
 }
 
 private struct LibrarySongResource: Decodable {

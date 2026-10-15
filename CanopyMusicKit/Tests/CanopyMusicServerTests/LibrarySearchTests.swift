@@ -50,6 +50,9 @@ struct LibrarySearchTests {
         #expect(dreams.map(\.id) == ["demo-1"])
         #expect(dreams.first?.libraryID == "i.DemoDreams1")
         #expect(dreams.first?.title == "Dreams (2004 Remaster)")
+        // An album title finds its songs (the song search doesn't match album titles), for hosts only.
+        #expect(try await search(18866, "q=bootlegs&key=secret").map(\.id) == ["i.DemoUpload1"])
+        #expect(try await search(18866, "q=bootlegs").isEmpty)
 
         // A host adds it as the page does (the whole track), and it plays as it was found.
         _ = hub.add(upload, by: Requester(name: "Host", clientID: "host", origin: .phone))

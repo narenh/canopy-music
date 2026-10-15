@@ -75,11 +75,15 @@ public struct DemoCatalog: MusicCatalog {
     }
 
     /// Hosts also find the demo library: its copy of "Dreams" in place of the catalog's, and two
-    /// uploads only in the library ("harbour", "paper"), with art from `DemoLibraryArtwork`.
+    /// uploads only in the library ("harbour", "paper"), with art from `DemoLibraryArtwork`. Their
+    /// albums' titles find them too ("bootlegs"), as Apple Music's do (`LibraryAlbumSearch`).
     public func searchSongs(_ term: String, includingLibrary: Bool) async throws -> [QueueTrack] {
         let catalog = try await searchSongs(term)
         guard includingLibrary else { return catalog }
-        let library = Self.librarySongs.filter { Self.matches($0.track, term) }
+        let byAlbum = Dictionary(grouping: Self.librarySongs, by: \.track.album)
+        let albums = byAlbum.keys.sorted().map { LibraryAlbumSearch.Album(id: $0, name: $0, artist: byAlbum[$0]?.first?.track.artist ?? "") }
+        let fromAlbums = LibraryAlbumSearch.songs(of: LibraryAlbumSearch.albumsToExpand(albums, for: term), from: byAlbum)
+        let library = Self.librarySongs.filter { Self.matches($0.track, term) } + fromAlbums
         return LibraryDuplicates.collapse(library.map { .library($0) } + catalog.map { .catalog($0) })
     }
 

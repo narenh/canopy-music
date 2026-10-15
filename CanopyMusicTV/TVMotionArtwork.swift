@@ -205,7 +205,8 @@ private final class TVLoopingVideoView: UIView {
         }
     }
 
-    static let rampDuration: TimeInterval = 0.25
+    /// Trying 1 s (was 0.25 s): long enough to see it slow, as Apple Music's does.
+    static let rampDuration: TimeInterval = 1
     private var rampTimer: Timer?
     private var ramp: (from: Double, to: Double, start: Date)?
 

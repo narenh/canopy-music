@@ -383,8 +383,9 @@ private final class LoopingVideoView: UIView {
         setActive(requested.active, playing: requested.playing, animated: false)
     }
 
-    /// Trying 0.5 s with the slow-down curve flipped (was 0.25 s; 1 s eased out looked choppy, 0.75 s too long).
-    static let rampDuration: TimeInterval = 0.5
+    /// Trying 0.3 s with the slow-down curve flipped (was 0.25 s; 1 s eased out looked choppy,
+    /// 0.75 s too long, 0.5 s too noticeable on busy artwork).
+    static let rampDuration: TimeInterval = 0.3
     private var rampTimer: Timer?
     private var ramp: (from: Double, to: Double, start: Date)?
 

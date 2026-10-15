@@ -82,8 +82,17 @@ struct MotionArtworkView: View {
             }
             #endif
             guard let lookup = catalog.motionArtwork else { return }
-            let video = await lookup.videoURL(for: track)
+            var video = await lookup.videoURL(for: track)
+            // Once more a moment later: a failed lookup isn't remembered, but nothing asks again
+            // until the song changes, so one hiccup cost the whole song. An album known to have
+            // none answers from the lookup's memory.
+            if video == nil {
+                try? await Task.sleep(for: .seconds(4))
+                guard !Task.isCancelled else { return }
+                video = await lookup.videoURL(for: track)
+            }
             guard !Task.isCancelled else { return }
+            motionLog("lookup \"\(track.title)\" (\(track.id), album \(track.albumID ?? "unknown")): \(video?.absoluteString ?? "none")")
             found = video
             startIfReady()
         }

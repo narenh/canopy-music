@@ -298,7 +298,7 @@ struct HostView: View {
                     }
                     .listRowBackground(Color.clear)
                 } footer: {
-                    Text("Press and hold the Canopy logo to return to this screen. PIN required if set. Turn on Guided Access (triple-click the top button) so guests can’t leave the app.")
+                    Text("Press and hold the Canopy Music logo to return to this screen. PIN required if set. Turn on Guided Access (triple-click the top button) so guests can’t leave the app.")
                 }
             }
             .scrollContentBackground(.hidden)

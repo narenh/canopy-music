@@ -788,7 +788,6 @@ private struct SettingsSheet: View {
                     Text("Used when crossfade is on. Apple Music's AutoMix isn't available to other apps.")
                 }
                 .listRowBackground(Color.white.opacity(0.08))
-                LinksSection()
                 // A party to save, or a zone to end, only once it's live.
                 if model.isLive, model.session.partySaveInfo.offersSave {
                     Section {
@@ -812,9 +811,15 @@ private struct SettingsSheet: View {
                     NavigationLink("Link test") { LinkTestView().environment(model) }
                 }
                 .listRowBackground(Color.white.opacity(0.08))
+                // Last, collapsed. Debug builds only: Release has no Advanced section.
+                AdvancedSection()
                 #endif
             }
             .scrollContentBackground(.hidden)
+            #if DEBUG
+            // `-settingsBottom`: scrolls to the end (Advanced) once the sheet is up, for screenshots.
+            .modifier(DebugScrollToEnd())
+            #endif
             .endZoneConfirmation(isPresented: $confirmingEnd) { dismiss() }
             .sheet(isPresented: $savingPlaylist) { PartyPlaylistSheet(purpose: .save).environment(model) }
             #if DEBUG
@@ -850,79 +855,141 @@ private struct SettingsSheet: View {
     }
 }
 
-// MARK: - Links
+// MARK: - Advanced
 
-/// The hub's canopy-cmdlp server, which turns links guests paste into songs. Links stay hidden
-/// until the address and a token are both set. Only the token's last four characters show.
-private struct LinksSection: View {
+#if DEBUG
+/// Settings' last section, collapsed until opened. Debug builds only: Release has no Advanced
+/// section, and no default server or token. The direct audio server (canopy-cmdlp) turns links
+/// guests paste into songs; empty fields use the defaults (`AppModel.linkDefaults`). Only a
+/// saved token's last four characters show. "Normalize audio" shows once Test Connection has
+/// worked for the URL and token in use (`AppModel.linkVerified`).
+private struct AdvancedSection: View {
     @Environment(AppModel.self) private var model
+    @State private var expanded = ProcessInfo.processInfo.arguments.contains("-showAdvanced")
     @State private var tokenDraft = ""
     @State private var testResult: String?
     @State private var isTesting = false
 
+    private var draftIsEmpty: Bool { tokenDraft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
+
+    /// What the empty token field says: the saved token's last four, else whether the default is used.
+    private var tokenPrompt: String {
+        if let hint = model.linkTokenHint { return "…\(hint)" }
+        return model.linkDefaults.token == nil ? "Not set" : "Default"
+    }
+
     var body: some View {
         @Bindable var model = model
         Section {
-            TextField("Server address", text: $model.linkBaseURL)
-                .textInputAutocapitalization(.never)
-                .autocorrectionDisabled()
-                .keyboardType(.URL)
-                .textContentType(nil)
-            if let hint = model.linkTokenHint {
+            // A disclosure row, like the PIN row's chevron, turning down while open.
+            Button {
+                withAnimation { expanded.toggle() }
+            } label: {
                 HStack {
-                    LabeledContent("API token", value: "…\(hint)")
-                    Spacer()
-                    Button("Forget", role: .destructive) {
-                        model.forgetLinkToken()
-                        testResult = nil
-                    }
-                    .buttonStyle(.borderless)
+                    Text("Advanced")
+                    Spacer(minLength: 16)
+                    Image(systemName: "chevron.right")
+                        .font(.footnote.weight(.semibold))
+                        .foregroundStyle(.tertiary)
+                        .rotationEffect(.degrees(expanded ? 90 : 0))
                 }
+                .contentShape(Rectangle())
             }
-            HStack {
-                SecureField(model.linkTokenHint == nil ? "API token" : "New API token", text: $tokenDraft)
-                    .textInputAutocapitalization(.never)
-                    .autocorrectionDisabled()
-                    .textContentType(nil)
-                    .onSubmit(saveToken)
-                Button("Save", action: saveToken)
-                    .buttonStyle(.borderless)
-                    .disabled(tokenDraft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
-            }
-            HStack {
-                Button("Test Connection") {
-                    isTesting = true
-                    testResult = nil
-                    Task {
-                        testResult = await model.testLinkConnection()
-                        isTesting = false
-                    }
-                }
-                .disabled(isTesting || model.linkBaseURL.trimmingCharacters(in: .whitespaces).isEmpty)
-                if isTesting {
-                    Spacer()
-                    ProgressView()
-                }
-            }
-            if let testResult {
-                Text(testResult)
-                    .font(.subheadline)
-                    .foregroundStyle(.secondary)
-            }
-        } header: {
-            Text("Links")
-        } footer: {
-            Text("Songs from links guests paste into search on their phones, through your own canopy-cmdlp server. Leave it empty to keep links off.")
+            .buttonStyle(.plain)
+            .accessibilityValue(expanded ? "Expanded" : "Collapsed")
+            .id(DebugScrollToEnd.target)
         }
         .listRowBackground(Color.white.opacity(0.08))
+        if expanded {
+            Section {
+                HStack {
+                    Text("URL")
+                    Spacer(minLength: 16)
+                    TextField(model.linkDefaults.address.isEmpty ? "https://" : model.linkDefaults.address, text: $model.linkBaseURL)
+                        .multilineTextAlignment(.trailing)
+                        .textInputAutocapitalization(.never)
+                        .autocorrectionDisabled()
+                        .keyboardType(.URL)
+                        .textContentType(nil)
+                        .onChange(of: model.linkBaseURL) { testResult = nil }
+                }
+                HStack {
+                    Text("Access Token")
+                    Spacer(minLength: 16)
+                    SecureField(tokenPrompt, text: $tokenDraft)
+                        .multilineTextAlignment(.trailing)
+                        .textInputAutocapitalization(.never)
+                        .autocorrectionDisabled()
+                        .textContentType(nil)
+                        .onSubmit(saveToken)
+                    if !draftIsEmpty {
+                        Button("Save", action: saveToken)
+                            .buttonStyle(.borderless)
+                    } else if model.linkTokenHint != nil {
+                        // Back to the default token, where there is one.
+                        Button("Forget", role: .destructive) {
+                            model.forgetLinkToken()
+                            testResult = nil
+                        }
+                        .buttonStyle(.borderless)
+                    }
+                }
+                if model.linkVerified, model.linksConfigured {
+                    Toggle("Normalize audio", isOn: $model.linkNormalize)
+                }
+                HStack {
+                    Button("Test Connection") {
+                        isTesting = true
+                        testResult = nil
+                        Task {
+                            testResult = await model.testLinkConnection()
+                            isTesting = false
+                        }
+                    }
+                    .disabled(isTesting || model.linkAddress.isEmpty)
+                    if isTesting {
+                        Spacer()
+                        ProgressView()
+                    }
+                }
+                if let testResult {
+                    Text(testResult)
+                        .font(.subheadline)
+                        .foregroundStyle(.secondary)
+                }
+            } header: {
+                Text("Direct Audio Server")
+            } footer: {
+                Text("Self-host the direct audio server. Most people can ignore this.")
+            }
+            .listRowBackground(Color.white.opacity(0.08))
+        }
     }
 
     private func saveToken() {
+        guard !draftIsEmpty else { return }
         model.saveLinkToken(tokenDraft)
         tokenDraft = ""
         testResult = nil
     }
 }
+
+/// `-settingsBottom` (with `-showSettings`; `-showAdvanced` opens it too): scrolls Settings to
+/// Advanced, at the end, once the sheet is up, for screenshots.
+private struct DebugScrollToEnd: ViewModifier {
+    static let target = "settings-advanced"
+
+    func body(content: Content) -> some View {
+        ScrollViewReader { proxy in
+            content.task {
+                guard ProcessInfo.processInfo.arguments.contains("-settingsBottom") else { return }
+                try? await Task.sleep(for: .seconds(1.5))
+                proxy.scrollTo(Self.target, anchor: .top)
+            }
+        }
+    }
+}
+#endif
 
 // MARK: - Ending the zone
 

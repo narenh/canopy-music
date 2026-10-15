@@ -2886,21 +2886,27 @@
     fillPartyRow();
   }
 
-  /** An Apple TV hub's links server (hosts' snapshots carry it): where it is, the token's last four
-   * characters, and the TV's check of the connection. */
+  /** Settings' Advanced section: an Apple TV hub's direct audio server (hosts' snapshots carry it,
+   * with `advanced` only from Debug builds of the TV). Its URL (empty: the default), the token's
+   * last four characters, the TV's check of the connection, and "Normalize audio" once that check
+   * worked for the URL and token in use. */
+  let linksChecking = false; // Test Connection or a save asked the TV to check; no answer yet
+  const hostOf = (address) => { try { return new URL(address).host; } catch { return address; } };
   function fillLinks() {
-    const links = snap.hubKind === "tv" ? snap.linkSetup : null;
-    $("settings-links").hidden = !links;
+    const links = snap.hubKind === "tv" && snap.linkSetup && snap.linkSetup.advanced ? snap.linkSetup : null;
+    $("settings-advanced").hidden = !links;
     if (!links) return;
-    let server = "Not set";
-    if (links.address) {
-      try { server = new URL(links.address).host; } catch { server = links.address; }
-    }
-    $("settings-links-server").textContent = server;
-    $("settings-links-token").textContent = links.tokenHint ? `…${links.tokenHint}` : "Not set";
-    $("settings-links-btn").textContent = links.address ? "Change" : "Set";
-    $("settings-links-status").hidden = !links.status;
-    $("settings-links-status").textContent = links.status || "";
+    const address = links.address || links.defaultAddress || "";
+    const hasToken = !!links.tokenHint || links.hasDefaultToken === true;
+    $("settings-links-server").textContent = links.address ? hostOf(links.address) : links.defaultAddress ? `Default (${hostOf(links.defaultAddress)})` : "Not set";
+    $("settings-links-token").textContent = links.tokenHint ? `…${links.tokenHint}` : links.hasDefaultToken ? "Default" : "Not set";
+    $("settings-normalize-row").hidden = !(links.verified && address && hasToken);
+    $("settings-normalize").checked = links.normalize !== false;
+    $("settings-links-test").disabled = !address;
+    if (links.status) linksChecking = false;
+    const status = links.status || (linksChecking ? "Checking…" : "");
+    $("settings-links-status").hidden = !status;
+    $("settings-links-status").textContent = status;
   }
 
   /** "Limit reorders", under Reorder from phones (and only while that's on; older hubs don't
@@ -2984,6 +2990,7 @@
   $("settings-btn").addEventListener("click", () => {
     wifiDetails = null;
     partyInfo = null;
+    $("settings-advanced").open = false; // collapsed each time the sheet opens
     fillSettings();
     const list = $("settings-display-list");
     list.innerHTML = "";
@@ -3044,12 +3051,15 @@
   });
   $("wifi-cancel").addEventListener("click", () => { $("wifi-modal").hidden = true; });
 
-  // The links dialog: the token field is write-only (empty keeps the saved one).
+  // The direct audio server's dialog: the token field is write-only (empty keeps the saved one),
+  // and an empty URL uses the default.
   $("settings-links-btn").addEventListener("click", () => {
     const links = snap.linkSetup || {};
     $("links-address").value = links.address || "";
+    $("links-address").placeholder = links.defaultAddress || "https://cmdlp.example.com";
     $("links-token").value = "";
-    $("links-token").placeholder = links.tokenHint ? `Saved (…${links.tokenHint}). Paste to replace` : "Paste the token";
+    $("links-token").placeholder = links.tokenHint ? `Saved (…${links.tokenHint}). Paste to replace`
+      : links.hasDefaultToken ? "Default. Paste to replace" : "Paste the token";
     $("links-forget").hidden = !links.tokenHint;
     $("links-modal").hidden = false;
     setTimeout(() => $("links-address").focus(), 50);
@@ -3060,10 +3070,17 @@
     $("links-token").focus();
   });
   $("links-cancel").addEventListener("click", () => { $("links-modal").hidden = true; });
+  /** Saves a change to the server or token; the TV then checks the connection (when there's a
+   * URL to check), and the sheet says "Checking…" until it answers. */
   async function saveLinks(change) {
     try {
       await api("/api/host/links", { key: hostKey, ...change });
       $("links-modal").hidden = true;
+      // As the TV does: the last check no longer counts.
+      const links = { ...snap.linkSetup, status: null, verified: false };
+      snap = { ...snap, linkSetup: links };
+      linksChecking = !!((change.address ?? links.address) || links.defaultAddress);
+      fillLinks();
     } catch { toast("Couldn't save that"); }
   }
   $("links-forget").addEventListener("click", () => saveLinks({ forgetToken: true }));
@@ -3071,6 +3088,14 @@
     event.preventDefault();
     const token = $("links-token").value.trim();
     saveLinks({ address: $("links-address").value.trim(), token: token || undefined });
+  });
+  // Test Connection: the same URL again, which the TV checks.
+  $("settings-links-test").addEventListener("click", () => saveLinks({ address: (snap.linkSetup || {}).address || "" }));
+  // "Normalize audio" saves on its own, without checking the connection again.
+  $("settings-normalize").addEventListener("change", async (event) => {
+    const on = event.target.checked;
+    try { await api("/api/host/links", { key: hostKey, normalize: on }); }
+    catch { toast("Couldn't save that"); event.target.checked = !on; }
   });
   $("wifi-form").addEventListener("submit", async (event) => {
     event.preventDefault();

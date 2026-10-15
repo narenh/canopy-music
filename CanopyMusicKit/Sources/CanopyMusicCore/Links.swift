@@ -422,40 +422,112 @@ public struct LinkRefusal: Error, Equatable, LocalizedError {
 
 /// "Test connection": cmdlp's `/health` (no token), then the token. A sentence for the host.
 public enum LinkConnectionCheck {
+    /// How a check went: the sentence, and whether both the server and the token worked.
+    public struct Outcome: Equatable, Sendable {
+        public var message: String
+        public var connected: Bool
+
+        public init(message: String, connected: Bool) {
+            self.message = message
+            self.connected = connected
+        }
+    }
+
     public static func run(baseURL typed: String, token: String?, urlSession: URLSession = .shared) async -> String {
-        guard let base = CmdlpClient.baseURL(typed) else { return "Enter the server's address first." }
+        await check(baseURL: typed, token: token, urlSession: urlSession).message
+    }
+
+    public static func check(baseURL typed: String, token: String?, urlSession: URLSession = .shared) async -> Outcome {
+        guard let base = CmdlpClient.baseURL(typed) else { return Outcome(message: "Enter the server's URL first.", connected: false) }
         do {
             try await CmdlpClient.health(baseURL: base, urlSession: urlSession)
         } catch {
-            return "Couldn't reach \(base.host() ?? "the server")."
+            return Outcome(message: "Couldn't reach \(base.host() ?? "the server").", connected: false)
         }
-        guard let token else { return "The server is up. Add its API token to turn links on." }
+        guard let token else { return Outcome(message: "The server is up. Add its access token to turn links on.", connected: false) }
         do {
             try await CmdlpClient(baseURL: base, token: token, urlSession: urlSession).checkToken()
-            return "Connected. Guests can paste links into search."
+            return Outcome(message: "Connected. Guests can paste links into search.", connected: true)
         } catch let error as CmdlpError where error.status == 401 {
-            return "The server is up, but it didn't accept the token."
+            return Outcome(message: "The server is up, but it didn't accept the token.", connected: false)
         } catch {
-            return "The server is up, but the token couldn't be checked."
+            return Outcome(message: "The server is up, but the token couldn't be checked.", connected: false)
         }
+    }
+}
+
+/// The direct audio server (cmdlp) a hub uses when the host hasn't entered one. Debug builds
+/// only: the developer's own cmdlp, and a dev token from the gitignored `Config/Secrets.xcconfig`
+/// (the `CMDLPDevToken` Info.plist key; empty when that file doesn't exist). Release builds have
+/// none, so links stay off there until a hub is set up. What the host entered always wins, and
+/// clearing it falls back to these.
+public struct LinkDefaults: Equatable, Sendable {
+    public var address: String
+    public var token: String?
+
+    public init(address: String = "", token: String? = nil) {
+        self.address = address.trimmingCharacters(in: .whitespacesAndNewlines)
+        self.token = token?.nonEmpty
+    }
+
+    public static let none = LinkDefaults()
+
+    /// This build's defaults: the dev ones in Debug builds, none in Release.
+    public static var current: LinkDefaults {
+        #if DEBUG
+        dev
+        #else
+        none
+        #endif
+    }
+
+    #if DEBUG
+    /// The developer's cmdlp (canopy-cmdlp's README: `cmdlp.canopysf.com`).
+    public static let devAddress = "https://cmdlp.canopysf.com"
+    static let dev = LinkDefaults(address: devAddress, token: Bundle.main.object(forInfoDictionaryKey: "CMDLPDevToken") as? String)
+    #endif
+
+    /// The address to use: as the host typed it, else this default.
+    public func address(typed: String) -> String {
+        typed.nonEmpty ?? address
+    }
+
+    /// The token to use: the one the host saved, else this default.
+    public func token(saved: String?) -> String? {
+        saved?.nonEmpty ?? token
     }
 }
 
 /// An Apple TV hub's link settings as its hosts' phones see them (`PartySnapshot.linkSetup`): the
 /// address, the token's last four characters (never the token), and how the last check went.
 public struct LinkSetup: Codable, Equatable, Sendable {
+    /// As the host typed it; empty uses `defaultAddress`, when there is one.
     public var address: String
     public var tokenHint: String?
     public var status: String?
     /// Whether links are brought to about Apple Music's loudness (`LinkNormalize`); nil from
     /// hubs before the choice existed.
     public var normalize: Bool?
+    /// The last check of the connection worked, for the address and token in use now: the page
+    /// offers "Normalize audio" only then.
+    public var verified: Bool?
+    /// The page shows the settings sheet's Advanced section (Debug builds of the TV only).
+    public var advanced: Bool?
+    /// The address used when none is typed (`LinkDefaults`), and whether there's a default
+    /// token. Debug builds only.
+    public var defaultAddress: String?
+    public var hasDefaultToken: Bool?
 
-    public init(address: String, tokenHint: String?, status: String? = nil, normalize: Bool? = nil) {
+    public init(address: String, tokenHint: String?, status: String? = nil, normalize: Bool? = nil, verified: Bool? = nil,
+                advanced: Bool? = nil, defaultAddress: String? = nil, hasDefaultToken: Bool? = nil) {
         self.address = address
         self.tokenHint = tokenHint
         self.status = status
         self.normalize = normalize
+        self.verified = verified
+        self.advanced = advanced
+        self.defaultAddress = defaultAddress
+        self.hasDefaultToken = hasDefaultToken
     }
 }
 

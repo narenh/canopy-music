@@ -148,10 +148,34 @@ final class StubCmdlp: URLProtocol, @unchecked Sendable {
         #expect(await LinkConnectionCheck.run(baseURL: "https://cmdlp.example.com", token: "bad", urlSession: session)
                 == "The server is up, but it didn't accept the token.")
         #expect(await LinkConnectionCheck.run(baseURL: "https://cmdlp.example.com", token: nil, urlSession: session)
-                == "The server is up. Add its API token to turn links on.")
-        #expect(await LinkConnectionCheck.run(baseURL: "not a url", token: "good", urlSession: session) == "Enter the server's address first.")
+                == "The server is up. Add its access token to turn links on.")
+        #expect(await LinkConnectionCheck.run(baseURL: "not a url", token: "good", urlSession: session) == "Enter the server's URL first.")
+        // Only the server and the token both working counts as connected ("Normalize audio" shows).
+        #expect(await LinkConnectionCheck.check(baseURL: "https://cmdlp.example.com", token: "good", urlSession: session).connected)
+        #expect(await !LinkConnectionCheck.check(baseURL: "https://cmdlp.example.com", token: "bad", urlSession: session).connected)
+        #expect(await !LinkConnectionCheck.check(baseURL: "https://cmdlp.example.com", token: nil, urlSession: session).connected)
         StubCmdlp.handler = { _ in (503, "") }
         #expect(await LinkConnectionCheck.run(baseURL: "https://cmdlp.example.com", token: "good", urlSession: session)
                 == "Couldn't reach cmdlp.example.com.")
+        #expect(await !LinkConnectionCheck.check(baseURL: "https://cmdlp.example.com", token: "good", urlSession: session).connected)
+    }
+
+    /// What the host entered wins; empty (or forgotten) falls back to the defaults, and with none
+    /// (Release builds) links stay off.
+    @Test func defaultsFillInWhatTheHostLeftEmpty() {
+        let defaults = LinkDefaults(address: " https://cmdlp.example.com ", token: "dev_token")
+        #expect(defaults.address(typed: "") == "https://cmdlp.example.com")
+        #expect(defaults.address(typed: "  ") == "https://cmdlp.example.com")
+        #expect(defaults.address(typed: "https://mine.example.com") == "https://mine.example.com")
+        #expect(defaults.token(saved: nil) == "dev_token")
+        #expect(defaults.token(saved: "") == "dev_token")
+        #expect(defaults.token(saved: "saved") == "saved")
+        #expect(LinkDefaults.none.address(typed: "") == "")
+        #expect(LinkDefaults.none.token(saved: nil) == nil)
+        // A missing secrets file leaves the Info.plist value empty: no default token.
+        #expect(LinkDefaults(address: "https://cmdlp.example.com", token: "").token == nil)
+        // The test bundle has no dev token; debug builds default to the developer's cmdlp.
+        #expect(LinkDefaults.current.address == "https://cmdlp.canopysf.com")
+        #expect(LinkDefaults.current.token == nil)
     }
 }

@@ -17,6 +17,7 @@
 		CA0000000000000000000001 /* CanopyMusic.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = CanopyMusic.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		CA0000000000000000000012 /* CanopyMusic-Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = "CanopyMusic-Info.plist"; sourceTree = "<group>"; };
 		CA0000000000000000000013 /* CanopyMusicKit */ = {isa = PBXFileReference; lastKnownFileType = wrapper; path = CanopyMusicKit; sourceTree = "<group>"; };
+		CA0000000000000000000014 /* Debug.xcconfig */ = {isa = PBXFileReference; lastKnownFileType = text.xcconfig; path = Config/Debug.xcconfig; sourceTree = "<group>"; };
 		CB0000000000000000000001 /* CanopyMusicTV.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = CanopyMusicTV.app; sourceTree = BUILT_PRODUCTS_DIR; };
 /* End PBXFileReference section */
 
@@ -83,6 +84,7 @@
 				CB000000000000000000000B /* Background (iPad and TV) */,
 				CB000000000000000000000C /* Spotify (iPad and TV) */,
 				CA0000000000000000000012 /* CanopyMusic-Info.plist */,
+				CA0000000000000000000014 /* Debug.xcconfig */,
 				CA0000000000000000000005 /* Products */,
 			);
 			sourceTree = "<group>";
@@ -228,6 +230,7 @@
 /* Begin XCBuildConfiguration section */
 		CA0000000000000000000040 /* Debug */ = {
 			isa = XCBuildConfiguration;
+			baseConfigurationReference = CA0000000000000000000014 /* Debug.xcconfig */;
 			buildSettings = {
 				ALWAYS_SEARCH_USER_PATHS = NO;
 				ASSETCATALOG_COMPILER_GENERATE_SWIFT_ASSET_SYMBOL_EXTENSIONS = YES;
@@ -260,6 +263,7 @@
 				ASSETCATALOG_COMPILER_GENERATE_SWIFT_ASSET_SYMBOL_EXTENSIONS = YES;
 				CLANG_ENABLE_MODULES = YES;
 				CLANG_ENABLE_OBJC_ARC = YES;
+				CMDLP_DEV_TOKEN = "";
 				COPY_PHASE_STRIP = NO;
 				DEBUG_INFORMATION_FORMAT = "dwarf-with-dsym";
 				ENABLE_NS_ASSERTIONS = NO;

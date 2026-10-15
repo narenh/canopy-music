@@ -479,17 +479,28 @@ final class AppModel {
 
     // MARK: Links (canopy-cmdlp)
 
-    /// cmdlp's address, as the host typed it in Settings. Not a secret: the token is
-    /// (`linkTokens`, in the Keychain). Links are hidden until both are set.
+    /// cmdlp's address, as the host typed it in Settings › Advanced (Debug builds only). Not a
+    /// secret: the token is (`linkTokens`, in the Keychain). Empty uses the default
+    /// (`linkDefaults`). Links are hidden until an address and a token are both there.
     var linkBaseURL: String {
         didSet {
             guard linkBaseURL != oldValue else { return }
             defaults.set(linkBaseURL, forKey: "cmdlpBaseURL")
-            applyLinkSettings()
+            linkSettingsChanged()
         }
     }
     /// The token's last four characters, all Settings shows of it; nil when there's none.
     private(set) var linkTokenHint: String?
+    /// Debug builds: cmdlp's address and a dev token for when the host hasn't entered them
+    /// (`LinkDefaults`). Release builds have none.
+    let linkDefaults = LinkDefaults.current
+    /// Settings' Test Connection worked for the address and token in use now; any change to them
+    /// clears it. "Normalize audio" shows only then.
+    private(set) var linkVerified = false
+    /// Counts changes to the address and token, so a check that finishes after one doesn't count.
+    @ObservationIgnored private var linkSettingsVersion = 0
+    /// The address in use: the host's, else the default.
+    var linkAddress: String { linkDefaults.address(typed: linkBaseURL) }
     /// "Normalize audio": cmdlp brings links to about Apple Music's loudness (`LinkNormalize`).
     /// On unless the host turns it off; applies to links added after a change.
     var linkNormalize: Bool {
@@ -503,30 +514,38 @@ final class AppModel {
     /// This zone's name at cmdlp: kept across relaunches, and a new one for each zone (`clearZone`).
     @ObservationIgnored private var linkZone: String
 
-    /// The address and a token are both set: guests' pasted links become songs.
-    var linksConfigured: Bool { CmdlpClient.baseURL(linkBaseURL) != nil && linkTokenHint != nil }
+    /// The address and a token are both there (the host's or the defaults): guests' pasted links
+    /// become songs.
+    var linksConfigured: Bool { CmdlpClient.baseURL(linkAddress) != nil && (linkTokenHint != nil || linkDefaults.token != nil) }
 
     func saveLinkToken(_ typed: String) {
         let token = typed.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !token.isEmpty else { return }
         linkTokens.save(token)
         linkTokenHint = LinkTokenHint.of(token)
-        applyLinkSettings()
+        linkSettingsChanged()
     }
 
+    /// Back to the default token, where there is one (else links go off).
     func forgetLinkToken() {
         linkTokens.save(nil)
         linkTokenHint = nil
+        linkSettingsChanged()
+    }
+
+    private func linkSettingsChanged() {
+        linkSettingsVersion += 1
+        linkVerified = false
         applyLinkSettings()
     }
 
-    /// The hub's session takes links once cmdlp's address and token are set
+    /// The hub's session takes links once cmdlp's address and token are there
     /// (`PartySession.linkService`), in this zone's cmdlp zone. Not a display's.
     private func applyLinkSettings() {
         guard !isDisplay else { return }
         session.linkZone = linkZone
         session.linkNormalize = linkNormalize
-        if let base = CmdlpClient.baseURL(linkBaseURL), let token = linkTokens.load() {
+        if let base = CmdlpClient.baseURL(linkAddress), let token = linkDefaults.token(saved: linkTokens.load()) {
             session.linkService = CmdlpClient(baseURL: base, token: token)
         } else {
             session.linkService = nil
@@ -541,9 +560,13 @@ final class AppModel {
         applyLinkSettings()
     }
 
-    /// Settings' "Test connection": cmdlp's `/health`, then the token. A sentence to show.
+    /// Settings' "Test Connection": cmdlp's `/health`, then the token. A sentence to show; when
+    /// both worked (and nothing changed meanwhile), `linkVerified`.
     func testLinkConnection() async -> String {
-        await LinkConnectionCheck.run(baseURL: linkBaseURL, token: linkTokens.load())
+        let version = linkSettingsVersion
+        let outcome = await LinkConnectionCheck.check(baseURL: linkAddress, token: linkDefaults.token(saved: linkTokens.load()))
+        if version == linkSettingsVersion { linkVerified = outcome.connected }
+        return outcome.message
     }
 
     // MARK: Provider

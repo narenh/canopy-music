@@ -5,5 +5,8 @@ DerivedData/
 .swiftpm/
 *.xcuserstate
 
+# Dev-only secrets (the cmdlp dev token): see Config/Secrets.example.xcconfig
+Config/Secrets.xcconfig
+
 # Easter egg lyrics: bundled in the app, kept out of the public repo
 CanopyMusic/EasterEgg/*.lrc

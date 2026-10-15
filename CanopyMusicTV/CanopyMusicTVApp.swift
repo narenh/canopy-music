@@ -428,7 +428,15 @@ final class TVModel {
     @ObservationIgnored private let linkTokens: any LinkTokenStore = KeychainLinkTokenStore()
     /// The last check of the connection, for the host's settings sheet.
     @ObservationIgnored private var linkStatus: String?
+    /// That check worked, for the address and token in use now (any change clears it): the
+    /// sheet's "Normalize audio" shows only then.
+    @ObservationIgnored private var linkVerified = false
     @ObservationIgnored private var linkCheck: Task<Void, Never>?
+    /// Debug builds: cmdlp's address and token when the host hasn't set them (`LinkDefaults`).
+    private let linkDefaults = LinkDefaults.current
+
+    /// The address in use: the host's, else the default.
+    private var linkAddress: String { linkDefaults.address(typed: defaults.string(forKey: "cmdlpBaseURL") ?? "") }
 
     /// This zone's name at cmdlp: kept across relaunches, and a new one for each zone.
     private var linkZone: String {
@@ -447,13 +455,20 @@ final class TVModel {
         session.linkNormalize = normalize
         session.linkService = currentLinkService()
         (session.engine as? LinkHandoffEngine)?.linksEnabled = { [weak session] in session?.linksEnabled ?? false }
-        session.linkSetup = LinkSetup(address: defaults.string(forKey: "cmdlpBaseURL") ?? "",
-                                      tokenHint: LinkTokenHint.of(linkTokens.load()), status: linkStatus, normalize: normalize)
+        var setup = LinkSetup(address: defaults.string(forKey: "cmdlpBaseURL") ?? "", tokenHint: LinkTokenHint.of(linkTokens.load()),
+                              status: linkStatus, normalize: normalize, verified: linkVerified)
+        #if DEBUG
+        // The page's Advanced section, with the defaults it falls back to. Never in Release.
+        setup.advanced = true
+        setup.defaultAddress = linkDefaults.address
+        setup.hasDefaultToken = linkDefaults.token != nil
+        #endif
+        session.linkSetup = setup
     }
 
-    /// cmdlp, once its address and a token are both set.
+    /// cmdlp, once its address and a token are both set (the host's, else the defaults).
     private func currentLinkService() -> CmdlpClient? {
-        guard let base = CmdlpClient.baseURL(defaults.string(forKey: "cmdlpBaseURL") ?? ""), let token = linkTokens.load() else { return nil }
+        guard let base = CmdlpClient.baseURL(linkAddress), let token = linkDefaults.token(saved: linkTokens.load()) else { return nil }
         return CmdlpClient(baseURL: base, token: token)
     }
 
@@ -1029,13 +1044,15 @@ extension TVModel: HubSetupHandler {
         return await confirmSpotifyConflict()?.name
     }
 
-    /// Shows the zone already on this Spotify account as a display, after the page has its
-    /// answer. This zone was never started, so there's nothing of it to keep.
-    /// From a host's settings sheet: the address is saved as typed (empty turns links off), a new
-    /// token goes in the TV's Keychain, then the connection is checked and the sheet shows how
-    /// it went (`LinkSetup.status`). "Normalize audio" (`normalize`) is saved for links added from
-    /// then on; changed on its own, the connection isn't checked again.
+    /// From a host's settings sheet (its Advanced section, Debug builds only): the address is
+    /// saved as typed (empty falls back to the default, `LinkDefaults`, or turns links off where
+    /// there's none), a new token goes in the TV's Keychain (forgetting it falls back the same),
+    /// then the connection is checked and the sheet shows how it went (`LinkSetup.status`,
+    /// `verified`). "Normalize audio" (`normalize`) is saved for links added from then on;
+    /// changed on its own, the connection isn't checked again. Release builds take none of it:
+    /// they have no Advanced section.
     func setLinks(address: String?, token: String?, forgetToken: Bool, normalize: Bool?) -> Bool {
+        #if DEBUG
         guard role == .hub else { return false }
         if let normalize { LinkNormalize.save(normalize, to: defaults) }
         if address == nil, token == nil, !forgetToken {
@@ -1049,21 +1066,28 @@ extension TVModel: HubSetupHandler {
             linkTokens.save(token)
         }
         linkStatus = nil
+        linkVerified = false
         applyLinkSettings()
-        let typed = defaults.string(forKey: "cmdlpBaseURL") ?? ""
-        let saved = linkTokens.load()
+        let address = linkAddress
+        let token = linkDefaults.token(saved: linkTokens.load())
         linkCheck?.cancel()
-        guard !typed.isEmpty else { return true }
+        guard !address.isEmpty else { return true }
         linkCheck = Task { [weak self] in
-            let status = await LinkConnectionCheck.run(baseURL: typed, token: saved)
+            let outcome = await LinkConnectionCheck.check(baseURL: address, token: token)
             guard let self, !Task.isCancelled else { return }
-            self.debugLog("links: \(status)")
-            self.linkStatus = status
+            self.debugLog("links: \(outcome.message)")
+            self.linkStatus = outcome.message
+            self.linkVerified = outcome.connected
             self.applyLinkSettings()
         }
         return true
+        #else
+        return false
+        #endif
     }
 
+    /// Shows the zone already on this Spotify account as a display, after the page has its
+    /// answer. This zone was never started, so there's nothing of it to keep.
     func joinSpotifyConflict() -> String? {
         guard role == .hub, session.isWaitingForSetup, let zone = spotifyConflict else { return nil }
         Task {

@@ -493,6 +493,15 @@ input.volume::-moz-range-thumb { width: var(--thumb); height: var(--thumb); bord
 .picker-row select { position: absolute; inset: 0; width: 100%; height: 100%; opacity: 0; font-size: 16px; }
 .danger-btn { color: #ff6961; font-weight: 600; padding: 14px 2px 4px; width: 100%; text-align: left; }
 .danger-btn[hidden] { display: none; }
+/* Advanced, last in the settings sheet: a row with a chevron that turns down while it's open. */
+.settings-advanced { margin-top: 10px; }
+.settings-advanced[hidden] { display: none; }
+.settings-advanced summary { list-style: none; cursor: pointer; }
+.settings-advanced summary::-webkit-details-marker { display: none; }
+.settings-advanced summary svg { width: 16px; height: 16px; stroke-width: 2.2; color: var(--text-2); }
+.settings-advanced[open] summary svg { transform: rotate(90deg); }
+.row-btn { font-size: 15px; font-weight: 600; padding: 13px 2px; width: 100%; text-align: left; border-bottom: 1px solid var(--line); }
+.row-btn:disabled { opacity: .45; cursor: default; }
 .modal-card.centered { text-align: center; }
 .modal-card .small { font-size: 12px; margin: 12px 0 0; }
 .modal-card .party-name { margin: 4px 0 2px; }

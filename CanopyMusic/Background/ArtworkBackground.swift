@@ -147,6 +147,7 @@ struct ArtworkDrift<Content: View>: View {
     var moves = true
     @ViewBuilder let content: Content
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @Environment(\.screenCovered) private var screenCovered
     /// This drift, to `DriftClock`.
     @State private var id = UUID()
 
@@ -184,7 +185,7 @@ struct ArtworkDrift<Content: View>: View {
 
     var body: some View {
         let strength = reduceMotion ? 0 : Self.strength
-        let runs = moves && strength > 0
+        let runs = moves && !screenCovered && strength > 0
         GeometryReader { geo in
             let (width, height) = (Double(geo.size.width), Double(geo.size.height))
             let side = BackgroundDrift.artSide(width: width, height: height)
@@ -208,6 +209,12 @@ struct ArtworkDrift<Content: View>: View {
         .onChange(of: runs) { DriftClock.shared.set(id, running: runs) }
         .onDisappear { DriftClock.shared.set(id, running: false) }
     }
+}
+
+extension EnvironmentValues {
+    /// Something opaque covers the whole party screen (the lyrics takeover; on the TV, a sheet):
+    /// what's under it (the background's drift, the animated art) stops until it goes.
+    @Entry var screenCovered = false
 }
 
 /// The drift's time (`ArtworkDrift`): real time, except that it stands still while no drift

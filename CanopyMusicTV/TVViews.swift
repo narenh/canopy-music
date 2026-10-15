@@ -12,6 +12,8 @@ struct TVRootView: View {
     @State private var easterEgg = LyricsEasterEgg()
     /// The song the party screen shows, while it's there (`TVShownSongKey`).
     @State private var partySong: TVShownSong?
+    /// The lyrics takeover is on screen, covering everything (`screenCovered`).
+    @State private var takeoverShowing = false
 
     /// `-capture` (debug builds, as on the iPad): screenshots for the App Store and the README,
     /// so the lyrics takeover never shows in them.
@@ -77,6 +79,7 @@ struct TVRootView: View {
             }
         }
         .animation(.easeInOut(duration: 0.5), value: model.role)
+        .environment(\.screenCovered, takeoverShowing)
         // Unnamed requests from a Mac hub are labelled with the kind of Mac, not "iPad".
         .environment(\.hubDeviceNoun, MacKind(wire: model.session.hubDevice)?.noun ?? "iPad")
         .onPreferenceChange(TVShownSongKey.self) { partySong = $0 }
@@ -91,7 +94,7 @@ struct TVRootView: View {
         .onChange(of: model.session.isWaitingForSetup) { model.advertise() }
         .overlay {
             if let (item, lines) = takeover {
-                TakeoverView(lines: lines, track: item.track, session: model.session, scale: 1.4) {
+                TakeoverView(lines: lines, track: item.track, session: model.session, scale: 1.4, onShowingChange: { takeoverShowing = $0 }) {
                     easterEgg.dismissedItemID = item.id
                 }
                 .transition(.opacity)

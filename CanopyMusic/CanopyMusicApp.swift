@@ -156,6 +156,8 @@ final class SceneDelegate: UIResponder, UIWindowSceneDelegate {
 struct RootView: View {
     let model: AppModel
     @State private var easterEgg = LyricsEasterEgg()
+    /// The lyrics takeover is on screen, covering everything (`screenCovered`).
+    @State private var takeoverShowing = false
 
     /// `-qrGallery` covers the app with QR design variants (debug builds only).
     @ViewBuilder private var debugOverlay: some View {
@@ -199,9 +201,10 @@ struct RootView: View {
         .animation(.easeInOut(duration: 0.4), value: model.isLocked)
         .animation(.easeInOut(duration: 0.5), value: model.needsOnboarding)
         .tint(model.provider.accent)
+        .environment(\.screenCovered, takeoverShowing)
         .overlay {
             if let (item, lines) = takeover {
-                TakeoverView(lines: lines, track: item.track, session: model.session) {
+                TakeoverView(lines: lines, track: item.track, session: model.session, onShowingChange: { takeoverShowing = $0 }) {
                     easterEgg.dismissedItemID = item.id
                 }
                 .transition(.opacity)

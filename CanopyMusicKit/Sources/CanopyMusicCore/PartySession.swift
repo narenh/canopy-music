@@ -101,6 +101,16 @@ public struct PartySnapshot: Codable, Equatable, Sendable {
     /// Something everyone's phone shows for a moment, once (by `id`): a link that couldn't
     /// download, say. nil when there's nothing new.
     public var notice: PartyNotice?
+
+    // Reorder limits (`ReorderLimit`). Optional so older pages and clients still decode.
+    /// The hub's "Limit reorders" setting, on or off, for the host's settings sheet and guests'
+    /// balances. nil from older hubs and displays.
+    public var reorderLimit: ReorderLimit?
+    /// Reorders spent, by client ID, while the limit is on: each guest's page works out its own
+    /// balance and countdown from its entry (none: a full balance). nil when the limit is off or
+    /// nobody has spent one.
+    public var reorderSpends: [String: ReorderSpend]?
+
     /// Apple TV hubs: whether the TV can play Apple Music. Only in snapshots for hosts (a page
     /// whose socket gave a valid Host Control key); nil for everyone else and from other hubs.
     public var musicAccess: MusicAccess?
@@ -391,6 +401,11 @@ public final class PartySession {
             state = restored
             // A zone coming back after a relaunch: its music had started.
             isUnderWay = restored.current != nil || !restored.history.isEmpty
+            // And what its guests had spent of their reorders.
+            if let data = try? Data(contentsOf: Self.spendsURL(beside: storeURL)),
+               let spends = try? JSONDecoder().decode([String: ReorderSpend].self, from: data) {
+                reorderSpends = spends
+            }
         } else {
             state = QueueState()
         }
@@ -497,7 +512,7 @@ public final class PartySession {
     /// Applies settings sent by a host from the web page. (The iPad's unlock PIN isn't one: it's
     /// set only on the iPad.)
     public func applyHostSettings(zoneName: String?, phonesCanQueue: Bool? = nil, phonesCanReorder: Bool?,
-                                  displaysCanControl: Bool?, wifi: WifiDetails? = nil,
+                                  reorderLimit: ReorderLimit? = nil, displaysCanControl: Bool?, wifi: WifiDetails? = nil,
                                   screensaverWhilePlaying: Bool? = nil, crossfade: Bool? = nil) {
         if let wifi { self.wifi = wifi }
         // The party page's Crossfade button: the length stays the hub's.
@@ -506,6 +521,7 @@ public final class PartySession {
         if let zoneName, !zoneName.isEmpty { self.zoneName = zoneName }
         if let phonesCanQueue { self.phonesCanQueue = phonesCanQueue }
         if let phonesCanReorder { self.phonesCanReorder = phonesCanReorder }
+        if let reorderLimit { self.reorderLimit = reorderLimit.validated }
         if let displaysCanControl { self.displaysCanControl = displaysCanControl }
         onSettingsChanged?()
     }
@@ -576,6 +592,7 @@ public final class PartySession {
         isUnderWay = false
         skippedOnLoad = []
         displays = []
+        reorderSpends = [:]
         displayExpiry?.cancel()
         displayExpiry = nil
         resetFollow(keepPlayerQueue: false)
@@ -983,6 +1000,38 @@ public final class PartySession {
         return mutate { $0.move(id, after: anchor) }
     }
 
+    /// What became of a move from the web page or a display (`move(_:after:asClient:)`).
+    public enum ClientMove: Equatable, Sendable {
+        case moved
+        /// Not possible: the song isn't in Up Next, or it's the locked next song.
+        case refused
+        /// The guest has no reorders left (`reorderLimit`); nothing moved.
+        case outOfReorders
+    }
+
+    /// A move from the web page or a display (hub only). With `reorderLimit` on, a guest's move
+    /// spends one of their reorders, unless it takes their own song further down (or leaves it
+    /// where it was); with none left it's refused. Hosts (`clientID` nil) and displays checked in
+    /// as `clientID` aren't limited.
+    public func move(_ id: UUID, after anchor: UUID?, asClient clientID: String?) -> ClientMove {
+        guard remote == nil, reorderLimit.isOn, let clientID, !displays.contains(where: { $0.id == clientID }) else {
+            return move(id, after: anchor) ? .moved : .refused
+        }
+        // Where it would land, so a move that costs nothing can be told from one that does.
+        var trial = state
+        guard let from = state.upNext.firstIndex(where: { $0.id == id }), trial.move(id, after: anchor),
+              let to = trial.upNext.firstIndex(where: { $0.id == id }) else { return .refused }
+        let ownSong = state.upNext[from].requester?.clientID == clientID
+        if to < from || (to > from && !ownSong) {
+            let now = Date()
+            guard let spend = reorderLimit.spending(reorderSpends[clientID], at: now) else { return .outOfReorders }
+            // Balances back to full aren't kept (or sent to every page) any longer.
+            reorderSpends = reorderSpends.filter { reorderLimit.settled($0.value, at: now).spent > 0 }
+            reorderSpends[clientID] = spend
+        }
+        return move(id, after: anchor) ? .moved : .refused
+    }
+
     /// Removes an item. When `clientID` is given (a phone), only that phone's own requests can be removed.
     /// A display removes only its own requests (`isOwnRequest`): at once, then on the hub, which
     /// checks again and is followed if it refuses.
@@ -1031,6 +1080,39 @@ public final class PartySession {
         didSet { if phonesCanReorder != oldValue { broadcast() } }
     }
 
+    /// "Limit reorders" (a hub setting, off by default): how often each guest may reorder while
+    /// phones can. Hub only; displays aren't limited, so they don't follow it.
+    public var reorderLimit = ReorderLimit.standard {
+        didSet {
+            guard reorderLimit != oldValue else { return }
+            // Off forgets what everyone spent, so turned on again everyone starts with a full balance.
+            if !reorderLimit.isOn { reorderSpends = [:] }
+            if remote == nil { broadcast() }
+        }
+    }
+    /// Reorders each guest has spent, by client ID, while `reorderLimit` is on (hub only). Saved
+    /// beside the queue, so a hub relaunched mid-party (a crash, an update) doesn't hand everyone
+    /// a full balance again. The app hands them on to a session it rebuilds mid-party.
+    public var reorderSpends: [String: ReorderSpend] = [:] {
+        didSet { if reorderSpends != oldValue { saveReorderSpends() } }
+    }
+
+    /// Where `reorderSpends` is saved: beside the queue's file.
+    private static func spendsURL(beside storeURL: URL) -> URL {
+        storeURL.deletingLastPathComponent().appending(path: storeURL.deletingPathExtension().lastPathComponent + "-reorders.json")
+    }
+
+    /// Small and written only when someone reorders, so at once rather than debounced as the queue is.
+    private func saveReorderSpends() {
+        guard let storeURL else { return }
+        let url = Self.spendsURL(beside: storeURL)
+        if reorderSpends.isEmpty {
+            try? FileManager.default.removeItem(at: url)
+        } else if let data = try? JSONEncoder().encode(reorderSpends) {
+            try? data.write(to: url, options: .atomic)
+        }
+    }
+
     // MARK: Snapshots
 
     /// What phones see; `includingWifi` adds the guest Wi‑Fi, for displays, and a valid Host
@@ -1067,6 +1149,10 @@ public final class PartySession {
             links: linksEnabled ? true : nil,
             notice: notice
         )
+        if remote == nil {
+            snap.reorderLimit = reorderLimit
+            if reorderLimit.isOn, !reorderSpends.isEmpty { snap.reorderSpends = reorderSpends }
+        }
         if isHostKey(key) { addHostDetails(to: &snap) }
         return snap
     }

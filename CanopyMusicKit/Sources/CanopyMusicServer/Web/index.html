@@ -69,7 +69,8 @@
 
   <div class="list-head">
     <h2>Up next</h2>
-    <span class="hint">Drag to reorder</span>
+    <!-- Under "Limit reorders", a guest's balance instead ("2 reorders left"). -->
+    <span class="hint" id="reorder-hint">Drag to reorder</span>
   </div>
   <ol class="queue" id="queue"></ol>
   <ol class="queue" id="later" hidden></ol>
@@ -275,6 +276,13 @@
     <p class="settings-head">Phones</p>
     <label class="setting-row"><span>Queue from phones</span><input type="checkbox" class="switch" id="settings-queue"></label>
     <label class="setting-row"><span>Reorder from phones</span><input type="checkbox" class="switch" id="settings-reorder"></label>
+    <!-- Only while phones can reorder; its two settings only while it's on. -->
+    <label class="setting-row" id="settings-limit-row" hidden><span>Limit reorders</span><input type="checkbox" class="switch" id="settings-limit"></label>
+    <div class="setting-row sub" id="settings-allowance-row" hidden><span class="setting-label">Initial balance</span><span class="setting-value" id="settings-allowance"></span>
+      <span class="stepper"><button type="button" class="pill-btn" data-allowance="-1" aria-label="Fewer">&minus;</button><button type="button" class="pill-btn" data-allowance="1" aria-label="More">+</button></span></div>
+    <label class="setting-row sub picker-row" id="settings-refill-row" hidden><span class="setting-label">Refill</span><span class="setting-value" id="settings-refill"></span>
+      <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m6 9 6 6 6-6"/></svg><select id="settings-refill-select" aria-label="Refill"></select></label>
+    <p class="small" id="settings-limit-note" hidden></p>
     <p class="settings-head">Wi&#8209;Fi information</p>
     <div class="setting-row"><span class="setting-label">Network</span><span class="setting-value" id="settings-wifi-ssid"></span><button type="button" class="pill-btn" id="settings-wifi-btn">Change</button></div>
     <label class="setting-row"><span>Simple QR code</span><input type="checkbox" class="switch" id="settings-wifi-simple"></label>

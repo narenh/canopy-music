@@ -16,6 +16,8 @@ import Testing
         var time: TimeInterval = 0
         var playing = true
         var resetsAtEnd = false
+        /// Halted by a pause rather than a stop.
+        var pausedNotStopped = false
         var clock: TimeInterval = 0
 
         mutating func run(for seconds: TimeInterval) {
@@ -59,7 +61,7 @@ import Testing
         }
 
         mutating func read() {
-            let activity: EntrylessTracker.Activity = player.playing ? .playing : .halted
+            let activity: EntrylessTracker.Activity = player.playing ? .playing : player.pausedNotStopped ? .paused : .halted
             let at = String(format: "%.1f", player.clock)
             switch tracker.read(activity, time: player.time, at: player.now, pausedByUs: pausedByUs) {
             case .movedOn:
@@ -202,6 +204,17 @@ import Testing
         engine.player.time = 0
         engine.run(for: 3)
         #expect(engine.events == ["stopped early at 3.0"])
+    }
+
+    /// Paused from outside in the first seconds (AirPlay, Control Center): a choice, not a
+    /// failed start, so it isn't started again.
+    @Test func aPauseInTheFirstSecondsIsNotAnEarlyStop() {
+        var engine = Engine(FakePlayer(lengths: [200]))
+        engine.run(for: 1)
+        engine.player.playing = false
+        engine.player.pausedNotStopped = true
+        engine.run(for: 5)
+        #expect(engine.events.isEmpty)
     }
 
     @Test func aPauseMidSongIsNothing() {

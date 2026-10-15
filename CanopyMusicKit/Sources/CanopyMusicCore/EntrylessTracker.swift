@@ -13,8 +13,10 @@ import Foundation
 public struct EntrylessTracker: Equatable, Sendable {
     public enum Activity: Equatable, Sendable {
         case playing
-        /// Stopped or paused.
+        /// Stopped: the player's own halt (an end, a failed start).
         case halted
+        /// Paused: someone paused it (here or from outside), or it ran past its last song.
+        case paused
         /// Interrupted, or seeking: says nothing about the song.
         case other
     }
@@ -124,7 +126,7 @@ public struct EntrylessTracker: Equatable, Sendable {
         // Back from anywhere else: a scrub back, a restart, or a halt that reset the time.
         if time < previous.time - Self.jumpBack, atEnd { return .movedOn }
 
-        guard activity == .halted, !pausedByUs else { return nil }
+        guard activity == .halted || activity == .paused, !pausedByUs else { return nil }
         let atItsEnd: Bool
         if let duration {
             atItsEnd = sawPlaying && (time >= duration - 1.5 || atEnd)
@@ -145,6 +147,8 @@ public struct EntrylessTracker: Equatable, Sendable {
             reportedEnd = true
             return .ended
         }
+        // A pause is someone's choice, however early (a failed start stops, it doesn't pause).
+        guard activity == .halted else { return nil }
         let early = sawPlaying ? furthest < Self.earlyStopWindow
                                : startedAt.map { now.timeIntervalSince($0) >= Self.earlyStopWindow } ?? false
         guard early, !reportedEarlyStop else { return nil }

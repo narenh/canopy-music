@@ -234,9 +234,13 @@ final class AppleMusicEngine: PlaybackEngine {
             switch reading.status {
             case .playing where reading.time >= Self.librarySettle:
                 return false
-            case .stopped, .paused:
+            case .stopped:
                 log("library song \(track.title): \(reading.status) on its own at t=\(reading.time)")
                 return true
+            case .paused:
+                // Someone paused it (AirPlay, Control Center): a choice, not a failed start.
+                log("library song \(track.title): paused at t=\(reading.time), not by us")
+                return false
             default:
                 break
             }
@@ -500,7 +504,8 @@ final class AppleMusicEngine: PlaybackEngine {
     private static func activity(_ status: MusicPlayer.PlaybackStatus) -> EntrylessTracker.Activity {
         switch status {
         case .playing: .playing
-        case .stopped, .paused: .halted
+        case .stopped: .halted
+        case .paused: .paused
         default: .other
         }
     }

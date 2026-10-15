@@ -205,8 +205,8 @@ private final class TVLoopingVideoView: UIView {
         }
     }
 
-    /// Trying 0.5 s (was 0.25 s; 1 s looked choppy): long enough to see it slow.
-    static let rampDuration: TimeInterval = 0.5
+    /// Trying 0.75 s with the slow-down curve flipped (was 0.25 s; 1 s eased out looked choppy).
+    static let rampDuration: TimeInterval = 0.75
     private var rampTimer: Timer?
     private var ramp: (from: Double, to: Double, start: Date)?
 
@@ -217,8 +217,10 @@ private final class TVLoopingVideoView: UIView {
             return
         }
         let progress = min(1, Date().timeIntervalSince(ramp.start) / Self.rampDuration)
-        // Ease out: quick at first, settling into the new speed.
-        let eased = 1 - pow(1 - progress, 2)
+        // Slowing down eases in: near full speed until late, then drops to a stop, so little time
+        // is spent at slow speeds, where each frame holds long enough to stutter. Speeding back
+        // up eases out, leaving the slow speeds quickly for the same reason.
+        let eased = ramp.to < ramp.from ? progress * progress : 1 - pow(1 - progress, 2)
         if progress >= 1 {
             rampTimer?.invalidate()
             rampTimer = nil

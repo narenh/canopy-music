@@ -535,7 +535,7 @@ struct NowPlayingView: View {
                 }
                 // The requester badge shares the artist line so it never adds height.
                 HStack(spacing: 10) {
-                    Text(item?.track.artist ?? (startsUpNext ? "Press play to start Up next" : "Search for a song to get things going"))
+                    Text(item?.track.artist ?? (startsUpNext ? "Press play to start Up Next" : "Search for a song to get things going"))
                         .font(.system(size: 22, weight: .medium))
                         .foregroundStyle(.white.opacity(0.65))
                     if let requester = item?.requester {

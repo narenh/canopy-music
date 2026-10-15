@@ -2815,7 +2815,7 @@
     $("party-title").textContent = mode === "end" ? `End ${snap.zoneName || "this zone"}?` : "Save as playlist";
     $("party-sub").textContent = mode === "end"
       ? `The music stops for everyone and the queue is cleared.${back}`
-      : "Saves the songs guests added so far, played or still in Up next. The party carries on.";
+      : "Saves the songs guests added so far, played or still in Up Next. The party carries on.";
     $("party-save").checked = true;
     $("party-only").checked = true;
     $("party-error").hidden = true;

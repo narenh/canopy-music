@@ -355,6 +355,26 @@ final class FakeLinkService: LinkService {
         #expect(session.linkProgress(for: "phone-1").preparing.first { $0.id == "link:L1" }?.takesLong == true)
     }
 
+    /// The phone's "Preparing… N%" is cmdlp's overall figure, never going back and at most 99
+    /// until the link is queued.
+    @Test func thePreparingFigureOnlyGoesUp() async throws {
+        let service = FakeLinkService()
+        service.add(Self.youtube, id: "L1", steps: [FakeLinkService.track("L1", status: .pending, percent: 60)])
+        let session = try await session(service)
+        session.linkPollInterval = .seconds(3600)
+        guard case .preparing(let added) = try await addLink(session) else { Issue.record("not preparing"); return }
+        #expect(added.percent == 60)
+        func percent() -> Int? { session.linkProgress(for: "phone-1").preparing.first?.percent }
+        for (next, shown) in [(45.0, 60), (82, 82), (100, 99)] as [(Double, Int)] {
+            service.steps["L1"] = [FakeLinkService.track("L1", status: .pending, percent: next)]
+            #expect(await session.pollLink("L1"))
+            #expect(percent() == shown)
+        }
+        service.steps["L1"] = [FakeLinkService.track("L1", status: .pending)]
+        #expect(await session.pollLink("L1"))
+        #expect(percent() == 99)
+    }
+
     /// Ready after the zone moved to a player that can't play links: not queued, and the guest
     /// is told.
     @Test func readyWhereLinksCantPlayIsAFailure() async throws {

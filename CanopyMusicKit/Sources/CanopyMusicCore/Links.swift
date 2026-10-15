@@ -75,12 +75,14 @@ public enum LinkURL {
 
 /// A track as cmdlp answers `POST /resolve` and `GET /tracks/{id}`.
 public struct CmdlpTrack: Codable, Equatable, Sendable {
+    /// How far a link still `pending` has got, its download and conversion together.
     public struct Progress: Codable, Equatable, Sendable {
+        /// 0–100 across downloading and converting; nil when it isn't known.
         public var percent: Double?
         public var downloadedBytes: Int?
         public var totalBytes: Int?
         public var speed: Double?
-        /// Seconds yt-dlp expects the download still to take, when it knows.
+        /// Seconds cmdlp expects the whole of it still to take, when it knows.
         public var eta: Double?
 
         public init(percent: Double? = nil, eta: Double? = nil) {
@@ -221,11 +223,16 @@ public enum LinkAddResult: Equatable, Sendable {
     case preparing(LinkProgress)
 }
 
-/// Whether a link being prepared will take more than `limit` seconds from when it was added: the
-/// time so far, plus what's left (yt-dlp's ETA when cmdlp passes it on, otherwise the download's
-/// rate between the first and latest percentages seen, once they're a second apart). Without an
-/// estimate, only once the time so far is past the limit.
-public enum LinkPrepEstimate {
+/// How a link being prepared is getting on, from cmdlp's overall progress (its download and its
+/// conversion together, 0–100).
+///
+/// - `percent`: for "Preparing… N%". At most 99 until the link is queued, and never lower than
+///   a figure already shown, whatever cmdlp says next.
+/// - `takesLong`: whether it will take more than `limit` seconds from when it was added: the time
+///   so far, plus what's left (cmdlp's overall ETA when it gives one, otherwise the rate between
+///   the first and latest percentages seen, once they're a second apart). With nothing to go on,
+///   only once the time so far is past the limit.
+public struct LinkPrepEstimate: Equatable, Sendable {
     public static let limit: TimeInterval = 15
 
     public struct Sample: Equatable, Sendable {
@@ -238,15 +245,35 @@ public enum LinkPrepEstimate {
         }
     }
 
-    public static func takesLong(addedAt: Date, first: Sample?, latest: Sample?, eta: Double?, now: Date,
-                                 limit: TimeInterval = limit) -> Bool {
+    public private(set) var first: Sample?
+    public private(set) var latest: Sample?
+    /// Seconds cmdlp expects it still to take, when it says.
+    public private(set) var eta: Double?
+    /// The figure for "Preparing… N%": nil until cmdlp gives one.
+    public private(set) var percent: Int?
+
+    public init() {}
+
+    /// cmdlp's latest `progress` on a link still `pending`.
+    public mutating func note(percent overall: Double?, eta: Double?, at now: Date = Date()) {
+        if let overall, overall.isFinite {
+            let sample = Sample(at: now, percent: min(100, max(0, overall)))
+            if first == nil { first = sample }
+            latest = sample
+            let figure = min(99, Int(sample.percent.rounded(.down)))
+            percent = max(percent ?? figure, figure)
+        }
+        self.eta = eta.flatMap { $0.isFinite && $0 >= 0 ? $0 : nil }
+    }
+
+    public func takesLong(addedAt: Date, now: Date = Date(), limit: TimeInterval = limit) -> Bool {
         let elapsed = now.timeIntervalSince(addedAt)
         if elapsed > limit { return true }
-        if let eta, eta.isFinite, eta >= 0 { return elapsed + eta > limit }
+        if let eta { return elapsed + eta > limit }
         guard let first, let latest else { return false }
         let span = latest.at.timeIntervalSince(first.at)
         guard span >= 1, latest.percent > first.percent else { return false }
-        let remaining = (100 - min(latest.percent, 100)) / ((latest.percent - first.percent) / span)
+        let remaining = (100 - latest.percent) / ((latest.percent - first.percent) / span)
         return elapsed + remaining > limit
     }
 }

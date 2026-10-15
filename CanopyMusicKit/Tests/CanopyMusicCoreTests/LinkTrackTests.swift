@@ -117,28 +117,71 @@ import Testing
 
     // MARK: Preparing
 
-    /// "More than 15 seconds" from when it was added: yt-dlp's ETA when there is one, otherwise
-    /// the rate between the first and latest percentages, once they're a second apart.
+    static let added = Date(timeIntervalSince1970: 1000)
+
+    static func at(_ seconds: TimeInterval) -> Date { added.addingTimeInterval(seconds) }
+
+    /// What cmdlp said, in turn: seconds after it was added, and its overall percent and ETA.
+    static func estimate(_ notes: [(TimeInterval, Double?, Double?)]) -> LinkPrepEstimate {
+        var estimate = LinkPrepEstimate()
+        for (seconds, percent, eta) in notes { estimate.note(percent: percent, eta: eta, at: at(seconds)) }
+        return estimate
+    }
+
+    /// "Preparing… N%" is cmdlp's overall figure (download and conversion together): whole
+    /// percents, at most 99 until the link is queued, and never going back.
+    @Test func thePercentageOnlyGoesUpAndStopsAt99() {
+        var estimate = LinkPrepEstimate()
+        estimate.note(percent: nil, eta: nil)
+        #expect(estimate.percent == nil)
+        estimate.note(percent: 37.8, eta: 6)
+        #expect(estimate.percent == 37)
+        estimate.note(percent: 64, eta: 4)
+        #expect(estimate.percent == 64)
+        // Never back, whatever cmdlp says next (a figure that dips, or none for a moment).
+        estimate.note(percent: 50, eta: 5)
+        #expect(estimate.percent == 64)
+        estimate.note(percent: nil, eta: nil)
+        #expect(estimate.percent == 64)
+        // All done at cmdlp, but not yet queued.
+        estimate.note(percent: 100, eta: 0)
+        #expect(estimate.percent == 99)
+        estimate.note(percent: .nan, eta: .infinity)
+        #expect(estimate.percent == 99)
+    }
+
+    /// "More than 15 seconds" from when it was added: cmdlp's overall ETA when there is one,
+    /// otherwise the rate between the first and latest percentages, once they're a second apart.
     @Test func estimatesWhetherPreparingTakesLong() {
-        let added = Date(timeIntervalSince1970: 1000)
-        func at(_ seconds: TimeInterval, _ percent: Double) -> LinkPrepEstimate.Sample {
-            LinkPrepEstimate.Sample(at: added.addingTimeInterval(seconds), percent: percent)
+        func takesLong(_ notes: [(TimeInterval, Double?, Double?)], now: TimeInterval) -> Bool {
+            Self.estimate(notes).takesLong(addedAt: Self.added, now: Self.at(now))
         }
-        func now(_ seconds: TimeInterval) -> Date { added.addingTimeInterval(seconds) }
         // Nothing to go on yet.
-        #expect(!LinkPrepEstimate.takesLong(addedAt: added, first: nil, latest: nil, eta: nil, now: now(2)))
-        #expect(!LinkPrepEstimate.takesLong(addedAt: added, first: at(1, 10), latest: at(1, 10), eta: nil, now: now(1)))
+        #expect(!LinkPrepEstimate().takesLong(addedAt: Self.added, now: Self.at(2)))
+        #expect(!takesLong([(1, nil, nil)], now: 1))
+        #expect(!takesLong([(1, 10, nil)], now: 1))
         // 10% a second from 10% at 1 s: done around 10 s.
-        #expect(!LinkPrepEstimate.takesLong(addedAt: added, first: at(1, 10), latest: at(3, 30), eta: nil, now: now(3)))
+        #expect(!takesLong([(1, 10, nil), (3, 30, nil)], now: 3))
         // 2% a second from 10% at 1 s: around 45 s.
-        #expect(LinkPrepEstimate.takesLong(addedAt: added, first: at(1, 10), latest: at(3, 14), eta: nil, now: now(3)))
+        #expect(takesLong([(1, 10, nil), (3, 14, nil)], now: 3))
         // Less than a second apart: not yet a rate.
-        #expect(!LinkPrepEstimate.takesLong(addedAt: added, first: at(1, 10), latest: at(1.5, 11), eta: nil, now: now(1.5)))
+        #expect(!takesLong([(1, 10, nil), (1.5, 11, nil)], now: 1.5))
         // cmdlp's ETA wins over the rate.
-        #expect(LinkPrepEstimate.takesLong(addedAt: added, first: at(1, 10), latest: at(3, 30), eta: 20, now: now(3)))
-        #expect(!LinkPrepEstimate.takesLong(addedAt: added, first: at(1, 10), latest: at(3, 14), eta: 5, now: now(3)))
+        #expect(takesLong([(1, 10, nil), (3, 30, 20)], now: 3))
+        #expect(!takesLong([(1, 10, nil), (3, 14, 5)], now: 3))
         // Past 15 s, it has taken long, whatever the estimate.
-        #expect(LinkPrepEstimate.takesLong(addedAt: added, first: at(1, 10), latest: at(16, 99), eta: 0, now: now(16)))
+        #expect(takesLong([(1, 10, nil), (16, 99, 0)], now: 16))
+    }
+
+    /// The overall ETA counts the conversion still to come: an hour-long video downloaded in about
+    /// 7 s and then converted for about 8, so 99% of the download is about half of the whole.
+    @Test func aLongConversionCountsTowardsTheEstimate() {
+        // At 7 s, half done with 8 s to go: more than 15.
+        #expect(Self.estimate([(2, 14, 12), (7, 48, 8.5)]).takesLong(addedAt: Self.added, now: Self.at(7)))
+        // No ETA: 6% a second since 2 s, so about 9 s more.
+        #expect(Self.estimate([(2, 14, nil), (7, 44, nil)]).takesLong(addedAt: Self.added, now: Self.at(7)))
+        // A short song, converted quickly: under.
+        #expect(!Self.estimate([(1, 30, nil), (2, 70, 1.5)]).takesLong(addedAt: Self.added, now: Self.at(2)))
     }
 
     // MARK: Telling a link from a search

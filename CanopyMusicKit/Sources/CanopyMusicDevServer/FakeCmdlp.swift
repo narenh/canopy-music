@@ -12,7 +12,7 @@ import UniformTypeIdentifiers
 ///
 /// - Links from the five sites resolve after a moment (`slow` in the link: 14 s, so the phone's
 ///   "still looking" path runs) and "download" over 8 s (`quick`: 2 s; `stuck`: never), queued,
-///   then downloading with a percentage, then converting.
+///   then downloading, then converting, with one percentage and ETA across both.
 /// - `fail` in the link: the download fails partway. `live`, `blocked`, a playlist or an album
 ///   link, or another site: refused as cmdlp refuses them.
 /// - Audio is a tone (each song its own pitch), 20 s long (`long`: 60 s), as AAC in .m4a, with
@@ -135,7 +135,8 @@ actor FakeCmdlp {
             api.error = "ERROR: [youtube] fake: Video unavailable. This video has been removed by the uploader"
         } else if elapsed < total {
             api.stage = elapsed < 1 ? "queued" : elapsed > total - 1 ? "converting" : "downloading"
-            api.progress = elapsed < 1 ? nil : .init(percent: min(100, elapsed / max(total - 1, 1) * 100))
+            // As cmdlp: one percentage and ETA across downloading and converting together.
+            api.progress = elapsed < 1 ? nil : .init(percent: elapsed / total * 100, eta: total - elapsed)
         } else {
             api.status = .ready
             api.stage = nil

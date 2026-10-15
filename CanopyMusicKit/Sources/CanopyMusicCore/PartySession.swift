@@ -326,8 +326,8 @@ public final class PartySession {
     /// Links added while still downloading, by cmdlp id: each joins Up Next once it's ready.
     /// Saved beside the queue (`saveLinkPreparations`).
     @ObservationIgnored var linkPreparations: [String: LinkPreparation] = [:]
-    /// What each link being prepared has shown of its download, by cmdlp id (not saved).
-    @ObservationIgnored var linkDownloads: [String: LinkDownload] = [:]
+    /// How each link being prepared is getting on, by cmdlp id (not saved).
+    @ObservationIgnored var linkEstimates: [String: LinkPrepEstimate] = [:]
     /// Links that failed to prepare, by the client IDs of the phones that added them, until that
     /// phone has been told. Saved with the preparations.
     @ObservationIgnored var linkFailures: [String: [LinkFailure]] = [:]

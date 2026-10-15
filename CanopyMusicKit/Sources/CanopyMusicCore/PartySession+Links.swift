@@ -1,12 +1,5 @@
 import Foundation
 
-/// What a link being prepared has shown of its download so far (`LinkPrepEstimate`).
-struct LinkDownload {
-    var first: LinkPrepEstimate.Sample?
-    var latest: LinkPrepEstimate.Sample?
-    var eta: Double?
-}
-
 /// The links being prepared and the failures not yet told, as saved beside the queue.
 struct SavedLinkPreparations: Codable {
     var preparing: [LinkPreparation]
@@ -122,7 +115,7 @@ extension PartySession {
         let preparation = LinkPreparation(linkID: record.id, zone: linkZone, title: record.queueTrack.title, requester: requester,
                                           itemID: id, addedAt: Date(), clients: [requester.clientID].compactMap { $0 })
         linkPreparations[record.id] = preparation
-        noteDownload(record)
+        noteProgress(record)
         saveLinkPreparations()
         watchLink(record.id)
         return .preparing(progress(of: linkPreparations[record.id] ?? preparation))
@@ -149,8 +142,8 @@ extension PartySession {
     }
 
     func progress(of preparation: LinkPreparation) -> LinkProgress {
-        // At most 99 until it's queued: converting comes after the download's 100.
-        let percent = linkDownloads[preparation.linkID]?.latest.map { min(99, max(0, Int($0.percent.rounded(.down)))) }
+        // cmdlp's overall figure: at most 99 until it's queued, and never going back.
+        let percent = linkEstimates[preparation.linkID]?.percent
         let takesLong = preparation.takesLong || Date().timeIntervalSince(preparation.addedAt) > LinkPrepEstimate.limit
         return LinkProgress(id: QueueTrack.linkID(preparation.linkID), title: preparation.title, percent: percent, takesLong: takesLong)
     }
@@ -197,25 +190,19 @@ extension PartySession {
         switch track.status {
         case .ready: queuePrepared(track)
         case .failed: failPreparation(track.id, reason: track.error)
-        case .pending: noteDownload(track)
+        case .pending: noteProgress(track)
         }
     }
 
-    /// The download's percentage and ETA, for the phones' "Preparing… 37%" and whether it's
-    /// expected to take more than 15 seconds (`LinkPrepEstimate`), which once true stays true.
-    func noteDownload(_ track: CmdlpTrack, at now: Date = Date()) {
+    /// cmdlp's overall percentage and ETA (download and conversion together), for the phones'
+    /// "Preparing… 37%" and whether it's expected to take more than 15 seconds
+    /// (`LinkPrepEstimate`), which once true stays true.
+    func noteProgress(_ track: CmdlpTrack, at now: Date = Date()) {
         guard var preparation = linkPreparations[track.id] else { return }
-        var download = linkDownloads[track.id] ?? LinkDownload()
-        if let percent = track.progress?.percent, percent.isFinite {
-            let sample = LinkPrepEstimate.Sample(at: now, percent: percent)
-            if download.first == nil { download.first = sample }
-            download.latest = sample
-        }
-        download.eta = track.progress?.eta
-        linkDownloads[track.id] = download
-        guard !preparation.takesLong,
-              LinkPrepEstimate.takesLong(addedAt: preparation.addedAt, first: download.first, latest: download.latest,
-                                         eta: download.eta, now: now) else { return }
+        var estimate = linkEstimates[track.id] ?? LinkPrepEstimate()
+        estimate.note(percent: track.progress?.percent, eta: track.progress?.eta, at: now)
+        linkEstimates[track.id] = estimate
+        guard !preparation.takesLong, estimate.takesLong(addedAt: preparation.addedAt, now: now) else { return }
         preparation.takesLong = true
         linkPreparations[track.id] = preparation
         saveLinkPreparations()
@@ -230,7 +217,7 @@ extension PartySession {
             return
         }
         linkPreparations[track.id] = nil
-        linkDownloads[track.id] = nil
+        linkEstimates[track.id] = nil
         mutate { $0.addRequest(track.queueTrack, by: preparation.requester, at: preparation.addedAt, id: preparation.itemID) }
         saveLinkPreparations()
     }
@@ -239,7 +226,7 @@ extension PartySession {
     /// (`linkProgress(for:)`), even if it comes back to the page later. Nobody else hears of it.
     func failPreparation(_ id: String, reason: String?) {
         guard let preparation = linkPreparations.removeValue(forKey: id) else { return }
-        linkDownloads[id] = nil
+        linkEstimates[id] = nil
         let failure = LinkFailure(id: QueueTrack.linkID(id), text: Self.failure(reason, title: preparation.title))
         for client in preparation.clients { linkFailures[client, default: []].append(failure) }
         saveLinkPreparations()
@@ -267,7 +254,7 @@ extension PartySession {
         linkLookups = [:]
         linkRecords = [:]
         linkPreparations = [:]
-        linkDownloads = [:]
+        linkEstimates = [:]
         linkFailures = [:]
         saveLinkPreparations()
         guard let service = linkService, let zone = linkZone else { return }

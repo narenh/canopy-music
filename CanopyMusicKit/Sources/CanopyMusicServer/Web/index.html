@@ -287,6 +287,15 @@
       <p class="settings-head">Screen</p>
       <label class="setting-row"><span>Allow screensaver while playing</span><input type="checkbox" class="switch" id="settings-screensaver"></label>
     </div>
+    <!-- Apple TV hubs only (an iPad or Mac sets it in its own Settings): the canopy-cmdlp server
+         that turns links pasted into search into songs. Its token is never shown, only its last
+         four characters. -->
+    <div id="settings-links" hidden>
+      <p class="settings-head">Links</p>
+      <div class="setting-row"><span class="setting-label">Server</span><span class="setting-value" id="settings-links-server"></span><button type="button" class="pill-btn" id="settings-links-btn">Set</button></div>
+      <div class="setting-row"><span class="setting-label">API token</span><span class="setting-value" id="settings-links-token"></span></div>
+      <p class="small" id="settings-links-status" hidden></p>
+    </div>
     <p class="settings-head">Host Control</p>
     <div class="setting-row"><span class="setting-label" id="settings-hosts"></span><button type="button" class="pill-btn" id="settings-invite">Add another host</button></div>
     <button type="button" class="danger-btn" id="settings-forget">Forget other hosts</button>
@@ -348,6 +357,24 @@
     <input id="wifi-password" maxlength="63" placeholder="Optional" autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck="false" enterkeyhint="done" data-1p-ignore data-lpignore="true">
     <div class="modal-actions">
       <button type="button" class="text-btn" id="wifi-cancel">Cancel</button>
+      <button type="submit" class="primary-btn">Save</button>
+    </div>
+  </form>
+</div>
+
+<!-- Host, Apple TV hubs: the links server's address and token. An empty token field keeps the
+     saved one; the TV checks the connection and the settings sheet says how it went. -->
+<div id="links-modal" class="modal over" hidden>
+  <form class="modal-card" id="links-form">
+    <h2>Links</h2>
+    <label class="field-label" for="links-address">Server address</label>
+    <input id="links-address" type="url" maxlength="300" placeholder="https://cmdlp.example.com" autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck="false" enterkeyhint="next" data-1p-ignore data-lpignore="true">
+    <label class="field-label" for="links-token">API token</label>
+    <input id="links-token" type="password" maxlength="200" autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck="false" enterkeyhint="done" data-1p-ignore data-lpignore="true">
+    <p class="small">Songs from links guests paste into search, through your own canopy-cmdlp server. Leave the address empty to keep links off.</p>
+    <div class="modal-actions">
+      <button type="button" class="text-btn" id="links-forget" hidden>Forget token</button>
+      <button type="button" class="text-btn" id="links-cancel">Cancel</button>
       <button type="submit" class="primary-btn">Save</button>
     </div>
   </form>

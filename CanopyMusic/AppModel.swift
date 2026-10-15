@@ -523,21 +523,7 @@ final class AppModel {
 
     /// Settings' "Test connection": cmdlp's `/health`, then the token. A sentence to show.
     func testLinkConnection() async -> String {
-        guard let base = CmdlpClient.baseURL(linkBaseURL) else { return "Enter the server's address first." }
-        do {
-            try await CmdlpClient.health(baseURL: base)
-        } catch {
-            return "Couldn't reach \(base.host() ?? "the server")."
-        }
-        guard let token = linkTokens.load() else { return "The server is up. Add its API token to turn links on." }
-        do {
-            try await CmdlpClient(baseURL: base, token: token).checkToken()
-            return "Connected. Guests can paste links into search."
-        } catch let error as CmdlpError where error.status == 401 {
-            return "The server is up, but it didn't accept the token."
-        } catch {
-            return "The server is up, but the token couldn't be checked."
-        }
+        await LinkConnectionCheck.run(baseURL: linkBaseURL, token: linkTokens.load())
     }
 
     // MARK: Provider

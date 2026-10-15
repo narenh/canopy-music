@@ -294,6 +294,41 @@ public struct LinkRefusal: Error, Equatable, LocalizedError {
     }
 }
 
+/// "Test connection": cmdlp's `/health` (no token), then the token. A sentence for the host.
+public enum LinkConnectionCheck {
+    public static func run(baseURL typed: String, token: String?, urlSession: URLSession = .shared) async -> String {
+        guard let base = CmdlpClient.baseURL(typed) else { return "Enter the server's address first." }
+        do {
+            try await CmdlpClient.health(baseURL: base, urlSession: urlSession)
+        } catch {
+            return "Couldn't reach \(base.host() ?? "the server")."
+        }
+        guard let token else { return "The server is up. Add its API token to turn links on." }
+        do {
+            try await CmdlpClient(baseURL: base, token: token, urlSession: urlSession).checkToken()
+            return "Connected. Guests can paste links into search."
+        } catch let error as CmdlpError where error.status == 401 {
+            return "The server is up, but it didn't accept the token."
+        } catch {
+            return "The server is up, but the token couldn't be checked."
+        }
+    }
+}
+
+/// An Apple TV hub's link settings as its hosts' phones see them (`PartySnapshot.linkSetup`): the
+/// address, the token's last four characters (never the token), and how the last check went.
+public struct LinkSetup: Codable, Equatable, Sendable {
+    public var address: String
+    public var tokenHint: String?
+    public var status: String?
+
+    public init(address: String, tokenHint: String?, status: String? = nil) {
+        self.address = address
+        self.tokenHint = tokenHint
+        self.status = status
+    }
+}
+
 /// The hub's cmdlp settings: the address (not secret) and the token (the Keychain's).
 public protocol LinkTokenStore: Sendable {
     func load() -> String?

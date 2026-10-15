@@ -41,7 +41,8 @@ extension PartySession {
     /// results: the song without its audio's address. nil when the lookup is still running after
     /// `wait` seconds (YouTube can take 20 or more): the phone asks again, and joins it. Throws a
     /// `LinkRefusal` with the sentence for the phone.
-    public func resolveLink(_ text: String, waitingAtMost wait: TimeInterval = 10) async throws -> QueueTrack? {
+    public func resolveLink(_ text: String, waitingAtMost wait: TimeInterval? = nil) async throws -> QueueTrack? {
+        let wait = wait ?? linkLookupWait
         guard linksEnabled, let service = linkService, let zone = linkZone, let url = LinkURL.parse(text) else {
             throw LinkRefusal.unavailable
         }

@@ -17,7 +17,7 @@ if args.contains("-onlyCmdlp") {
     try await FakeCmdlp(port: 3002).run()
 }
 let fakeCmdlp = args.contains("-fakeCmdlp")
-if fakeCmdlp { Task { try await FakeCmdlp(port: 3002).run() } }
+if fakeCmdlp { Task { try? await FakeCmdlp(port: 3002).run() } }
 let session = PartySession(catalog: DemoCatalog(), engine: fakeCmdlp
     ? LinkHandoffEngine(music: DemoPlaybackEngine(), links: DemoPlaybackEngine()) : DemoPlaybackEngine())
 if fakeCmdlp {

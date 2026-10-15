@@ -1316,7 +1316,7 @@
     const on = hosting();
     $("settings-btn").hidden = !on;
     if (!on) {
-      for (const id of ["setup", "settings-modal", "edit-modal", "wifi-modal", "invite-modal", "playlists", "conflict-modal", "devices-modal"]) $(id).hidden = true;
+      for (const id of ["setup", "settings-modal", "edit-modal", "wifi-modal", "links-modal", "invite-modal", "playlists", "conflict-modal", "devices-modal"]) $(id).hidden = true;
       if (hostChecked) askNameIfNeeded();
       return;
     }
@@ -2707,12 +2707,30 @@
     // Apple TV hubs only (an iPad never sleeps).
     $("settings-screen").hidden = snap.hubKind !== "tv";
     $("settings-screensaver").checked = snap.screensaverWhilePlaying === true;
+    fillLinks();
     const hosts = snap.hostPhones || 0;
     $("settings-hosts").textContent = hosts === 1 ? "1 phone" : `${hosts} phones`;
     $("settings-forget").hidden = hosts < 2;
     $("settings-stop").textContent = `End ${snap.zoneName || "this zone"}`;
     fillWifi();
     fillPartyRow();
+  }
+
+  /** An Apple TV hub's links server (hosts' snapshots carry it): where it is, the token's last four
+   * characters, and the TV's check of the connection. */
+  function fillLinks() {
+    const links = snap.hubKind === "tv" ? snap.linkSetup : null;
+    $("settings-links").hidden = !links;
+    if (!links) return;
+    let server = "Not set";
+    if (links.address) {
+      try { server = new URL(links.address).host; } catch { server = links.address; }
+    }
+    $("settings-links-server").textContent = server;
+    $("settings-links-token").textContent = links.tokenHint ? `…${links.tokenHint}` : "Not set";
+    $("settings-links-btn").textContent = links.address ? "Change" : "Set";
+    $("settings-links-status").hidden = !links.status;
+    $("settings-links-status").textContent = links.status || "";
   }
 
   /** Saving is offered once someone has added a song (played or still in Up next); until then the
@@ -2805,6 +2823,35 @@
     $("wifi-password").focus();
   });
   $("wifi-cancel").addEventListener("click", () => { $("wifi-modal").hidden = true; });
+
+  // The links dialog: the token field is write-only (empty keeps the saved one).
+  $("settings-links-btn").addEventListener("click", () => {
+    const links = snap.linkSetup || {};
+    $("links-address").value = links.address || "";
+    $("links-token").value = "";
+    $("links-token").placeholder = links.tokenHint ? `Saved (…${links.tokenHint}). Paste to replace` : "Paste the token";
+    $("links-forget").hidden = !links.tokenHint;
+    $("links-modal").hidden = false;
+    setTimeout(() => $("links-address").focus(), 50);
+  });
+  $("links-address").addEventListener("keydown", (event) => {
+    if (event.key !== "Enter") return;
+    event.preventDefault();
+    $("links-token").focus();
+  });
+  $("links-cancel").addEventListener("click", () => { $("links-modal").hidden = true; });
+  async function saveLinks(change) {
+    try {
+      await api("/api/host/links", { key: hostKey, ...change });
+      $("links-modal").hidden = true;
+    } catch { toast("Couldn't save that"); }
+  }
+  $("links-forget").addEventListener("click", () => saveLinks({ forgetToken: true }));
+  $("links-form").addEventListener("submit", (event) => {
+    event.preventDefault();
+    const token = $("links-token").value.trim();
+    saveLinks({ address: $("links-address").value.trim(), token: token || undefined });
+  });
   $("wifi-form").addEventListener("submit", async (event) => {
     event.preventDefault();
     const next = { ...wifiDetails, ssid: $("wifi-ssid").value.trim(), password: $("wifi-password").value };

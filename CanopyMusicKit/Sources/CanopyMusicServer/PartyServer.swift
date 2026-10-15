@@ -462,6 +462,14 @@ public final class PartyServer: Sendable {
         await hostSetup("POST /api/host/spotify/conflict") { _, _, handler in
             try .json(SpotifyConflictReply(zone: await handler.checkSpotifyConflict()))
         }
+        // An Apple TV hub's link settings, from the settings sheet: the cmdlp address and (when
+        // typed) the token, or `forgetToken`. The token is never sent back: hosts' snapshots carry
+        // its last four characters (`linkSetup`), and the TV's check of the connection.
+        await hostSetup("POST /api/host/links") { body, _, handler in
+            let ok = await handler.setLinks(address: body.address.map { String($0.prefix(300)) }, token: body.token.map { String($0.prefix(200)) },
+                                            forgetToken: body.forgetToken == true)
+            return HTTPResponse(statusCode: ok ? .noContent : .notImplemented)
+        }
         // Another zone already plays from this Spotify account: the TV shows that zone as a
         // display instead, and the page goes on to it.
         await hostSetup("POST /api/host/spotify/join") { _, _, handler in
@@ -765,10 +773,13 @@ struct HostSetupBody: Decodable {
     /// "appleMusic" or "spotify".
     var service: String?
     var spotifyClientId: String?
-    /// The Spotify sign-in page as typed (empty: the default).
+    /// The Spotify sign-in page as typed (empty: the default); the cmdlp server's (`/api/host/links`).
     var address: String?
     /// A Spotify Connect device.
     var id: String?
+    /// cmdlp's API token, when the host typed a new one.
+    var token: String?
+    var forgetToken: Bool?
 }
 
 /// The hub's Sonos rooms, from a host's phone.

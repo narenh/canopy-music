@@ -113,6 +113,9 @@ public struct PartySnapshot: Codable, Equatable, Sendable {
     /// Whether the hub's crossfade is on (on Sonos, Sonos's own), for the party page's Crossfade
     /// button. Hosts only, as `musicAccess`; nil until the hub has set it, and from older hubs.
     public var crossfade: Bool?
+    /// Apple TV hubs: the cmdlp address and the token's last four characters, for the settings
+    /// sheet's Links section. Hosts only, as `musicAccess`; never the token.
+    public var linkSetup: LinkSetup?
 }
 
 /// A line every phone shows once, for a moment (`PartySnapshot.notice`).
@@ -215,6 +218,10 @@ public final class PartySession {
     /// The hub's Sonos rooms, for hosts' snapshots (set by the app).
     public var sonosSetup: SonosSetup? {
         didSet { if sonosSetup != oldValue, remote == nil { broadcast() } }
+    }
+    /// Apple TV hubs: the link settings, for hosts' snapshots (set by the app).
+    public var linkSetup: LinkSetup? {
+        didSet { if linkSetup != oldValue, remote == nil { broadcast() } }
     }
     /// Chooses Sonos rooms, and sets their volumes, for a host's phone (set by the app).
     @ObservationIgnored public weak var sonosHandler: (any SonosOutputHandler)?
@@ -323,6 +330,9 @@ public final class PartySession {
     /// The once-a-second check of each link still downloading.
     @ObservationIgnored var linkPolls: [String: Task<Void, Never>] = [:]
     @ObservationIgnored var linkPollInterval: Duration = .seconds(1)
+    /// How long a phone's request waits for a lookup before it's told to ask again: well inside
+    /// the server's 15 s for a request.
+    @ObservationIgnored var linkLookupWait: TimeInterval = 10
     /// How long a link still downloading at its turn is waited for before the next song plays
     /// instead (`postponeLink`).
     @ObservationIgnored var linkWaitAtTurn: TimeInterval = 4
@@ -1075,6 +1085,7 @@ public final class PartySession {
         snap.spotify = spotifySetup
         snap.sonos = sonosSetup
         snap.crossfade = crossfade
+        snap.linkSetup = linkSetup
     }
 
     /// Emits the current snapshot immediately, then again after every change. `includingWifi`

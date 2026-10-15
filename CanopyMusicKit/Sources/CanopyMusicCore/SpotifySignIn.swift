@@ -458,4 +458,12 @@ public protocol HubSetupHandler: AnyObject, Sendable {
     func checkSpotifyConflict() async -> String?
     /// Join the zone already using this Spotify account as a display; returns its address.
     func joinSpotifyConflict() -> String?
+    /// The cmdlp server's address (empty turns links off) and, when given, its token; or forgets
+    /// the token. The hub keeps the token to itself and checks the connection
+    /// (`PartySession.linkSetup`). False when this hub doesn't take links from the page.
+    func setLinks(address: String?, token: String?, forgetToken: Bool) -> Bool
+}
+
+public extension HubSetupHandler {
+    func setLinks(address: String?, token: String?, forgetToken: Bool) -> Bool { false }
 }

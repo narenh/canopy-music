@@ -217,10 +217,17 @@ struct AppleMusicCatalog: MusicCatalog {
     }
 
     /// A library album's songs, with their catalog songs, up to 100 (one page; a search adds
-    /// `LibraryAlbumSearch.maxSongs` at most).
+    /// `LibraryAlbumSearch.maxSongs` at most), each marked with the album, for its art
+    /// (`LibraryArtworkHints.albumKey`).
     private func libraryAlbumSongs(id: String) async throws -> [LibrarySongResource] {
         let page: APIPage<LibrarySongResource> = try await fetch("/v1/me/library/albums/\(id)/tracks?limit=100&include=catalog")
-        return page.data
+        return page.data.map { song in
+            var song = song
+            var relationships = song.relationships ?? .init()
+            relationships.albums = .init(data: [.init(id: id)])
+            song.relationships = relationships
+            return song
+        }
     }
 
     func searchPlaylists(_ term: String) async throws -> [PlaylistSummary] {
@@ -334,10 +341,13 @@ struct AppleMusicCatalog: MusicCatalog {
         return songs
     }
 
-    /// Library playlist tracks are library songs; map each to its catalog song.
+    /// Library playlist tracks are library songs; map each to its catalog song. With each one's
+    /// library album, so the relay downloads an album's art once (`LibraryArtworkHints.albumKey`):
+    /// its songs needn't credit the same artist. Without, if the API won't.
     private func libraryPlaylistSongs(id: String) async throws -> [LoadedTrack] {
         var resources: [LibrarySongResource] = []
-        var path: String? = "/v1/me/library/playlists/\(id)/tracks?limit=100&include=catalog"
+        let withAlbums = "/v1/me/library/playlists/\(id)/tracks?limit=100&include=catalog,albums"
+        var path: String? = withAlbums
         while let next = path {
             let page: APIPage<LibrarySongResource>
             do {
@@ -345,6 +355,9 @@ struct AppleMusicCatalog: MusicCatalog {
             } catch where resources.isEmpty && Self.isNotFound(error) {
                 // An empty playlist has no tracks to find: it loads empty (`PlaylistLoadError`).
                 break
+            } catch where next == withAlbums {
+                path = "/v1/me/library/playlists/\(id)/tracks?limit=100&include=catalog"
+                continue
             }
             resources += page.data
             path = page.next
@@ -386,7 +399,8 @@ struct AppleMusicCatalog: MusicCatalog {
         await artworkHints.record(resources.compactMap { resource in
             resource.libraryID.map {
                 LibraryArtworkHints.Listing(libraryID: $0, template: resource.attributes?.artwork?.url,
-                                            album: resource.attributes?.albumName ?? "", artist: resource.attributes?.artistName ?? "")
+                                            album: resource.attributes?.albumName ?? "", artist: resource.attributes?.artistName ?? "",
+                                            albumID: resource.libraryAlbumID)
             }
         })
         for resource in resources {
@@ -931,6 +945,8 @@ private struct LibrarySongResource: Decodable {
         struct Albums: Decodable {
             struct Album: Decodable {
                 struct Attributes: Decodable { var artwork: APIArtwork? }
+                /// The library album id ("l.…").
+                var id: String?
                 var attributes: Attributes?
             }
             var data: [Album]?
@@ -953,6 +969,9 @@ private struct LibrarySongResource: Decodable {
 
     /// The id, if it's a library id a relay path and a Sonos URI can carry.
     var libraryID: String? { id.flatMap { LibraryArtwork.isLibraryID($0) ? $0 : nil } }
+
+    /// Its library album's id, when the request included it (or set it: an album's tracks).
+    var libraryAlbumID: String? { relationships?.albums?.data?.first?.id }
 
     /// It came with neither its catalog song nor a catalog id: an iTunes Match or uploaded copy,
     /// not one added from Apple Music.

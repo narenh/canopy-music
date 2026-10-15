@@ -28,22 +28,25 @@ public struct LibraryArtworkHint: Sendable, Equatable {
 /// The art of library songs as the service listed them (a library playlist's tracks, a search),
 /// so the hub's relay (`/api/artwork/…`) downloads each image straight away rather than asking the
 /// service for the song again: Apple Music's library songs come with their artwork's URL template.
-/// A song without art of its own gets one of its album's (another song of the same name and artist
+/// A song without art of its own gets one of its album's (another song of the same album, `albumKey`,
 /// that has some). Kept across launches in Caches, so a restored queue's art needs no lookups
 /// either; the `maxSongs` most recently listed.
 public actor LibraryArtworkHints {
-    /// A song as listed: its library id, its art's template (nil when it has none), and its album.
+    /// A song as listed: its library id, its art's template (nil when it has none), and its album:
+    /// the library album's id where the listing has it, and its title and the song's artist.
     public struct Listing: Sendable, Equatable {
         public var libraryID: String
         public var template: String?
         public var album: String
         public var artist: String
+        public var albumID: String?
 
-        public init(libraryID: String, template: String?, album: String, artist: String) {
+        public init(libraryID: String, template: String?, album: String, artist: String, albumID: String? = nil) {
             self.libraryID = libraryID
             self.template = template
             self.album = album
             self.artist = artist
+            self.albumID = albumID
         }
     }
 
@@ -80,9 +83,12 @@ public actor LibraryArtworkHints {
         return albums
     }
 
-    /// Songs with the same album title and artist, ignoring case, accents and punctuation. nil
-    /// without a title.
-    public static func albumKey(album: String, artist: String) -> String? {
+    /// The songs of one library album: by its id when the listing has it ("id:l.…"), since an
+    /// album's songs needn't credit the same artist (a cast recording, a soundtrack's guests: one
+    /// download per artist, on the iPad); else the same album title and artist, ignoring case,
+    /// accents and punctuation. nil without either.
+    public static func albumKey(album: String, artist: String, albumID: String? = nil) -> String? {
+        if let albumID, !albumID.isEmpty { return "id:" + albumID }
         let title = SearchRanking.words(album)
         guard !title.isEmpty else { return nil }
         return title.joined(separator: " ") + "|" + SearchRanking.words(artist).joined(separator: " ")
@@ -90,8 +96,10 @@ public actor LibraryArtworkHints {
 
     public func record(_ listings: [Listing]) {
         for listing in listings {
-            let album = Self.albumKey(album: listing.album, artist: listing.artist)
             let old = songs[listing.libraryID]
+            var album = Self.albumKey(album: listing.album, artist: listing.artist, albumID: listing.albumID)
+            // A search lists songs without their album's id: keep the one a playlist listed.
+            if listing.albumID == nil, let known = old?.album, known.hasPrefix("id:") { album = known }
             if old?.template != listing.template || old?.album != album { changed = true }
             songs[listing.libraryID] = Entry(template: listing.template, album: album, listed: now())
             if let album, let template = listing.template, albums[album] == nil { albums[album] = template }

@@ -250,7 +250,7 @@ public actor LibraryArtworkRelay {
             let downloaded = clock.now - start
             let (hash, pixels) = await Task.detached(priority: .userInitiated) { (Self.hash(data), Self.pixelSize(data)) }.value
             if let sameKey = contentKeys[hash], let jpeg = cached("\(Self.largest)|\(sameKey)") {
-                Self.log("downloaded \(data.count / 1024) KB (\(pixels)) in \(Self.ms(downloaded)): the same image as \(sameKey), kept once")
+                Self.log("downloaded \(data.count / 1024) KB (\(pixels)) in \(Self.ms(downloaded)) for \(key): the same image as \(sameKey), kept once")
                 return Downloaded(key: sameKey, jpeg: jpeg)
             }
             guard let jpeg = await Task.detached(priority: .userInitiated, operation: { Self.jpeg(data, side: Self.largest) }).value else { return nil }

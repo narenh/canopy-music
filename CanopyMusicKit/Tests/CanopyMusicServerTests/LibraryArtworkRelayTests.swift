@@ -93,6 +93,38 @@ actor FakeDownloads {
         #expect(await downloads.urls.first?.hasSuffix("/1200x1200bb.jpg") == true)
     }
 
+    /// An album whose songs credit different artists (a soundtrack's guests, a cast recording's
+    /// singers) is still one album, by its library id: its songs asking at once, while its image
+    /// downloads, as that ends, or after, share one download. The iPad downloaded The Two Towers'
+    /// 4.4 MB once per artist credited.
+    @Test func anAlbumsSongsShareOneDownloadWhoeverTheyCredit() async throws {
+        let directory = temporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let artists = ["Howard Shore", "Howard Shore & Ben Del Maestro", "Emiliana Torrini", "Howard Shore feat. Sheila Chandra"]
+        let ids = (0..<24).map { "i.Towers\($0)" }
+        let hints = LibraryArtworkHints(url: nil)
+        await hints.record(ids.enumerated().map { index, id in
+            .init(libraryID: id, template: "https://art.test/upload/\(id)/{w}x{h}{c}.{f}", album: "The Two Towers (The Complete Recordings)",
+                  artist: artists[index % artists.count], albumID: "l.TwoTowers")
+        })
+        var listed: [String: LibraryArtworkHint] = [:]
+        for id in ids { listed[id] = await hints.hint(for: id) }
+        let source = FakeLibraryArtwork(hints: listed)
+        let downloads = FakeDownloads(delay: .milliseconds(40))
+        let relay = relay(downloads, disk: LibraryArtworkDiskCache(directory: directory))
+        let images = await withTaskGroup(of: Data?.self) { group in
+            for (index, id) in ids.enumerated() {
+                group.addTask {
+                    try? await Task.sleep(for: .milliseconds(3 * index))
+                    return await relay.image(libraryID: id, size: index.isMultiple(of: 2) ? 160 : 1200, from: source)
+                }
+            }
+            return await group.reduce(into: [Data?]()) { $0.append($1) }
+        }
+        #expect(images.allSatisfy { $0 != nil })
+        #expect(await downloads.urls.count == 1)
+    }
+
     /// Two albums whose downloads are the same bytes keep one copy.
     @Test func theSameBytesAreKeptOnce() async throws {
         let source = FakeLibraryArtwork(hints: [
@@ -161,6 +193,19 @@ actor FakeDownloads {
         #expect(await hints.hint(for: "i.Bare") == LibraryArtworkHint(albumTemplate: Self.albumArt, album: album))
         #expect(await hints.hint(for: "i.Alone") == LibraryArtworkHint(album: "bootlegs|the cast"))
         #expect(await hints.hint(for: "i.Unlisted") == nil)
+    }
+
+    /// Listed with its library album's id, a song's album is that id, whoever the song credits;
+    /// a search listing it later without the id doesn't change that.
+    @Test func anAlbumIsItsLibraryIDWhenListed() async throws {
+        let hints = LibraryArtworkHints(url: nil)
+        await hints.record([
+            .init(libraryID: "i.Bare", template: nil, album: "Spring Awakening", artist: "Lea Michele", albumID: "l.Cast"),
+            .init(libraryID: "i.Art", template: Self.albumArt, album: "Spring Awakening", artist: "Jonathan Groff", albumID: "l.Cast"),
+        ])
+        #expect(await hints.hint(for: "i.Bare") == LibraryArtworkHint(albumTemplate: Self.albumArt, album: "id:l.Cast"))
+        await hints.record([.init(libraryID: "i.Art", template: Self.albumArt, album: "Spring Awakening", artist: "Jonathan Groff")])
+        #expect(await hints.hint(for: "i.Art") == LibraryArtworkHint(template: Self.albumArt, album: "id:l.Cast"))
     }
 
     @Test func templatesAreFilledAsMusicKitFillsThem() {

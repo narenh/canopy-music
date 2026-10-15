@@ -32,7 +32,7 @@ struct TVMotionArtworkView: View {
     /// To try, as the iPad's (`MotionArtworkView.fadesWhilePaused`): paused, the video fades to
     /// the still art, still moving until it's gone, then stops; it plays and fades back in.
     static let fadesWhilePaused = true
-    static let pauseFade: TimeInterval = 0.6
+    static let pauseFade: TimeInterval = 0.8
     static let resumeFade: TimeInterval = 0.8
 
     /// Shown, not faded to the still art: the music's playing and the video's moving.

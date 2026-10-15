@@ -505,8 +505,8 @@ struct NowPlayingView: View {
                     // Not while the song's video plays: that already says it's playing. Trying it.
                     if item != nil, !(Self.barsHideForVideo && videoShowing == item?.id) {
                         EqualizerBars(isAnimating: session.isPlaying)
-                            // Trying 16 × 22 (was 24 × 24): lighter beside the title.
-                            .frame(width: 16, height: 22)
+                            // Trying 18 × 22 (was 24 × 24): lighter beside the title.
+                            .frame(width: 18, height: 22)
                             // On the title's baseline, as a SwiftUI shape would be (a UIKit
                             // view's baseline isn't its bottom).
                             .alignmentGuide(.firstTextBaseline) { $0[.bottom] }

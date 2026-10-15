@@ -4,8 +4,6 @@ DerivedData/
 .build/
 .swiftpm/
 *.xcuserstate
-# Dev-only secrets (the cmdlp dev token): see Config/Secrets.example.xcconfig
-Config/Secrets.xcconfig
 
 # Dev-only secrets (the cmdlp dev token): see Config/Secrets.example.xcconfig
 Config/Secrets.xcconfig

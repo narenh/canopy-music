@@ -1889,7 +1889,8 @@
 
     const place = outputPlace();
     $("output-switch").hidden = !sonos;
-    $("output-switch-own").textContent = spotifyZone ? "Spotify device" : "This Apple TV";
+    // "Apple TV": its row underneath is the one that says "This Apple TV".
+    $("output-switch-own").textContent = spotifyZone ? "Spotify device" : "Apple TV";
     for (const button of $("output-switch").children) button.setAttribute("aria-checked", String(button.dataset.place === place));
     $("output-own-part").hidden = place === "sonos";
 

@@ -48,6 +48,29 @@ final class AppleMusicEngine: PlaybackEngine {
     private var lastStatus: MusicPlayer.PlaybackStatus?
     private var poller: Task<Void, Never>?
 
+    // Songs only in the library, on tvOS. There, a catalog song that came with a library track
+    // couldn't start a fresh player: its first update referred to the user's library, which the
+    // app can't open, so the player's connection dropped and the synchronous reads in `poll`
+    // blocked the main thread (`AppleMusicCatalog` plays those from the catalog instead). A song
+    // only in the library has no catalog version, so while one plays or is staged the player is
+    // read on another thread (`PlayerReading.takeOffMain`), one read at a time, and a read that
+    // doesn't come back stops the reads (the music shows paused) rather than freeze the TV. Its
+    // start counts only once a read finds it playing, within `libraryStartDeadline`; otherwise
+    // `play` throws, and the session moves on past it. Not yet tried on a real Apple TV.
+    #if os(tvOS)
+    private static let readsLibrarySongsOffMain = true
+    #else
+    private static let readsLibrarySongsOffMain = false
+    #endif
+    static let readDeadline: TimeInterval = 5
+    static let libraryStartDeadline: TimeInterval = 8
+    private var currentIsLibraryOnly = false
+    private var stagedIsLibraryOnly = false
+    private var readsOffMain: Bool { Self.readsLibrarySongsOffMain && (currentIsLibraryOnly || stagedIsLibraryOnly) }
+    /// A read on another thread is out; its answer counts only for the `play` it was made for.
+    private var isReading = false
+    private var readGeneration = 0
+
     // Playback state as of the last poll. Reading `ApplicationMusicPlayer` goes to an
     // out-of-process service; the UI asks for the time every frame (lyrics takeover), so it
     // gets a value interpolated from these instead of hitting the service each time.
@@ -110,13 +133,23 @@ final class AppleMusicEngine: PlaybackEngine {
         reportedEnd = false
         pausedByUs = false
         sawPlaying = false
+        // A read still out was of the song before.
+        readGeneration += 1
+        isReading = false
+        currentIsLibraryOnly = track.isLibraryOnly
+        stagedIsLibraryOnly = false
         // `poll` runs while we await below; it must not mistake our own queue swap for the
         // player landing on an unexpected entry (that fed back into another `play`, forever).
         isReplacingQueue = true
+        let start = ContinuousClock.now
         player.queue = ApplicationMusicPlayer.Queue(for: [song])
+        log("play \(track.title)\(track.isLibraryOnly ? " (library only)" : ""): queue set")
         do {
             try await player.play()
+            log("play(): returned after \((ContinuousClock.now - start).inMilliseconds)")
+            currentEntryID = readsOffMain ? try await startedEntry(of: track) : player.queue.currentEntry?.id
         } catch {
+            log("play(): threw after \((ContinuousClock.now - start).inMilliseconds): \(error)")
             // Don't read the player back after a failure (nor if the session gave up waiting and
             // this lands later): its connection may have dropped, and a synchronous read then
             // blocks the main thread. Polling stays off until a play works.
@@ -124,7 +157,6 @@ final class AppleMusicEngine: PlaybackEngine {
             isReplacingQueue = false
             throw error
         }
-        currentEntryID = player.queue.currentEntry?.id
         isReplacingQueue = false
         pollingPaused = false
         cache(playing: true, time: 0)
@@ -132,14 +164,38 @@ final class AppleMusicEngine: PlaybackEngine {
         noteCommand()
     }
 
+    /// A song only in the library, on tvOS: its entry once a read on another thread finds the
+    /// player playing, within `libraryStartDeadline` of now. Past it (the player not answering,
+    /// or never playing) it didn't start: `AppleMusicError.libraryPlaybackStalled`.
+    private func startedEntry(of track: QueueTrack) async throws -> String? {
+        let start = ContinuousClock.now
+        let deadline = Date().addingTimeInterval(Self.libraryStartDeadline)
+        var last: PlayerReading?
+        while deadline.timeIntervalSinceNow > 0 {
+            guard let reading = await PlayerReading.takeOffMain(within: min(Self.readDeadline, deadline.timeIntervalSinceNow)) else {
+                log("library song \(track.title): no answer from the player after \((ContinuousClock.now - start).inMilliseconds)")
+                throw AppleMusicError.libraryPlaybackStalled
+            }
+            if reading.status == .playing {
+                log("library song \(track.title): playing after \((ContinuousClock.now - start).inMilliseconds), t=\(reading.time) (read off the main thread)")
+                return reading.entryID
+            }
+            last = reading
+            try await Task.sleep(for: .milliseconds(250))
+        }
+        log("library song \(track.title): not playing after \((ContinuousClock.now - start).inMilliseconds) (status \(last.map { "\($0.status)" } ?? "?"))")
+        throw AppleMusicError.libraryPlaybackStalled
+    }
+
     /// Inserts the new next track right after the current one. It never removes the previously
     /// staged entry: editing `queue.entries` makes the player rebuild its queue, which causes an
     /// audible dropout. Stale entries sit behind the new one and are never reached, because a new
     /// track is always staged first. If the player does land on one, `poll` reports it.
     func stage(_ track: QueueTrack?) async throws {
-        log("stage \(track?.title ?? "nil") status=\(player.state.playbackStatus) entries=\(player.queue.entries.count)")
-        defer { log("staged; status=\(player.state.playbackStatus) entries=\(player.queue.entries.count)") }
+        log("stage \(track?.title ?? "nil")\(playerDetails)")
+        defer { log("staged;\(playerDetails)") }
         stagedTrackID = nil
+        stagedIsLibraryOnly = track?.isLibraryOnly ?? false
         guard let track else { return }
         // A song only in the library is fetched from it by its library id, which is its id here
         // too, so the player's entry for it (`poll`) matches as a catalog song's does.
@@ -192,24 +248,55 @@ final class AppleMusicEngine: PlaybackEngine {
 
     private func poll() {
         guard !isReplacingQueue, !pollingPaused else { return }
-        let entry = player.queue.currentEntry
-        let status = player.state.playbackStatus
-        let time = player.playbackTime
+        guard readsOffMain else {
+            handle(PlayerReading.take())
+            return
+        }
+        guard !isReading else { return }
+        isReading = true
+        let generation = readGeneration
+        Task {
+            let reading = await PlayerReading.takeOffMain(within: Self.readDeadline)
+            guard generation == readGeneration else { return }
+            isReading = false
+            guard let reading else {
+                playerStoppedAnswering()
+                return
+            }
+            guard !isReplacingQueue, !pollingPaused else { return }
+            handle(reading)
+        }
+    }
+
+    /// A read on another thread didn't come back in `readDeadline`: the player's connection has
+    /// likely dropped. No more reads until a play works; the music shows paused.
+    private func playerStoppedAnswering() {
+        log("the player gave no answer in \(Int(Self.readDeadline)) s; not reading it until a play works")
+        pollingPaused = true
+        cache(playing: false, time: currentTime)
+        onEvent?(.statusChanged)
+    }
+
+    private func handle(_ reading: PlayerReading) {
+        let status = reading.status
+        let time = reading.time
         // Before any event: the session snapshots the time as it handles them.
         cache(playing: status == .playing, time: time)
-        let duration = entry?.item.flatMap(Self.duration(of:))
+        let duration = reading.duration
         cachedDuration = duration
-        if entry?.id != currentEntryID {
+        if reading.entryID != currentEntryID {
             let previous = currentEntryID
-            currentEntryID = entry?.id
-            if let staged = stagedTrackID, entry?.item?.id.rawValue == staged {
+            currentEntryID = reading.entryID
+            if let staged = stagedTrackID, reading.itemID == staged {
                 stagedTrackID = nil
                 reportedEnd = false
+                currentIsLibraryOnly = stagedIsLibraryOnly
+                stagedIsLibraryOnly = false
                 onEvent?(.advancedToStaged)
-            } else if previous != nil, entry != nil, !reportedEnd {
+            } else if previous != nil, reading.entryID != nil, !reportedEnd {
                 // Landed on something Canopy didn't stage (a stale entry, or the system's
                 // "previous" command). Hand control back to the queue.
-                log("unexpected entry \(entry?.title ?? "?")")
+                log("unexpected entry \(reading.title ?? "?")")
                 reportedEnd = true
                 onEvent?(.reachedEnd)
             }
@@ -238,8 +325,68 @@ final class AppleMusicEngine: PlaybackEngine {
         #endif
     }
 
-    private static func duration(of item: MusicPlayer.Queue.Entry.Item) -> TimeInterval? {
-        if case .song(let song) = item { return song.duration }
-        return nil
+    /// For the log: the player's status and queue length, unless it's being read off the main
+    /// thread (`readsOffMain`): then nothing is read here.
+    private var playerDetails: String {
+        readsOffMain ? " (player read off the main thread)" : " status=\(player.state.playbackStatus) entries=\(player.queue.entries.count)"
+    }
+}
+
+extension Duration {
+    /// "412 ms", for debug logs.
+    var inMilliseconds: String { "\(Int(self / .milliseconds(1))) ms" }
+}
+
+/// One read of `ApplicationMusicPlayer`: what `AppleMusicEngine.poll` acts on. Each property
+/// read goes to Apple's out-of-process player, synchronously.
+struct PlayerReading: Sendable {
+    var entryID: String?
+    /// The entry's song id (a catalog id, or a library id for a song only in the library).
+    var itemID: String?
+    var title: String?
+    var status: MusicPlayer.PlaybackStatus
+    var time: TimeInterval
+    var duration: TimeInterval?
+
+    /// On the calling thread.
+    nonisolated static func take() -> PlayerReading {
+        let player = ApplicationMusicPlayer.shared
+        let entry = player.queue.currentEntry
+        var duration: TimeInterval?
+        if case .song(let song) = entry?.item { duration = song.duration }
+        return PlayerReading(entryID: entry?.id, itemID: entry?.item?.id.rawValue, title: entry?.title,
+                             status: player.state.playbackStatus, time: player.playbackTime, duration: duration)
+    }
+
+    /// Reads one at a time, in order, on their own thread: one that never returns holds up only
+    /// the reads behind it.
+    private static let queue = DispatchQueue(label: "com.canopysf.CanopyMusic.player-reads", qos: .userInitiated)
+
+    /// `take` on `queue`, or nil if it hasn't come back within `seconds` (it's left to finish, or
+    /// not, by itself).
+    nonisolated static func takeOffMain(within seconds: TimeInterval) async -> PlayerReading? {
+        await withCheckedContinuation { continuation in
+            let answer = Answer(continuation)
+            queue.async { answer.give(take()) }
+            DispatchQueue.global(qos: .userInitiated).asyncAfter(deadline: .now() + seconds) { answer.give(nil) }
+        }
+    }
+
+    /// Whichever of a read and its deadline comes first.
+    private final class Answer: @unchecked Sendable {
+        private let lock = NSLock()
+        private var waiter: CheckedContinuation<PlayerReading?, Never>?
+
+        init(_ waiter: CheckedContinuation<PlayerReading?, Never>) {
+            self.waiter = waiter
+        }
+
+        func give(_ reading: PlayerReading?) {
+            let waiter = lock.withLock {
+                defer { self.waiter = nil }
+                return self.waiter
+            }
+            waiter?.resume(returning: reading)
+        }
     }
 }

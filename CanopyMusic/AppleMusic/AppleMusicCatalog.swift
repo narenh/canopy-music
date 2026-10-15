@@ -40,12 +40,16 @@ actor SongCache {
 enum AppleMusicError: LocalizedError {
     case songNotFound(String)
     case librarySongNotFound(String)
+    /// tvOS: a song only in the library didn't start, or the player stopped answering
+    /// (`AppleMusicEngine.libraryStartDeadline`).
+    case libraryPlaybackStalled
     case badResponse
 
     var errorDescription: String? {
         switch self {
         case .songNotFound: "That song isn't available on Apple Music."
         case .librarySongNotFound: "That song isn't in this Apple Music library."
+        case .libraryPlaybackStalled: "That library song didn't start playing."
         case .badResponse: "Apple Music sent back something unexpected."
         }
     }

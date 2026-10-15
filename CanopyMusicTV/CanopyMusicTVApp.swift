@@ -34,6 +34,8 @@ struct CanopyMusicTVApp: App {
             #if DEBUG
             if ProcessInfo.processInfo.arguments.contains("-playTest") {
                 TVPlayTestView()
+            } else if let libraryID = TVLibraryPlayTestView.libraryID {
+                TVLibraryPlayTestView(libraryID: libraryID)
             } else {
                 TVRootView()
                     .environment(model)
@@ -259,7 +261,7 @@ final class TVModel {
         guard zoneRecord.restoresOnLaunch, LocalNetwork.lanAddress() != nil, canPlay else { return }
         #if DEBUG
         let args = ProcessInfo.processInfo.arguments
-        guard !args.contains("-playTest"), !args.contains("-noRestore") else { return }
+        guard !args.contains("-playTest"), !args.contains("-libraryPlayTest"), !args.contains("-noRestore") else { return }
         #endif
         debugLog("restoring zone")
         #if DEBUG

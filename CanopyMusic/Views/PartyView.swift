@@ -704,9 +704,21 @@ struct EqualizerBars: UIViewRepresentable {
 }
 
 final class EqualizerBarsView: UIView {
-    /// Each bar follows a sine wave: radians a second, and where it starts.
-    private static let speeds: [Double] = [5.1, 7.3, 4.2, 6.4]
-    private static let phases: [Double] = [0, 1.7, 3.1, 0.8]
+    /// How the bars move. Trying out `.bounce`; `.glide` is how they moved before.
+    enum Style {
+        /// Smoothly up and down, a sine wave, each bar at its own rate.
+        case glide
+        /// Up, then back down into a sharp bounce off the floor (an absolute sine wave), as Apple
+        /// Music's and Canopy+'s do.
+        case bounce
+    }
+    static let style: Style = .bounce
+
+    /// Each bar's wave: radians a second, and where it starts.
+    private static let speeds: [Double] = style == .bounce ? [3.1, 4.4, 5.7, 7.0] : [5.1, 7.3, 4.2, 6.4]
+    private static let phases: [Double] = style == .bounce ? [0, 1, 2, 3] : [0, 1.7, 3.1, 0.8]
+    /// The floor, as a share of the height: where the bars rest when paused.
+    private static let floor: CGFloat = style == .bounce ? 0.3 : 0.25
     private let bars = speeds.map { _ in CALayer() }
     private var laidOut: (size: CGSize, animating: Bool)?
 
@@ -731,35 +743,77 @@ final class EqualizerBarsView: UIView {
         super.layoutSubviews()
         let size = bounds.size
         guard laidOut?.size != size || laidOut?.animating != isAnimating else { return }
+        // Paused or played with nothing else changed: the bars ease down to rest, or start from
+        // it, rather than snapping.
+        let toggled = laidOut?.size == size
         laidOut = (size, isAnimating)
         let spacing = size.width * 0.12
         let width = (size.width - spacing * 3) / 4
-        let low = max(2, size.height * 0.25)
+        let low = max(2, size.height * Self.floor)
         CATransaction.begin()
         CATransaction.setDisableActions(true)
         for (i, bar) in bars.enumerated() {
+            // Where it is on screen now, before its bounce is taken off.
+            let shown = bar.presentation()?.bounds.height ?? low
             bar.removeAllAnimations()
             bar.cornerRadius = width / 2
             bar.position = CGPoint(x: (width + spacing) * CGFloat(i) + width / 2, y: size.height)
             bar.bounds = CGRect(x: 0, y: 0, width: width, height: low)
-            guard isAnimating, size.height > low else { continue }
-            // From the wave's trough to its crest and back: a quarter to all of the height.
-            let speed = Self.speeds[i]
-            let bounce = CABasicAnimation(keyPath: "bounds.size.height")
-            bounce.fromValue = low
-            bounce.toValue = size.height
-            bounce.duration = .pi / speed
-            bounce.autoreverses = true
-            bounce.repeatCount = .infinity
-            // A sine wave's half from trough to crest (ease in and out, sine).
-            bounce.timingFunction = CAMediaTimingFunction(controlPoints: 0.37, 0, 0.63, 1)
-            // Where the wave is at its phase: the time since its trough (at -π/2).
-            bounce.timeOffset = (Self.phases[i] + .pi / 2).truncatingRemainder(dividingBy: 2 * .pi) / speed
-            bounce.isRemovedOnCompletion = false
-            bounce.preferredFrameRateRange = CAFrameRateRange(minimum: 20, maximum: 30, preferred: 30)
-            bar.add(bounce, forKey: "bounce")
+            guard isAnimating, size.height > low else {
+                if toggled, shown > low {
+                    let settle = CABasicAnimation(keyPath: "bounds.size.height")
+                    settle.fromValue = shown
+                    settle.toValue = low
+                    settle.duration = 0.35
+                    settle.timingFunction = CAMediaTimingFunction(name: .easeOut)
+                    bar.add(settle, forKey: "settle")
+                }
+                continue
+            }
+            // Played again: every bar from the floor, where it rests. First shown: each at its phase.
+            bar.add(Self.wave(bar: i, low: low, high: size.height, fromRest: toggled), forKey: "bounce")
         }
         CATransaction.commit()
+    }
+
+    /// One bar's endless wave between `low` and `high`, at its phase (or from the floor).
+    private static func wave(bar i: Int, low: CGFloat, high: CGFloat, fromRest: Bool) -> CAAnimation {
+        let speed = speeds[i]
+        let animation: CAAnimation
+        let sinceTrough: Double
+        switch style {
+        case .glide:
+            // From the wave's trough to its crest and back.
+            let glide = CABasicAnimation(keyPath: "bounds.size.height")
+            glide.fromValue = low
+            glide.toValue = high
+            glide.duration = .pi / speed
+            glide.autoreverses = true
+            // A sine wave's half from trough to crest (ease in and out, sine).
+            glide.timingFunction = CAMediaTimingFunction(controlPoints: 0.37, 0, 0.63, 1)
+            animation = glide
+            // The trough is at -π/2.
+            sinceTrough = (phases[i] + .pi / 2).truncatingRemainder(dividingBy: 2 * .pi) / speed
+        case .bounce:
+            // |sin|: up from the floor slowing into the top, then down faster and faster into
+            // the floor, and straight back up. One bounce lasts half the wave.
+            let bounce = CAKeyframeAnimation(keyPath: "bounds.size.height")
+            bounce.values = [low, high, low]
+            bounce.keyTimes = [0, 0.5, 1]
+            bounce.timingFunctions = [
+                CAMediaTimingFunction(controlPoints: 0.39, 0.575, 0.565, 1), // ease out, sine
+                CAMediaTimingFunction(controlPoints: 0.47, 0, 0.745, 0.715), // ease in, sine
+            ]
+            bounce.duration = .pi / speed
+            animation = bounce
+            // The floor is wherever the wave is a multiple of π.
+            sinceTrough = phases[i].truncatingRemainder(dividingBy: .pi) / speed
+        }
+        animation.repeatCount = .infinity
+        animation.timeOffset = fromRest ? 0 : sinceTrough
+        animation.isRemovedOnCompletion = false
+        animation.preferredFrameRateRange = CAFrameRateRange(minimum: 20, maximum: 30, preferred: 30)
+        return animation
     }
 }
 

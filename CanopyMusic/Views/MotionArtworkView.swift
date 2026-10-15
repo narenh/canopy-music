@@ -18,6 +18,9 @@ struct MotionArtworkView: View {
     var cornerRadius: CGFloat
     /// Now Playing can't be seen (the search results are over it): the video pauses.
     var isHidden = false
+    /// Told when the video starts showing over the still art and when it goes (Low Power Mode,
+    /// another song): Now Playing hides its equalizer bars while it shows.
+    var onShowing: (Bool) -> Void = { _ in }
 
     /// The video found for the song, until it can start (`waits`).
     @State private var found: URL?
@@ -97,6 +100,7 @@ struct MotionArtworkView: View {
             startIfReady()
         }
         .onChange(of: waits) { startIfReady() }
+        .onChange(of: isShowing) { _, showing in onShowing(showing) }
         // Low Power Mode: the video fades out to the still art and goes; it comes back without.
         .onChange(of: LowPowerMode.shared.isOn) { _, lowPower in
             guard lowPower else {

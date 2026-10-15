@@ -275,46 +275,23 @@ struct RootView: View {
                 ScreenshotHub.pose(model)
             }
             // `-sonosFake -sonosFakeParty 1|2`: the party screen playing through the simulated
-            // Sonos household, in Bedroom (and Move). `0`: playing on this device, with the
-            // simulated rooms on offer.
+            // Sonos household, in Bedroom (and Move).
             if let i = args.firstIndex(of: "-sonosFakeParty"), i + 1 < args.count, AppModel.isSonosFake {
-                let rooms = Int(args[i + 1]) ?? 1
-                if rooms == 0 {
-                    await model.startFakeDeviceParty()
-                } else {
-                    await model.startFakeSonosParty(rooms: rooms)
-                }
-                // `-showOutputPicker`: opens the party screen's "Where should music play?" first,
-                // so `-sonosToggle` below taps its rows.
-                if args.contains("-showOutputPicker") {
-                    try? await Task.sleep(for: .seconds(2))
-                    model.isPickingSpotifyDevice = true
-                }
+                await model.startFakeSonosParty(rooms: Int(args[i + 1]) ?? 1)
                 // `-sonosToggle Move,Bedroom`: ticks or unticks those rooms in turn, 5 s apart, as
-                // tapping them in the Speakers panel (or the picker) would (the simulator can't be
-                // tapped from here). `device` taps the picker's This iPad row.
+                // tapping them in the Speakers panel would (the simulator can't be tapped from here).
                 if let t = args.firstIndex(of: "-sonosToggle"), t + 1 < args.count {
                     for name in args[t + 1].split(separator: ",") {
                         try? await Task.sleep(for: .seconds(5))
-                        if name == "device" {
-                            print("[debug] back to this device")
-                            model.useThisDevice()
-                        } else if let room = model.sonos.rooms.first(where: { $0.roomName == name }) {
+                        if let room = model.sonos.rooms.first(where: { $0.roomName == name }) {
                             print("[debug] toggling \(name)")
                             model.toggleSonosRoom(room.id)
                         }
                     }
                 }
-                // `-closeOutputPicker`: the picker's Done, 5 s after the last toggle.
-                if args.contains("-closeOutputPicker") {
-                    try? await Task.sleep(for: .seconds(5))
-                    print("[debug] closing the picker")
-                    model.isPickingSpotifyDevice = false
-                }
             }
-            // `-showOutputPicker`: opens "Where should music play?" on the start screen (on the
-            // party screen with `-sonosFakeParty`, above).
-            if args.contains("-showOutputPicker"), !args.contains("-sonosFakeParty") {
+            // `-showOutputPicker`: opens "Where should music play?" on the start screen.
+            if args.contains("-showOutputPicker") {
                 try? await Task.sleep(for: .seconds(2))
                 // `-sonosFake`: once the simulated household's rooms are listed.
                 for _ in 0..<50 where AppModel.isSonosFake && model.sonos.rooms.isEmpty {

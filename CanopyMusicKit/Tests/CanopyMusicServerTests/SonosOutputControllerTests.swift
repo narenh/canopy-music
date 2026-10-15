@@ -136,7 +136,7 @@ import Testing
     /// Raised from an observation's change handler (on the main actor here, as the tests run).
     final class Flag: @unchecked Sendable { var raised = false }
 
-    /// A list open while the music moves to Sonos (the party screen's picker, a mid-party move)
+    /// A list open while the music moves to Sonos (the start screen's picker, mid-party)
     /// is told once the rooms play the zone's music, though the engine itself isn't observable
     /// and the rooms' readings come back the same: its ticked room then says so.
     @Test func listsHearWhenTheRoomsStartPlayingOurs() async throws {

@@ -48,9 +48,11 @@ struct MotionArtworkView: View {
     /// (`LoopingVideoView.start`); a Mac hub on macOS 27 has no cut-off but was seen not to pause.
     /// Before 27 a hub keeps the still art: a paused party is far worse than art that doesn't move.
     /// To try (against a plain pause, false): paused, the video fades to the still art over
-    /// `pauseFade`, still moving until it's gone, then stops; it plays and fades back in with the music.
+    /// `pauseFade`, still moving until it's gone, then stops; it plays and fades back in with the
+    /// music over `resumeFade`.
     static let fadesWhilePaused = true
-    static let pauseFade: TimeInterval = 0.8
+    static let pauseFade: TimeInterval = 0.6
+    static let resumeFade: TimeInterval = 0.8
 
     /// Shown, not faded to the still art: the music's playing and the video's moving.
     private var movesShown: Bool {
@@ -104,7 +106,7 @@ struct MotionArtworkView: View {
                     // fades too and darkens the middle of the fade (as recorded).
                     .compositingGroup()
                     .opacity(isShowing && !movesShown ? 1 : 0)
-                    .animation(.easeInOut(duration: Self.pauseFade), value: movesShown)
+                    .animation(.easeInOut(duration: movesShown ? Self.resumeFade : Self.pauseFade), value: movesShown)
             }
         }
         .onGeometryChange(for: CGFloat.self, of: { max($0.size.width, $0.size.height) }) { side = $0 }

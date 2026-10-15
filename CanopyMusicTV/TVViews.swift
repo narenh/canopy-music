@@ -308,8 +308,11 @@ struct TVZoneListView: View {
         model.canResumeZone ? "resume" : zones.first?.id ?? "create"
     }
 
+    /// Other devices' zones. Read live, not kept in `body`: the `.task` below runs once, and with a
+    /// copy from the first `body` (before Bonjour had answered) it put focus on Create.
+    private var zones: [ZoneListing] { model.browser.zones.filter { $0.hubID != model.deviceID } }
+
     var body: some View {
-        let zones = model.browser.zones.filter { $0.hubID != model.deviceID }
         VStack(spacing: 34) {
             Image("CanopyLogo").resizable().scaledToFit().frame(height: 70)
             VStack(spacing: 16) {
@@ -366,8 +369,9 @@ struct TVZoneListView: View {
         // Joining is the usual case (a second zone in one house is rare), so start on the first
         // zone. Zones turn up a moment after launch, when focus is already on Create.
         .defaultFocus($focused, firstFocus(zones))
+        // Not off Create when there's a Resume row: the user moved there from Resume.
         .onChange(of: zones.isEmpty) { wasEmpty, isEmpty in
-            if wasEmpty, !isEmpty, focused == "create" || focused == nil { focused = firstFocus(zones) }
+            if wasEmpty, !isEmpty, focused == nil || (focused == "create" && !model.canResumeZone) { focused = firstFocus(zones) }
         }
         .confirmationDialog("This ends \(model.zoneName) and clears its queue.", isPresented: $confirmingCreate, titleVisibility: .visible) {
             Button("Create a new zone", role: .destructive) { Task { await model.createZone() } }

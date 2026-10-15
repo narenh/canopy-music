@@ -53,10 +53,13 @@ struct TVMotionArtworkView: View {
                 }
                 .id(url)
                 .opacity(isShowing ? 1 : 0)
-                // Paused, the video fades to the still art (still moving until it's gone). Played,
-                // it fades back once it's moving again, not while it's still a stopped frame.
-                .opacity(movesShown ? 1 : 0)
-                .animation(.easeInOut(duration: Self.pauseFade), value: movesShown)
+                // Paused, a copy of the still art fades in over the video (still moving until it's
+                // covered). Played, it fades away once the video's moving again, not while it's
+                // still a stopped frame. The video itself stays opaque: see-through, it was seen
+                // to dim until the fade ended (on the iPad).
+                TVArtwork(track: track, large: true, cornerRadius: cornerRadius)
+                    .opacity(isShowing && !movesShown ? 1 : 0)
+                    .animation(.easeInOut(duration: Self.pauseFade), value: movesShown)
             }
         }
         .onGeometryChange(for: CGFloat.self, of: { max($0.size.width, $0.size.height) }) { side = $0 }

@@ -531,6 +531,16 @@ enum LibraryTestPrivate {
         return "gave \(changed) of \(libraries.count) libraries the identity \(active)"
     }
 
+    /// Gives libraries without one the active account (`giveLibrariesTheActiveAccount`); true
+    /// when there's at least one library and every one has an identity afterwards.
+    nonisolated static func attachActiveAccount() -> (attached: Bool, note: String) {
+        let note = giveLibrariesTheActiveAccount()
+        guard let libraryClass = NSClassFromString("MPMediaLibrary"),
+              let ivar = class_getInstanceVariable(libraryClass, "_userIdentity"),
+              case .success(let libraries) = mediaLibraries(), !libraries.isEmpty else { return (false, note) }
+        return (libraries.allSatisfy { object_getIvar($0, ivar) != nil }, note)
+    }
+
     /// `MPMusicPlayerController.applicationMusicPlayer` (which `ApplicationMusicPlayer` wraps):
     /// its now-playing item and index, which come from the same now-playing reply.
     nonisolated static func mediaPlayerNowPlaying() -> String {

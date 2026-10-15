@@ -83,6 +83,22 @@ final class AppleMusicEngine: PlaybackEngine {
     #else
     private static let debugLinesUpLibrarySongs = false
     #endif
+
+    #if DEBUG && os(tvOS)
+    /// Debug builds on tvOS only, never TestFlight or the App Store (private API: compiled out of
+    /// Release): the app's music libraries get the TV's active account, which the app may not
+    /// read, so the player's replies about a library song decode. Its entry then arrives and a
+    /// library song can be lined up (gapless, no freeze), as on the iPad. On a real TV that fixed
+    /// both. What shipping builds do (the clock, no lining up) is run from a TestFlight build.
+    /// Attaches the account to any library without one; true when every library has one.
+    private func attachesLibraryAccount() -> Bool {
+        let (attached, note) = LibraryTestPrivate.attachActiveAccount()
+        if !note.hasPrefix("gave 0 ") { log("library account (private, debug only): \(note)") }
+        return attached
+    }
+    #else
+    private func attachesLibraryAccount() -> Bool { false }
+    #endif
     private var currentIsLibraryOnly = false
     /// A library song's start, on tvOS: the time the watch last read it playing at, and when.
     private var startReading: (time: TimeInterval, at: Date)?
@@ -168,6 +184,7 @@ final class AppleMusicEngine: PlaybackEngine {
         let song = try await cache.song(for: track)
         // A later start has begun meanwhile (the session gave up on this one): it's the one wanted.
         guard generation == startGeneration else { throw CancellationError() }
+        if track.isLibraryOnly { _ = attachesLibraryAccount() }
         stagedTrackID = nil
         stagedTrack = nil
         retriedEarlyStop = !retryingEarlyStop
@@ -295,7 +312,8 @@ final class AppleMusicEngine: PlaybackEngine {
         // connection and froze the main thread on a real Apple TV, so neither it nor anything
         // behind one is lined up. The session's `.reachedEnd` then starts the next song itself,
         // after a short gap (the clock notices the end: `EntrylessTracker`).
-        if Self.readsLibrarySongsOffMain, track.isLibraryOnly || currentIsLibraryOnly, !Self.debugLinesUpLibrarySongs {
+        if Self.readsLibrarySongsOffMain, track.isLibraryOnly || currentIsLibraryOnly,
+           !Self.debugLinesUpLibrarySongs, !attachesLibraryAccount() {
             stagedIsLibraryOnly = false
             log("not lining up \(track.title) (a library song on tvOS)")
             throw AppleMusicError.libraryStagingRefused

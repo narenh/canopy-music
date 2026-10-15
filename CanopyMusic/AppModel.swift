@@ -956,7 +956,10 @@ final class AppModel {
     /// server, the Bonjour announcement and the `.local` name, and clears the queue, history, base
     /// playlist and saved queue, so there's nothing to resume and the next zone starts empty.
     /// Settings stay.
+    /// Displays and phones are told it has ended first, before the queue is cleared, and the
+    /// server stops once they have been (`PartyServer.end`).
     func endZone() {
+        server?.sayGoodbye()
         clearZone()
         isLive = false
         zoneRole = .choosing
@@ -964,7 +967,7 @@ final class AppModel {
         sonosController.beginSetup()
         isLocked = false
         UIApplication.shared.isIdleTimerDisabled = false
-        Task { await stopServer() }
+        Task { await endServer() }
     }
 
     /// Empties the queue and its saved copies and forgets the zone, so there's nothing to resume.
@@ -989,7 +992,12 @@ final class AppModel {
         let mirror = PartySession(remote: connection)
         session = mirror
         sonosController.connect(mirror) // no Sonos engine on a display
-        connection.start(session: mirror)
+        connection.onEnding = { [weak self, weak connection] _ in
+            guard let self, self.displayConnection === connection else { return }
+            self.displayedZoneEnded()
+        }
+        // The zone list too, for a hub that goes away without saying the zone ended.
+        connection.start(session: mirror, listing: zone, in: zoneBrowser)
         displayConnection = connection
         displayedZone = zone
         zoneRole = .display
@@ -1012,6 +1020,24 @@ final class AppModel {
         isLocked = false
         UIApplication.shared.isIdleTimerDisabled = false
     }
+
+    /// The zone this display showed has ended (its hub said so, or has been gone a while
+    /// without a word): back to the zone list, which says so for a moment.
+    private func displayedZoneEnded() {
+        let name = session.zoneName ?? displayedZone?.name ?? "The zone"
+        leaveZone()
+        zoneListNote = "\(name) ended"
+        zoneListNoteTask?.cancel()
+        zoneListNoteTask = Task { [weak self] in
+            try? await Task.sleep(for: .seconds(6))
+            guard !Task.isCancelled else { return }
+            self?.zoneListNote = nil
+        }
+    }
+
+    /// A line on the zone list for a moment: "Living Room ended".
+    private(set) var zoneListNote: String?
+    @ObservationIgnored private var zoneListNoteTask: Task<Void, Never>?
 
     private func configureHubSession() {
         session.configureHub(kind: .ipad, device: DeviceKind.device, id: deviceID, zoneName: zoneName, serviceName: provider == .none ? nil : provider.title)
@@ -1134,6 +1160,14 @@ final class AppModel {
 
     func stopServer() async {
         await serially { await self.stopServerNow() }
+    }
+
+    /// End Zone: every socket gets the goodbye out (at most 1 s) before the server stops.
+    private func endServer() async {
+        await serially {
+            await self.server?.end()
+            await self.stopServerNow()
+        }
     }
 
     private func serially(_ operation: @escaping @MainActor () async -> Void) async {

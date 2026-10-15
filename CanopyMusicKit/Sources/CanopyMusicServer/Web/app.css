@@ -198,6 +198,8 @@ html.sheet-open, html.sheet-open body { overflow: hidden; }
 .splash[hidden] { display: none; }
 .splash-logo { width: min(62vw, 300px); height: auto; }
 .splash-status { display: flex; align-items: center; gap: 10px; font-size: 16px; font-weight: 600; color: rgba(255,255,255,.85); text-align: center; margin: 0; }
+/* The zone has ended: nothing is loading. */
+.splash.ended .spinner { display: none; }
 
 .modal { position: fixed; inset: 0; background: rgba(0,0,0,.6); display: grid; place-items: center; padding: 16px; z-index: 50; }
 /* Opened from the settings sheet, so on top of it. */

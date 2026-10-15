@@ -382,7 +382,7 @@
    * host gets the setup sheet). */
   function hideSplash() {
     const splash = $("splash");
-    if (!snap || !hostChecked || splash.hidden || splash.classList.contains("gone")) return;
+    if (!snap || !hostChecked || zoneEnded || splash.hidden || splash.classList.contains("gone")) return;
     // A sheet that opened as the first screen is already in place under the splash; it doesn't
     // also slide in while the splash fades.
     for (const sheet of document.querySelectorAll(".sheet")) if (!sheet.hidden) sheet.classList.add("instant");
@@ -827,8 +827,10 @@
   let retries = 0;
   let offlineTimer = null;
   let reconnectTimer = null;
+  /** The hub said its zone has ended: nothing more to connect to. */
+  let zoneEnded = false;
   function connect() {
-    if (socket && socket.readyState <= 1) return;
+    if (zoneEnded || (socket && socket.readyState <= 1)) return;
     // One way back at a time: a connect from elsewhere (the page shown again) replaces the
     // waiting one rather than start a second chain of retries.
     clearTimeout(reconnectTimer);
@@ -844,9 +846,14 @@
       // The rest of Up next, if it couldn't load while the hub was away.
       if (later.retryTimer) loadMoreLater();
     };
-    ws.onmessage = (event) => applySnapshot(JSON.parse(event.data));
+    ws.onmessage = (event) => {
+      const message = JSON.parse(event.data);
+      // The hub's last word when its zone is ended on purpose; then it closes the socket.
+      if (message.type === "zoneEnded") { showEnded(); return; }
+      applySnapshot(message);
+    };
     ws.onclose = () => {
-      if (ws !== socket) return;
+      if (ws !== socket || zoneEnded) return;
       clearTimeout(offlineTimer);
       offlineTimer = setTimeout(() => { $("offline").hidden = false; }, 1500);
       clearTimeout(reconnectTimer);
@@ -862,6 +869,18 @@
     const ws = socket;
     socket = null;
     if (ws) ws.close();
+  }
+  /** The zone was ended on the hub (or by a host's phone): the splash again, saying so, over
+   * whatever was open. No retries and no offline banner; reloading starts over. */
+  function showEnded() {
+    zoneEnded = true;
+    debugLog("zone ended");
+    clearTimeout(reconnectTimer);
+    clearTimeout(offlineTimer);
+    reconnectTimer = null;
+    $("offline").hidden = true;
+    $("splash").classList.add("ended");
+    showSplash("The party has ended");
   }
   document.addEventListener("visibilitychange", () => { if (document.hidden) disconnect(); else connect(); });
   addEventListener("online", () => { if (!document.hidden) connect(); });
@@ -2818,7 +2837,8 @@
   async function endZone() {
     closeParty();
     $("settings-modal").hidden = true;
-    try { await api("/api/host/stop", { key: hostKey }); } catch { toast("Couldn't end the zone"); }
+    // The hub may stop before it answers; the zone ending (`showEnded`) says it worked.
+    try { await api("/api/host/stop", { key: hostKey }); } catch { if (!zoneEnded) toast("Couldn't end the zone"); }
   }
 
   $("party-save").addEventListener("change", updateParty);

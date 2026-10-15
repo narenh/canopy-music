@@ -28,12 +28,17 @@ public struct QueueTrack: Codable, Hashable, Sendable, Identifiable {
     /// artwork ask for that exact album rather than searching by name. Optional in JSON: saved
     /// queues and snapshots from before it decode without it, and older peers ignore it.
     public var albumID: String?
-    /// Set for a song that's only in the hub account's own iCloud Music Library (an upload with
-    /// no Apple Music catalog entry): its library id ("i.…"), which `id` is too, so the same song
-    /// counts as already queued wherever it came from. Players fetch it from the library rather
-    /// than the catalog, and its artwork comes through the hub (`LibraryArtwork`). nil for
-    /// catalog songs. Optional in JSON: older saved queues and peers leave it out.
+    /// Set for the hub account's own copy of a song in its iCloud Music Library: its library id
+    /// ("i.…"). Its artwork comes through the hub (`LibraryArtwork`), and its title and artist are
+    /// the library's. `id` stays the song's catalog id when it has one (a matched or added copy),
+    /// so it plays as the catalog song and counts as the same song as the catalog's; a song only
+    /// in the library (an upload with no catalog entry, `isLibraryOnly`) has its library id as
+    /// `id` too, and players fetch it from the library. nil for catalog songs. Optional in JSON:
+    /// older saved queues and peers leave it out.
     public var libraryID: String?
+
+    /// Only in the hub account's library: no catalog id, so it plays from the library.
+    public var isLibraryOnly: Bool { libraryID != nil && libraryID == id }
 
     public init(
         id: String, title: String, artist: String, album: String = "",
@@ -69,6 +74,20 @@ public struct QueueTrack: Codable, Hashable, Sendable, Identifiable {
         )
     }
 
+    /// This catalog song as the hub account's library copy `libraryID` (matched or added): still
+    /// the catalog song (`id`, length, colors, album), with the library's title, artist and album
+    /// where it has them, and its art through the hub.
+    public func libraryCopy(libraryID: String, title: String?, artist: String?, album: String?) -> QueueTrack {
+        var track = self
+        track.libraryID = libraryID
+        if let title, !title.isEmpty { track.title = title }
+        if let artist, !artist.isEmpty { track.artist = artist }
+        if let album, !album.isEmpty { track.album = album }
+        track.artworkURL = LibraryArtwork.url(libraryID: libraryID, size: LibraryArtwork.largeSize)
+        track.thumbnailURL = LibraryArtwork.url(libraryID: libraryID, size: LibraryArtwork.thumbnailSize)
+        return track
+    }
+
     private enum CodingKeys: String, CodingKey {
         case id, title, artist, album, duration, artworkURL, thumbnailURL, colors, isExplicit, albumID, libraryID
     }
@@ -89,8 +108,8 @@ public struct QueueTrack: Codable, Hashable, Sendable, Identifiable {
     }
 }
 
-/// Artwork for songs only in the hub account's library (`QueueTrack.libraryID`). They have no
-/// public image URL: only the hub can load their art (through MusicKit), so it serves it at
+/// Artwork for the hub account's library songs (`QueueTrack.libraryID`). Their own art has no
+/// public image URL: only the hub can load it (through MusicKit), so it serves it at
 /// `/api/artwork/<library id>?size=<px>`. Tracks carry that path relative: the web page loads it
 /// from the hub that served the page, a display resolves it against its hub's address
 /// (`resolvingArtwork(against:)`), and the hub's own views against its own server.

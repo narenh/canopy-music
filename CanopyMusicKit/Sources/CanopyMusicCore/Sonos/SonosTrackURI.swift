@@ -95,10 +95,11 @@ public struct SonosTrackReference: Hashable, Sendable {
         "SA_RINCON\(serviceType)_X_#Svc\(serviceType)-0-Token"
     }
 
-    /// The URI for a queue track: a song only in the account's library (`QueueTrack.libraryID`)
-    /// as `libraryURI(for:)`, anything else as `uri(for:)` its id.
+    /// The URI for a queue track: a song only in the account's library (`QueueTrack.isLibraryOnly`)
+    /// as `libraryURI(for:)`, anything else (a library copy of a catalog song too) as `uri(for:)`
+    /// its id.
     public func uri(for track: QueueTrack) throws -> String {
-        guard let libraryID = track.libraryID else { return try uri(for: track.id) }
+        guard track.isLibraryOnly, let libraryID = track.libraryID else { return try uri(for: track.id) }
         return try libraryURI(for: libraryID)
     }
 
@@ -120,7 +121,7 @@ public struct SonosTrackReference: Hashable, Sendable {
         let e = SonosXMLEscape.escape
         let itemID: String
         var res = ""
-        if let libraryID = track.libraryID {
+        if track.isLibraryOnly, let libraryID = track.libraryID {
             let uri = try libraryURI(for: libraryID)
             itemID = "10032020" + Self.libraryObject(libraryID)
             let duration = track.duration.map { " duration=\"\(SonosTime.string($0))\"" } ?? ""

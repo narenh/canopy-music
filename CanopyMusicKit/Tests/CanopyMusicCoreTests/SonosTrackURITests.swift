@@ -56,8 +56,12 @@ struct SonosTrackURITests {
         #expect(item.id == "10032020librarytrack%3ai.bVl4FRZ1zY")
         #expect(item.title == "Chip the Glasses, Crack the Plates! (Film Version)")
         #expect(item.desc == "SA_RINCON52231_X_#Svc52231-0-Token")
-        // A catalog song still goes by its catalog id.
-        #expect(try appleMusic.uri(for: QueueTrack(id: "1440857781", title: "t", artist: "a")) == "x-sonos-http:song%3a1440857781.mp4?sid=204&flags=8224&sn=3")
+        // A catalog song still goes by its catalog id, and so does a library copy of one.
+        let catalog = QueueTrack(id: "1440857781", title: "t", artist: "a")
+        #expect(try appleMusic.uri(for: catalog) == "x-sonos-http:song%3a1440857781.mp4?sid=204&flags=8224&sn=3")
+        let copy = catalog.libraryCopy(libraryID: "i.Matched1", title: nil, artist: nil, album: nil)
+        #expect(try appleMusic.uri(for: copy) == "x-sonos-http:song%3a1440857781.mp4?sid=204&flags=8224&sn=3")
+        #expect(try SonosParse.didlItems(appleMusic.metadata(for: copy)).first?.id == "10032020song%3a1440857781")
     }
 
     /// What Sonos reports once it plays the library song (`GetPositionInfo`, its queue): its own
@@ -77,6 +81,7 @@ struct SonosTrackURITests {
         // Not a library id, or a library song on a Spotify zone.
         var odd = Self.upload
         odd.libraryID = "i.abc&sn=9"
+        odd.id = "i.abc&sn=9"
         #expect(throws: SonosTrackReference.Failure.self) { try appleMusic.uri(for: odd) }
         #expect(throws: SonosTrackReference.Failure.self) { try appleMusic.metadata(for: odd) }
         #expect(throws: SonosTrackReference.Failure.self) { try spotify.uri(for: Self.upload) }

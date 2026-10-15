@@ -32,7 +32,7 @@ struct TVMotionArtworkView: View {
     /// To try, as the iPad's (`MotionArtworkView.fadesWhilePaused`): paused, the video fades to
     /// the still art, still moving until it's gone, then stops; it plays and fades back in.
     static let fadesWhilePaused = true
-    static let pauseFade: TimeInterval = 0.4
+    static let pauseFade: TimeInterval = 0.6
     static let resumeFade: TimeInterval = 0.8
 
     /// Shown, not faded to the still art: the music's playing and the video's moving.
@@ -63,7 +63,9 @@ struct TVMotionArtworkView: View {
                     // fades too and darkens the middle of the fade (as recorded on the iPad).
                     .compositingGroup()
                     .opacity(isShowing && !movesShown ? 1 : 0)
-                    .animation(.easeInOut(duration: movesShown ? Self.resumeFade : Self.pauseFade), value: movesShown)
+                    // Pausing eases out: the still art starts covering the video at once, as the
+                    // music stops, rather than after a slow start that left it moving on its own.
+                    .animation(movesShown ? .easeInOut(duration: Self.resumeFade) : .easeOut(duration: Self.pauseFade), value: movesShown)
             }
         }
         .onGeometryChange(for: CGFloat.self, of: { max($0.size.width, $0.size.height) }) { side = $0 }

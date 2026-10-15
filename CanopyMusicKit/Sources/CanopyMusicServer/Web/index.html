@@ -120,15 +120,16 @@
       <button class="primary-btn wide spotify-btn open-spotify" id="spotify-open" type="button" hidden>Sign in to Spotify</button>
       <button class="text-btn small-link" id="spotify-change" type="button" hidden>Sign in again or change the Client ID</button>
       <!-- Where music plays, as the iPad's "Where should music play?". With Sonos rooms on the
-           Wi‑Fi, a switch chooses where first: Sonos (the household's rooms, several at once) or
-           the Spotify device (its Connect devices; never the TV itself) or This Apple TV. Switching
+           Wi‑Fi, a switch chooses where first: the Spotify device (its Connect devices; never the
+           TV itself) or This Apple TV, or Sonos (the household's rooms, several at once). Switching
            away from Sonos is one tap and lets go of the rooms. Rooms another Canopy Music zone
            plays on say so, with "Use" instead of a tick (the takeover sheet asks first). -->
       <div id="setup-output" hidden>
         <p class="muted-label" style="margin-top:18px">Plays on</p>
         <div class="segmented" id="output-switch" role="radiogroup" aria-label="Plays on" hidden>
-          <button type="button" role="radio" data-place="sonos">Sonos</button>
+          <!-- Sonos second: an Apple TV more often plays itself (or a Spotify device). -->
           <button type="button" role="radio" data-place="own" id="output-switch-own">Spotify device</button>
+          <button type="button" role="radio" data-place="sonos">Sonos</button>
         </div>
         <div id="output-own-part">
           <ul class="output-list" id="output-own"></ul>

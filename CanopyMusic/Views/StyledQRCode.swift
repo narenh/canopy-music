@@ -11,7 +11,7 @@ struct QRCodeView: View {
     var inverted = false
 
     var body: some View {
-        if let image = Self.render(payload, inverted: inverted) {
+        if let image = Self.cached(payload, inverted: inverted) {
             Image(uiImage: image)
                 .interpolation(.none)
                 .resizable()
@@ -19,6 +19,18 @@ struct QRCodeView: View {
         } else {
             Color.clear
         }
+    }
+
+    /// Codes already made, by what they encode: a body can run often, and there are only a few
+    /// (the guest address, the Wi‑Fi, a TV's host address).
+    @MainActor private static var images: [String: UIImage] = [:]
+
+    @MainActor static func cached(_ payload: String, inverted: Bool = false) -> UIImage? {
+        let key = "\(inverted ? 1 : 0)|\(payload)"
+        if let image = images[key] { return image }
+        let image = render(payload, inverted: inverted)
+        images[key] = image
+        return image
     }
 
     static func render(_ payload: String, inverted: Bool = false) -> UIImage? {
@@ -34,7 +46,7 @@ struct QRCodeView: View {
             guard let recolored = recolor.outputImage else { return nil }
             output = recolored
         }
-        guard let cgImage = CIContext().createCGImage(output, from: output.extent) else { return nil }
+        guard let cgImage = QRMatrix.context.createCGImage(output, from: output.extent) else { return nil }
         return UIImage(cgImage: cgImage)
     }
 }
@@ -44,6 +56,20 @@ struct QRMatrix {
     let size: Int
     private let modules: [Bool]
 
+    /// One for every code drawn (making a context isn't cheap).
+    static let context = CIContext()
+
+    /// Grids already made, by what they encode (`QRCodeView.cached`).
+    @MainActor private static var matrices: [String: QRMatrix] = [:]
+
+    @MainActor static func cached(_ payload: String, correction: String) -> QRMatrix? {
+        let key = "\(correction)|\(payload)"
+        if let matrix = matrices[key] { return matrix }
+        let matrix = QRMatrix(payload, correction: correction)
+        matrices[key] = matrix
+        return matrix
+    }
+
     init?(_ payload: String, correction: String) {
         let filter = CIFilter.qrCodeGenerator()
         filter.message = Data(payload.utf8)
@@ -52,8 +78,8 @@ struct QRMatrix {
         // The generator draws one pixel per module plus a quiet-zone border; strip the border.
         let width = Int(output.extent.width), height = Int(output.extent.height)
         var pixels = [UInt8](repeating: 0, count: width * height * 4)
-        CIContext().render(output, toBitmap: &pixels, rowBytes: width * 4, bounds: output.extent,
-                           format: .RGBA8, colorSpace: CGColorSpaceCreateDeviceRGB())
+        Self.context.render(output, toBitmap: &pixels, rowBytes: width * 4, bounds: output.extent,
+                            format: .RGBA8, colorSpace: CGColorSpaceCreateDeviceRGB())
         let dark = { (x: Int, y: Int) in pixels[(y * width + x) * 4] < 128 }
         guard let border = (0..<width).first(where: { i in (0..<height).contains { dark(i, $0) } }) else { return nil }
         let size = width - 2 * border
@@ -93,7 +119,7 @@ struct StyledQRCode: View {
     var foreground: Color = .white
 
     var body: some View {
-        if let matrix = QRMatrix(payload, correction: correction) {
+        if let matrix = QRMatrix.cached(payload, correction: correction) {
             Canvas { context, canvasSize in
                 draw(matrix, in: &context, size: canvasSize)
             }
@@ -165,11 +191,22 @@ struct HalftoneQRCode: View {
     var dotScale: CGFloat = 0.55
     var foreground: Color = .white
     var symbolColor: Color = .white
+    /// Names the symbol, so its mask is made once (`cachedMask`); nil makes it every time.
+    private var symbolKey: String?
 
     init(payload: String, symbol: String, symbolScale: CGFloat = 0.55, dotScale: CGFloat = 0.55,
          foreground: Color = .white, symbolColor: Color = .white) {
         self.init(payload: payload, image: Image(systemName: symbol), symbolScale: symbolScale, dotScale: dotScale,
                   foreground: foreground, symbolColor: symbolColor)
+        symbolKey = "symbol:\(symbol)"
+    }
+
+    /// An image from the asset catalog.
+    init(payload: String, imageNamed name: String, symbolScale: CGFloat = 0.55, dotScale: CGFloat = 0.55,
+         foreground: Color = .white, symbolColor: Color = .white) {
+        self.init(payload: payload, image: Image(name), symbolScale: symbolScale, dotScale: dotScale,
+                  foreground: foreground, symbolColor: symbolColor)
+        symbolKey = "image:\(name)"
     }
 
     init(payload: String, image: Image, symbolScale: CGFloat = 0.55, dotScale: CGFloat = 0.55,
@@ -183,7 +220,7 @@ struct HalftoneQRCode: View {
     }
 
     var body: some View {
-        if let matrix = QRMatrix(payload, correction: "H"), let mask = Self.mask(symbol, modules: matrix.size, scale: symbolScale) {
+        if let matrix = QRMatrix.cached(payload, correction: "H"), let mask = cachedMask(modules: matrix.size) {
             Canvas { context, size in
                 draw(matrix, mask: mask, in: &context, size: size)
             }
@@ -235,6 +272,18 @@ struct HalftoneQRCode: View {
             context.fill(Path(roundedRect: outer.insetBy(dx: unit * 2, dy: unit * 2), cornerRadius: unit * 1.2),
                          with: .color(foreground))
         }
+    }
+
+    /// Masks already made (each renders the symbol), by symbol, code size and scale.
+    @MainActor private static var masks: [String: [Bool]] = [:]
+
+    @MainActor private func cachedMask(modules: Int) -> [Bool]? {
+        guard let symbolKey else { return Self.mask(symbol, modules: modules, scale: symbolScale) }
+        let key = "\(symbolKey)|\(modules)|\(symbolScale)"
+        if let mask = Self.masks[key] { return mask }
+        let mask = Self.mask(symbol, modules: modules, scale: symbolScale)
+        Self.masks[key] = mask
+        return mask
     }
 
     /// Which modules have their center inside the symbol, from a small rendering of it.

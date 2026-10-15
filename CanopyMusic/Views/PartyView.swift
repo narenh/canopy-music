@@ -713,8 +713,8 @@ final class EqualizerBarsView: UIView {
         case bounce
     }
     static let style: Style = .bounce
-    /// Flat tops (bottoms still rounded). Trying it out; false rounds both ends again.
-    static let squaredTops = true
+    /// Square bars, no rounding. Trying it out; false rounds both ends again.
+    static let squared = true
 
     /// Each bar's wave: radians a second, and where it starts.
     private static let speeds: [Double] = style == .bounce ? [3.1, 4.4, 5.7, 7.0] : [5.1, 7.3, 4.2, 6.4]
@@ -758,11 +758,7 @@ final class EqualizerBarsView: UIView {
             // Where it is on screen now, before its bounce is taken off.
             let shown = bar.presentation()?.bounds.height ?? low
             bar.removeAllAnimations()
-            bar.cornerRadius = width / 2
-            // Layers' y runs down: the max-Y corners are the bottom ones.
-            bar.maskedCorners = Self.squaredTops
-                ? [.layerMinXMaxYCorner, .layerMaxXMaxYCorner]
-                : [.layerMinXMinYCorner, .layerMaxXMinYCorner, .layerMinXMaxYCorner, .layerMaxXMaxYCorner]
+            bar.cornerRadius = Self.squared ? 0 : width / 2
             bar.position = CGPoint(x: (width + spacing) * CGFloat(i) + width / 2, y: size.height)
             bar.bounds = CGRect(x: 0, y: 0, width: width, height: low)
             guard isAnimating, size.height > low else {

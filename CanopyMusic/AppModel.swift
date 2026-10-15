@@ -111,7 +111,10 @@ final class AppModel {
         // Sonos streams the zone's service (not during init: set there by hand).
         didSet { sonosController.service = sonosService }
     }
-    private(set) var session: PartySession
+    private(set) var session: PartySession {
+        // The hub's library art follows the session the views show (`HubLibraryArtwork`).
+        didSet { HubLibraryArtwork.follow(session) }
+    }
     /// Last fetched "Your playlists", so reopening the picker shows them at once while it refreshes.
     @ObservationIgnored var libraryPlaylistsCache: [PlaylistSummary] = []
     /// The party screen is showing and host mode is behind press and hold (and the PIN). A live
@@ -374,6 +377,7 @@ final class AppModel {
 
         // Long-form audio is what lets the AirPlay picker select several AirPlay 2 speakers at once.
         try? AVAudioSession.sharedInstance().setCategory(.playback, mode: .default, policy: .longFormAudio)
+        HubLibraryArtwork.follow(session)
     }
 
     /// Whether a zone that was running can come back by itself at launch: the service is still
@@ -1180,7 +1184,7 @@ final class AppModel {
         await stopServerNow()
         // Only a live zone runs the phone server: the start screen has none.
         guard isLive, zoneRole == .hub else { return }
-        guard let (server, task) = await PartyServer.start(session: session) else {
+        guard let (server, task) = await PartyServer.start(session: session, libraryArtwork: HubLibraryArtwork.relay) else {
             localGuestURL = nil
             localFriendlyURL = nil
             return

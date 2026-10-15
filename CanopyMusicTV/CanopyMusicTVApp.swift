@@ -12,8 +12,17 @@ import UIKit
 /// shows it as a display. See docs/multi-device.md.
 @main
 struct CanopyMusicTVApp: App {
-    @State private var model = TVModel()
+    @State private var model: TVModel
     @Environment(\.scenePhase) private var scenePhase
+
+    init() {
+        #if DEBUG
+        // As on the iPad: each debug line out at once when stdout is a pipe (`devicectl …
+        // --console`), not in 4 KB batches that leave the last lines unseen.
+        setvbuf(stdout, nil, _IOLBF, 0)
+        #endif
+        _model = State(initialValue: TVModel())
+    }
 
     var body: some Scene {
         scene
@@ -25,6 +34,8 @@ struct CanopyMusicTVApp: App {
             #if DEBUG
             if ProcessInfo.processInfo.arguments.contains("-playTest") {
                 TVPlayTestView()
+            } else if let libraryID = TVLibraryPlayTestView.libraryID {
+                TVLibraryPlayTestView(libraryID: libraryID)
             } else {
                 TVRootView()
                     .environment(model)
@@ -77,7 +88,10 @@ final class TVModel {
     /// Why the zone list's Resume didn't go back in (Spotify signed out, or another zone on the
     /// account). Cleared by the next attempt.
     private(set) var resumeProblem: String?
-    private(set) var session: PartySession
+    private(set) var session: PartySession {
+        // The hub's library art follows the session the views show (`HubLibraryArtwork`).
+        didSet { HubLibraryArtwork.follow(session) }
+    }
     let browser = ZoneBrowser()
     private(set) var guestURL: URL?
     private(set) var friendlyURL: URL?
@@ -166,6 +180,7 @@ final class TVModel {
         // Apple Music player's own session. Left at the default (not mixable), the music starting
         // interrupted this session and paused the video. Ambient mixes, so it never is.
         try? AVAudioSession.sharedInstance().setCategory(.ambient)
+        HubLibraryArtwork.follow(session)
         restoreZoneIfNeeded()
     }
 
@@ -246,7 +261,7 @@ final class TVModel {
         guard zoneRecord.restoresOnLaunch, LocalNetwork.lanAddress() != nil, canPlay else { return }
         #if DEBUG
         let args = ProcessInfo.processInfo.arguments
-        guard !args.contains("-playTest"), !args.contains("-noRestore") else { return }
+        guard !args.contains("-playTest"), !args.contains("-libraryPlayTest"), !args.contains("-noRestore") else { return }
         #endif
         debugLog("restoring zone")
         #if DEBUG
@@ -729,7 +744,7 @@ final class TVModel {
         await stopServerNow()
         debugLog("starting server")
         let session = session
-        guard let (server, task) = await PartyServer.start(session: session) else {
+        guard let (server, task) = await PartyServer.start(session: session, libraryArtwork: HubLibraryArtwork.relay) else {
             debugLog("server failed to start")
             return
         }

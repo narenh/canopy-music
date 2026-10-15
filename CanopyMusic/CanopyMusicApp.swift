@@ -8,6 +8,15 @@ import UIKit
 @main
 final class AppDelegate: UIResponder, UIApplicationDelegate {
     @MainActor let model = AppModel()
+
+    #if DEBUG
+    override init() {
+        // Each debug line out at once when stdout is a pipe (`devicectl … --console`), not in
+        // 4 KB batches that leave the last lines unseen.
+        setvbuf(stdout, nil, _IOLBF, 0)
+        super.init()
+    }
+    #endif
 }
 
 /// Lays `content` out at the landscape size and turns it 90° to fill a portrait screen.

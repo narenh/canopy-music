@@ -12,19 +12,35 @@ public final class PartyServer: Sendable {
     public let port: UInt16
     private let session: PartySession
     private let server: HTTPServer
+    private let libraryArtwork: LibraryArtworkRelay
+    /// It made its relay, so it warms it too (`LibraryArtworkRelay.warmAhead`); an app passing
+    /// its own warms it itself, for as long as its session lasts.
+    private let warmsLibraryArtwork: Bool
     private let snapshotEncoder = SnapshotEncoder()
     private let sockets = OpenSockets()
 
-    public init(session: PartySession, port: UInt16 = 8080) {
+    /// `libraryArtwork`: the relay for the hub's library art, shared with the app's own views (the
+    /// apps hold one with a disk cache); nil makes one in memory only.
+    public init(session: PartySession, port: UInt16 = 8080, libraryArtwork: LibraryArtworkRelay? = nil) {
         self.session = session
         self.port = port
         self.server = HTTPServer(port: port, logger: .disabled)
+        self.libraryArtwork = libraryArtwork ?? LibraryArtworkRelay(disk: nil)
+        warmsLibraryArtwork = libraryArtwork == nil
     }
 
     /// Runs until cancelled.
     public func run() async throws {
         await registerRoutes()
+        let session = session, relay = libraryArtwork
+        let warming = warmsLibraryArtwork ? Task { await relay.warmAhead(of: session) } : nil
+        defer { warming?.cancel() }
         try await server.run()
+    }
+
+    private func relayedArtwork(path: String, size: Int?) async -> Data? {
+        guard let source = await session.catalog.libraryArtwork else { return nil }
+        return await libraryArtwork.image(path: path, size: size, from: source)
     }
 
     public func stop() async {
@@ -56,14 +72,15 @@ public final class PartyServer: Sendable {
 
     /// Starts on the first port that binds (port 80 gives guests a URL without `:port`).
     /// Returns the running server and the task driving it.
-    public static func start(session: PartySession, ports: [UInt16] = [80, 8080, 8081]) async -> (PartyServer, Task<Void, Error>)? {
+    public static func start(session: PartySession, ports: [UInt16] = [80, 8080, 8081],
+                             libraryArtwork: LibraryArtworkRelay? = nil) async -> (PartyServer, Task<Void, Error>)? {
         for port in ports {
             // Right after a restart the previous socket can hold port 80 briefly; retry the
             // preferred port before falling back.
             let attempts = port == ports.first ? 3 : 1
             for attempt in 0..<attempts {
                 if attempt > 0 { try? await Task.sleep(for: .milliseconds(400)) }
-                let server = PartyServer(session: session, port: port)
+                let server = PartyServer(session: session, port: port, libraryArtwork: libraryArtwork)
                 let task = Task { try await server.run() }
                 do {
                     try await server.waitUntilListening(timeout: 1.5)
@@ -148,11 +165,23 @@ public final class PartyServer: Sendable {
             return try .json(await session.upcoming(offset: offset, limit: limit))
         }
 
+        // The art of songs only in the hub's library (`LibraryArtwork`), which only the hub can
+        // load: for the page, displays, and the hub's own views. Library ids don't change, so
+        // browsers may keep it.
+        await server.appendRoute("GET /api/artwork/*") { [self] request in
+            guard let data = await relayedArtwork(path: request.path, size: request.query["size"].flatMap { Int($0) }) else {
+                return HTTPResponse(statusCode: .notFound, headers: [.cacheControl: "no-store"])
+            }
+            return HTTPResponse(statusCode: .ok, headers: [.contentType: "image/jpeg", .cacheControl: "max-age=86400"], body: data)
+        }
+
+        // Hosts (`key`) also find the hub's own library songs (`searchShowsLibrary`).
         await server.appendRoute("GET /api/search") { request in
             let term = request.query["q"]?.trimmingCharacters(in: .whitespaces) ?? ""
             guard !term.isEmpty else { return try .json([QueueTrack]()) }
+            let library = Self.searchShowsLibrary(isHost: await session.isHost(key: request.query["key"]))
             do {
-                return try .json(try await session.catalog.searchSongs(term))
+                return try .json(try await session.catalog.searchSongs(term, includingLibrary: library))
             } catch {
                 return .serviceFailed(error)
             }
@@ -724,6 +753,13 @@ struct HostSonosBody: Decodable {
 }
 
 extension PartyServer {
+    /// Whether guests' searches (phones without Host Control, and displays) find the hub's own
+    /// library songs too, as hosts' do. `true` opens them to everyone.
+    static let guestsSearchTheLibrary = false
+
+    /// Whether a search from the page includes the hub's library (`MusicCatalog.searchSongs(_:includingLibrary:)`).
+    static func searchShowsLibrary(isHost: Bool) -> Bool { isHost || guestsSearchTheLibrary }
+
     @MainActor
     static func playback(_ body: PlaybackBody, session: PartySession) async -> HTTPResponse {
         switch body.action {

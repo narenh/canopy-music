@@ -62,6 +62,7 @@ private struct ResultRow: View {
                         .font(.system(size: 18, weight: .medium))
                         .foregroundStyle(.white)
                     if track.isExplicit { ExplicitBadge() }
+                    if track.libraryID != nil { LibraryBadge() }
                 }
                 Text(track.album.isEmpty ? track.artist : "\(track.artist) · \(track.album)")
                     .font(.system(size: 14))

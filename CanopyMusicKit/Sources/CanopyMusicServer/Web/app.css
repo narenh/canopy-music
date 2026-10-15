@@ -132,6 +132,8 @@ svg { width: 18px; height: 18px; fill: none; stroke: currentColor; stroke-width:
 .row-title { font-size: 15px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .row-sub { font-size: 13px; color: var(--text-2); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .explicit { display: inline-grid; place-items: center; width: 15px; height: 15px; border-radius: 3px; background: var(--text-3); color: var(--base); font-size: 10px; font-weight: 700; vertical-align: 1px; }
+/* A host's search: the hub's own library copy. As the explicit badge, with a word in it. */
+.library-tag { display: inline-grid; place-items: center; height: 15px; padding: 0 4px; border-radius: 3px; background: var(--text-3); color: var(--base); font-size: 10px; font-weight: 700; vertical-align: 1px; }
 .pill { font-size: 11px; font-weight: 600; padding: 3px 8px; border-radius: 999px; background: var(--surface-2); color: var(--text-2); flex: none; max-width: 90px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .pill.mine { background: var(--accent); color: var(--base); }
 .icon-btn { width: 36px; height: 36px; display: grid; place-items: center; border-radius: 50%; color: var(--text-3); flex: none; }

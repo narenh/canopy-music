@@ -255,8 +255,13 @@
       el.style.backgroundImage = !url && track.colors ? `linear-gradient(135deg, ${track.colors.background}, ${track.colors.secondary})` : "";
       let img = el.querySelector("img");
       if (url) {
-        if (!img) { img = document.createElement("img"); img.loading = "lazy"; img.decoding = "async"; img.alt = ""; el.append(img); }
-        if (img.getAttribute("src") !== url) img.src = url;
+        if (!img) {
+          img = document.createElement("img"); img.loading = "lazy"; img.decoding = "async"; img.alt = "";
+          // No broken-image icon where there's no art (a library song the hub has none for).
+          img.onerror = () => { img.style.visibility = "hidden"; };
+          el.append(img);
+        }
+        if (img.getAttribute("src") !== url) { img.style.visibility = ""; img.src = url; }
       } else if (img) {
         img.remove();
       }
@@ -1087,7 +1092,9 @@
     if (!term) { results = []; renderResults(); return; }
     searchAbort = new AbortController();
     try {
-      const res = await fetch(`/api/search?q=${encodeURIComponent(term)}`, { signal: searchAbort.signal });
+      // Hosts also find the hub's own library songs.
+      const key = hosting() ? `&key=${encodeURIComponent(hostKey)}` : "";
+      const res = await fetch(`/api/search?q=${encodeURIComponent(term)}${key}`, { signal: searchAbort.signal });
       if (!res.ok) throw new Error(`${res.status}`);
       results = await res.json();
       renderResults(term);
@@ -1119,6 +1126,13 @@
         badge.textContent = "E";
         badge.title = "Explicit";
         title.append(" ", badge);
+      }
+      // The hub's own library copy (a host's search): its art and titles are the library's.
+      if (track.libraryID) {
+        const tag = document.createElement("span");
+        tag.className = "library-tag";
+        tag.textContent = "Library";
+        title.append(" ", tag);
       }
       const sub = document.createElement("p");
       sub.className = "row-sub";

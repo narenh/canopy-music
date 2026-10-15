@@ -255,8 +255,13 @@
       el.style.backgroundImage = !url && track.colors ? `linear-gradient(135deg, ${track.colors.background}, ${track.colors.secondary})` : "";
       let img = el.querySelector("img");
       if (url) {
-        if (!img) { img = document.createElement("img"); img.loading = "lazy"; img.decoding = "async"; img.alt = ""; el.append(img); }
-        if (img.getAttribute("src") !== url) img.src = url;
+        if (!img) {
+          img = document.createElement("img"); img.loading = "lazy"; img.decoding = "async"; img.alt = "";
+          // No broken-image icon where there's no art (a library song the hub has none for).
+          img.onerror = () => { img.style.visibility = "hidden"; };
+          el.append(img);
+        }
+        if (img.getAttribute("src") !== url) { img.style.visibility = ""; img.src = url; }
       } else if (img) {
         img.remove();
       }

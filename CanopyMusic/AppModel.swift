@@ -920,14 +920,14 @@ final class AppModel {
         }
     }
 
-    /// Ends this zone and goes back to the start screen, with nothing live: stops the music, the
+    /// Ends this zone and goes back to the zone list, with nothing live: stops the music, the
     /// server, the Bonjour announcement and the `.local` name, and clears the queue, history, base
     /// playlist and saved queue, so there's nothing to resume and the next zone starts empty.
     /// Settings stay.
     func endZone() {
         clearZone()
         isLive = false
-        zoneRole = .hub
+        zoneRole = .choosing
         // A new zone's setup: rooms taken over for this one are just rooms again.
         sonosController.beginSetup()
         isLocked = false

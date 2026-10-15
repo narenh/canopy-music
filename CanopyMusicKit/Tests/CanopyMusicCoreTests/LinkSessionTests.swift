@@ -138,7 +138,7 @@ final class FakeLinkService: LinkService {
             try await session.addLink(FakeLinkService.track("L1", status: .ready).queueTrack.forGuests, by: guest)
         }
         #expect(service.resolveCalls.isEmpty)
-        #expect(LinkRefusal.notHere.message == "Links can't play in this zone.")
+        #expect(LinkRefusal.notHere.message == "Zone player does not support direct audio.")
     }
 
     // MARK: Looking up

@@ -216,13 +216,13 @@ import Testing
         defer { Task { await spotify.stop() } }
         let (refused, reason) = try await post("\(spotify.base)/api/link", ["url": "https://youtu.be/abc", "clientId": "phone-1"])
         #expect(refused == 409)
-        #expect(error(reason) == "Links can't play in this zone.")
+        #expect(error(reason) == "Zone player does not support direct audio.")
         #expect(spotify.links.resolved.isEmpty)
         // Adding one anyway (an older page) is refused the same way.
         let body = try #require(try JSONSerialization.jsonObject(with: JSONEncoder().encode(Links.track.queueTrack.forGuests)) as? [String: Any])
         let (add, addReason) = try await post("\(spotify.base)/api/add", ["track": body, "clientId": "phone-1"])
         #expect(add == 409)
-        #expect(error(addReason) == "Links can't play in this zone.")
+        #expect(error(addReason) == "Zone player does not support direct audio.")
     }
 
     /// Not set up: nothing says links exist, and a pasted link is just a search.

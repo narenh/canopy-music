@@ -398,7 +398,7 @@ public struct LinkRefusal: Error, Equatable, LocalizedError {
     public var errorDescription: String? { message }
 
     /// The zone plays on Spotify Connect, or the hub doesn't take links.
-    public static let notHere = LinkRefusal("Links can't play in this zone.")
+    public static let notHere = LinkRefusal("Zone player does not support direct audio.")
     public static let unavailable = LinkRefusal("Links aren't working right now. Try again in a moment.")
 
     /// What a phone is told when cmdlp refused or failed. cmdlp's own sentence for the refusals a

@@ -1342,7 +1342,7 @@
     } catch (error) {
       delete button.dataset.busy;
       setButton(button, "Add", false);
-      // A link the hub refused says why ("Links can't play in this zone.").
+      // A link the hub refused says why ("Zone player does not support direct audio.").
       toast((error.reason && error.reason.error) || "Couldn't add that. Try again.", error.reason ? 4000 : 2200);
     }
   });

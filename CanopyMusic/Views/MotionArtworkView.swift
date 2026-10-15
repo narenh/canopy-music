@@ -346,7 +346,7 @@ private final class LoopingVideoView: UIView {
         rampTimer?.invalidate()
         rampTimer = nil
         let canRamp = Self.eases && animated && active && (player.currentItem?.canPlaySlowForward ?? false)
-        motionLog("\(wanted ? "play" : "pause") (active: \(active), music playing: \(playing), \(canRamp ? "eased" : "at once"))")
+        motionLog("\(wanted ? "play" : "pause") at \(String(format: "%.3f", player.currentTime().seconds)) s (active: \(active), music playing: \(playing), \(canRamp ? "eased" : "at once"))")
         guard canRamp else {
             if wanted { player.play() } else { player.pause() }
             return
@@ -418,7 +418,7 @@ private final class LoopingVideoView: UIView {
         case .waitingToPlayAtSpecifiedRate: "waiting (\(player.reasonForWaitingToPlay?.rawValue ?? "?"))"
         @unknown default: "unknown"
         }
-        motionLog("video \(status), rate \(player.rate), wants to play: \(wantsToPlay)")
+        motionLog("video \(status), rate \(player.rate), at \(String(format: "%.3f", player.currentTime().seconds)) s, wants to play: \(wantsToPlay)")
     }
 
     func stop() {

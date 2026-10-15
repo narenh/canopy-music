@@ -197,12 +197,52 @@ public final class PartyServer: Sendable {
             if requester.origin == .phone, !(await session.phonesCanQueue), !(await session.isHost(key: body.key)) {
                 return HTTPResponse(statusCode: .forbidden)
             }
+            // A song from a link (a phone's pick from `/api/link`): the hub fills in its audio. Still
+            // downloading, it's "preparing" (`/api/link/progress`), and queued once it's ready.
+            if body.track.link != nil {
+                do {
+                    switch try await session.addLink(body.track, by: requester, id: body.itemId ?? UUID()) {
+                    case .queued(let result): return try .json(AddReply(result))
+                    case .preparing(let progress): return try .json(AddReply(preparing: progress))
+                    }
+                } catch {
+                    return .linkRefused(error)
+                }
+            }
             let result = if let itemId = body.itemId {
                 await session.add(body.track, by: requester, id: itemId)
             } else {
                 await session.add(body.track, by: requester)
             }
             return try .json(AddReply(result))
+        }
+
+        // A link pasted into a phone's search (only once the hub has cmdlp, `PartySnapshot.links`):
+        // looked up, and answered as one song for the phone's results, without its audio's address.
+        // 202 while the lookup is still running: the phone asks again, and joins it. 409 with the
+        // sentence to show when it can't be queued. Phones only: displays never ask.
+        await server.appendRoute("POST /api/link") { request in
+            let body = try JSONDecoder.api.decode(LinkBody.self, from: await request.bodyData)
+            if !(await session.phonesCanQueue), !(await session.isHost(key: body.key)) {
+                return HTTPResponse(statusCode: .forbidden)
+            }
+            do {
+                guard let track = try await session.resolveLink(String(body.url.prefix(2048))) else {
+                    return HTTPResponse(statusCode: .accepted, headers: [.cacheControl: "no-store"])
+                }
+                return try .json(track)
+            } catch {
+                return .linkRefused(error)
+            }
+        }
+
+        // The links this phone added that are still being prepared ("Preparing… 37%"), and
+        // those that failed since it last asked, each told once (`LinkProgressReply`). Asked
+        // about once a second while it has some, and when the page opens.
+        await server.appendRoute("POST /api/link/progress") { request in
+            let body = try JSONDecoder.api.decode(LinkProgressBody.self, from: await request.bodyData)
+            return HTTPResponse(statusCode: .ok, headers: [.contentType: "application/json", .cacheControl: "no-store"],
+                                body: try JSONEncoder().encode(await session.linkProgress(for: body.clientId)))
         }
 
         await server.appendRoute("POST /api/move") { request in
@@ -445,6 +485,15 @@ public final class PartyServer: Sendable {
         await hostSetup("POST /api/host/spotify/conflict") { _, _, handler in
             try .json(SpotifyConflictReply(zone: await handler.checkSpotifyConflict()))
         }
+        // An Apple TV hub's link settings, from the settings sheet: the cmdlp address and (when
+        // typed) the token, or `forgetToken`; and `normalize` (the hub's "Normalize audio"). The
+        // token is never sent back: hosts' snapshots carry its last four characters (`linkSetup`),
+        // and the TV's check of the connection.
+        await hostSetup("POST /api/host/links") { body, _, handler in
+            let ok = await handler.setLinks(address: body.address.map { String($0.prefix(300)) }, token: body.token.map { String($0.prefix(200)) },
+                                            forgetToken: body.forgetToken == true, normalize: body.normalize)
+            return HTTPResponse(statusCode: ok ? .noContent : .notImplemented)
+        }
         // Another zone already plays from this Spotify account: the TV shows that zone as a
         // display instead, and the page goes on to it.
         await hostSetup("POST /api/host/spotify/join") { _, _, handler in
@@ -625,6 +674,17 @@ struct AddBody: Decodable {
     var origin: String?
 }
 
+struct LinkBody: Decodable {
+    var url: String
+    var clientId: String?
+    /// Host Control key, so a host can paste a link while queueing from phones is off.
+    var key: String?
+}
+
+struct LinkProgressBody: Decodable {
+    var clientId: String
+}
+
 struct DisplayHello: Decodable {
     var clientId: String
     var name: String
@@ -705,6 +765,8 @@ struct AddReply: Encodable {
     var result: String
     var index: Int?
     var itemId: UUID?
+    /// A link still downloading ("preparing"): how far it's got.
+    var progress: LinkProgress?
 
     init(_ result: AddResult) {
         switch result {
@@ -715,6 +777,11 @@ struct AddReply: Encodable {
         case .nowPlaying:
             self.result = "nowPlaying"
         }
+    }
+
+    init(preparing progress: LinkProgress) {
+        result = "preparing"
+        self.progress = progress
     }
 }
 
@@ -745,10 +812,15 @@ struct HostSetupBody: Decodable {
     /// "appleMusic" or "spotify".
     var service: String?
     var spotifyClientId: String?
-    /// The Spotify sign-in page as typed (empty: the default).
+    /// The Spotify sign-in page as typed (empty: the default); the cmdlp server's (`/api/host/links`).
     var address: String?
     /// A Spotify Connect device.
     var id: String?
+    /// cmdlp's API token, when the host typed a new one.
+    var token: String?
+    var forgetToken: Bool?
+    /// The hub's "Normalize audio" for links (`LinkNormalize`); absent keeps it.
+    var normalize: Bool?
 }
 
 /// The hub's Sonos rooms, from a host's phone.
@@ -1100,6 +1172,13 @@ extension String {
 }
 
 extension HTTPResponse {
+    /// A link that can't be queued: 409 with the sentence the phone shows (`{"error": …}`).
+    static func linkRefused(_ error: any Error) -> HTTPResponse {
+        let refusal = LinkRefusal(resolving: error)
+        return HTTPResponse(statusCode: .conflict, headers: [.contentType: "application/json", .cacheControl: "no-store"],
+                            body: (try? JSONEncoder().encode(["error": refusal.message])) ?? Data())
+    }
+
     /// The music service failed. Debug builds say why in the body, since the hub's own console is
     /// hard to reach on an Apple TV.
     static func serviceFailed(_ error: Error) -> HTTPResponse {

@@ -138,7 +138,9 @@ struct MotionArtworkView: View {
                 return
             }
             #endif
-            guard let lookup = catalog.motionArtwork else { return }
+            // Only Apple Music catalog songs have it: not a link, nor a song only in the library
+            // (no lookup, no retry, no log line).
+            guard let lookup = catalog.motionArtwork, MotionArtwork.isCatalogID(track.id) else { return }
             var video = await lookup.videoURL(for: track)
             // Once more a moment later: a failed lookup isn't remembered, but nothing asks again
             // until the song changes, so one hiccup cost the whole song. An album known to have

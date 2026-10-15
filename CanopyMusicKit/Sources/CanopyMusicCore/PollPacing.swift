@@ -41,6 +41,11 @@ public struct PollPacing: Equatable, Sendable {
                           afterCommand: .milliseconds(400), afterCommandWindow: 2, idle: .seconds(3))
     }
 
+    /// `ApplicationMusicPlayer` when a link plays next (`LinkHandoffEngine`): the end is the
+    /// moment the link starts, so it's read for more often in the last seconds.
+    public static let appleMusicIntoLink = PollPacing(midSong: .seconds(1), nearEnd: .milliseconds(100), nearEndWindow: 3,
+                                                      afterCommand: .milliseconds(400), afterCommandWindow: 2, idle: .seconds(3))
+
     /// A Sonos group (two SOAP requests a read): near the end and after a command, as often as
     /// it always was while playing. Sonos's crossfade has a length of its own.
     public static func sonos(crossfade: Bool) -> PollPacing {

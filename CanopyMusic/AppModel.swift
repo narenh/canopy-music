@@ -305,6 +305,22 @@ final class AppModel {
         phoneQueueEnabled = defaults.object(forKey: "phoneQueueEnabled") as? Bool ?? true
         phoneReorderEnabled = defaults.object(forKey: "phoneReorderEnabled") as? Bool ?? true
         reorderLimit = ReorderLimit(defaults: defaults)
+        linkBaseURL = defaults.string(forKey: "cmdlpBaseURL") ?? ""
+        #if DEBUG
+        // `-cmdlpBaseURL <address> -cmdlpToken <token>`: links set up at launch, as Settings
+        // would (`CanopyMusicDevServer -onlyCmdlp` in the simulator: any token).
+        if let i = ProcessInfo.processInfo.arguments.firstIndex(of: "-cmdlpToken"), i + 1 < ProcessInfo.processInfo.arguments.count {
+            linkTokens.save(ProcessInfo.processInfo.arguments[i + 1])
+        }
+        #endif
+        linkTokenHint = LinkTokenHint.of(linkTokens.load())
+        linkNormalize = LinkNormalize.isOn(in: defaults)
+        if let zone = defaults.string(forKey: "cmdlpZone"), LinkZone.isValid(zone) {
+            linkZone = zone
+        } else {
+            linkZone = LinkZone.make()
+            defaults.set(linkZone, forKey: "cmdlpZone")
+        }
         // The `.local` address follows the zone name.
         hostname = FriendlyHostname(name: FriendlyHostname.localName(forZone: zoneName))
         defaults.removeObject(forKey: "localName") // the old editable address
@@ -436,14 +452,125 @@ final class AppModel {
             return PartySession(catalog: NoServiceCatalog(), engine: NoServiceEngine())
         case .appleMusic:
             let cache = SongCache()
-            return PartySession(catalog: AppleMusicCatalog(cache: cache), engine: sonosEngine ?? AppleMusicEngine(cache: cache), storeURL: store)
+            return PartySession(catalog: AppleMusicCatalog(cache: cache), engine: sonosEngine ?? makeLinkHandoffEngine(cache: cache), storeURL: store)
         case .spotify:
             return PartySession(catalog: SpotifyCatalog(api: spotify), engine: sonosEngine ?? SpotifyEngine(api: spotify), storeURL: store)
         #if DEBUG
         case .demo:
-            return PartySession(catalog: DemoCatalog(), engine: DemoPlaybackEngine(), storeURL: store)
+            // Links play for real (AVPlayer) between the demo's silent songs, so they can be
+            // tried in the simulator (`CanopyMusicDevServer -onlyCmdlp`).
+            let links = LinkPlayerEngine()
+            links.log = { print("[link-player] \($0)") }
+            let engine = LinkHandoffEngine(music: DemoPlaybackEngine(), links: links)
+            engine.log = { print("[handoff] \($0)") }
+            return PartySession(catalog: DemoCatalog(), engine: engine, storeURL: store)
         #endif
         }
+    }
+
+    /// Apple Music on this device: its own player for catalog and library songs, and an AVPlayer
+    /// for songs from links (`LinkHandoffEngine`), which acts as Apple Music's engine alone until
+    /// links are set up.
+    private static func makeLinkHandoffEngine(cache: SongCache) -> LinkHandoffEngine {
+        let links = LinkPlayerEngine()
+        let engine = LinkHandoffEngine(music: AppleMusicEngine(cache: cache), links: links)
+        #if DEBUG
+        engine.log = { print("[handoff] \($0)") }
+        links.log = { print("[link-player] \($0)") }
+        #endif
+        return engine
+    }
+
+    // MARK: Links (canopy-cmdlp)
+
+    /// cmdlp's address, as the host typed it in Settings › Advanced (Debug builds only). Not a
+    /// secret: the token is (`linkTokens`, in the Keychain). Empty uses the default
+    /// (`linkDefaults`). Links are hidden until an address and a token are both there.
+    var linkBaseURL: String {
+        didSet {
+            guard linkBaseURL != oldValue else { return }
+            defaults.set(linkBaseURL, forKey: "cmdlpBaseURL")
+            linkSettingsChanged()
+        }
+    }
+    /// The token's last four characters, all Settings shows of it; nil when there's none.
+    private(set) var linkTokenHint: String?
+    /// Debug builds: cmdlp's address and a dev token for when the host hasn't entered them
+    /// (`LinkDefaults`). Release builds have none.
+    let linkDefaults = LinkDefaults.current
+    /// Settings' Test Connection worked for the address and token in use now; any change to them
+    /// clears it. "Normalize audio" shows only then.
+    private(set) var linkVerified = false
+    /// Counts changes to the address and token, so a check that finishes after one doesn't count.
+    @ObservationIgnored private var linkSettingsVersion = 0
+    /// The address in use: the host's, else the default.
+    var linkAddress: String { linkDefaults.address(typed: linkBaseURL) }
+    /// "Normalize audio": cmdlp brings links to about Apple Music's loudness (`LinkNormalize`).
+    /// On unless the host turns it off; applies to links added after a change.
+    var linkNormalize: Bool {
+        didSet {
+            guard linkNormalize != oldValue else { return }
+            LinkNormalize.save(linkNormalize, to: defaults)
+            applyLinkSettings()
+        }
+    }
+    @ObservationIgnored private let linkTokens: any LinkTokenStore = KeychainLinkTokenStore()
+    /// This zone's name at cmdlp: kept across relaunches, and a new one for each zone (`clearZone`).
+    @ObservationIgnored private var linkZone: String
+
+    /// The address and a token are both there (the host's or the defaults): guests' pasted links
+    /// become songs.
+    var linksConfigured: Bool { CmdlpClient.baseURL(linkAddress) != nil && (linkTokenHint != nil || linkDefaults.token != nil) }
+
+    func saveLinkToken(_ typed: String) {
+        let token = typed.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !token.isEmpty else { return }
+        linkTokens.save(token)
+        linkTokenHint = LinkTokenHint.of(token)
+        linkSettingsChanged()
+    }
+
+    /// Back to the default token, where there is one (else links go off).
+    func forgetLinkToken() {
+        linkTokens.save(nil)
+        linkTokenHint = nil
+        linkSettingsChanged()
+    }
+
+    private func linkSettingsChanged() {
+        linkSettingsVersion += 1
+        linkVerified = false
+        applyLinkSettings()
+    }
+
+    /// The hub's session takes links once cmdlp's address and token are there
+    /// (`PartySession.linkService`), in this zone's cmdlp zone. Not a display's.
+    private func applyLinkSettings() {
+        guard !isDisplay else { return }
+        session.linkZone = linkZone
+        session.linkNormalize = linkNormalize
+        if let base = CmdlpClient.baseURL(linkAddress), let token = linkDefaults.token(saved: linkTokens.load()) {
+            session.linkService = CmdlpClient(baseURL: base, token: token)
+        } else {
+            session.linkService = nil
+        }
+        (session.engine as? LinkHandoffEngine)?.linksEnabled = { [weak session] in session?.linksEnabled ?? false }
+    }
+
+    /// The zone ended (and its cmdlp zone with it, `PartySession.end`): the next one gets its own.
+    private func startNewLinkZone() {
+        linkZone = LinkZone.make()
+        defaults.set(linkZone, forKey: "cmdlpZone")
+        applyLinkSettings()
+    }
+
+    /// Settings' "Test Connection": cmdlp's `/health`, then the token. A sentence to show; when
+    /// both worked (and nothing changed meanwhile), `linkVerified`.
+    func testLinkConnection() async -> String {
+        let version = linkSettingsVersion
+        let outcome = await LinkConnectionCheck.check(baseURL: linkAddress, token: linkDefaults.token(saved: linkTokens.load()))
+        if version == linkSettingsVersion { linkVerified = outcome.connected }
+        return outcome.message
     }
 
     // MARK: Provider
@@ -981,7 +1108,9 @@ final class AppModel {
 
     /// Empties the queue and its saved copies and forgets the zone, so there's nothing to resume.
     private func clearZone() {
+        // Deletes the zone's cmdlp downloads too; the next zone gets a cmdlp zone of its own.
         session.end()
+        startNewLinkZone()
         // Queues saved under another service (from before a service change) would come back too.
         for other in Self.allProviders where other != provider {
             try? FileManager.default.removeItem(at: Self.storeURL(other))
@@ -1059,6 +1188,7 @@ final class AppModel {
         sonosController.connect(session)
         session.sonosHandler = sonosController
         publishSonosSetup()
+        applyLinkSettings()
     }
 
     /// Announces this zone (or refreshes what's playing in the announcement). Only a live zone.

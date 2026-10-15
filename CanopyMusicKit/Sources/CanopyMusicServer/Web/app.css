@@ -172,6 +172,11 @@ html.sheet-open, html.sheet-open body { overflow: hidden; }
 .add-btn { font-size: 14px; font-weight: 600; padding: 7px 14px; border-radius: 999px; background: var(--surface-2); color: var(--text); flex: none; min-width: 64px; transition: background-color .2s, color .2s; }
 .add-btn.done { background: transparent; color: var(--accent); }
 .add-btn:disabled { opacity: .6; }
+/* A link being prepared: the spinner in place of Add, and a line of its own under the row, centered. */
+.add-btn.preparing, .add-btn.preparing:disabled { background: transparent; opacity: 1; display: grid; place-items: center; }
+.add-btn .spinner { width: 16px; height: 16px; border-width: 1.5px; color: var(--text-2); }
+.row.has-note { flex-wrap: wrap; row-gap: 6px; }
+.row-note { flex: 0 0 100%; margin: 0; font-size: 13px; color: var(--text-2); text-align: center; }
 
 .toast {
   position: fixed; left: 50%; bottom: calc(env(safe-area-inset-bottom) + 20px); transform: translate(-50%, 20px);
@@ -488,6 +493,15 @@ input.volume::-moz-range-thumb { width: var(--thumb); height: var(--thumb); bord
 .picker-row select { position: absolute; inset: 0; width: 100%; height: 100%; opacity: 0; font-size: 16px; }
 .danger-btn { color: #ff6961; font-weight: 600; padding: 14px 2px 4px; width: 100%; text-align: left; }
 .danger-btn[hidden] { display: none; }
+/* Advanced, last in the settings sheet: a row with a chevron that turns down while it's open. */
+.settings-advanced { margin-top: 10px; }
+.settings-advanced[hidden] { display: none; }
+.settings-advanced summary { list-style: none; cursor: pointer; }
+.settings-advanced summary::-webkit-details-marker { display: none; }
+.settings-advanced summary svg { width: 16px; height: 16px; stroke-width: 2.2; color: var(--text-2); }
+.settings-advanced[open] summary svg { transform: rotate(90deg); }
+.row-btn { font-size: 15px; font-weight: 600; padding: 13px 2px; width: 100%; text-align: left; border-bottom: 1px solid var(--line); }
+.row-btn:disabled { opacity: .45; cursor: default; }
 .modal-card.centered { text-align: center; }
 .modal-card .small { font-size: 12px; margin: 12px 0 0; }
 .modal-card .party-name { margin: 4px 0 2px; }

@@ -812,6 +812,7 @@ private struct SettingsSheet: View {
     @State private var savingPlaylist = false
     #if DEBUG
     @State private var debugSignInPage = false
+    @State private var debugLinkTest = false
     @State private var debugLibraryTest = false
     #endif
 
@@ -942,26 +943,42 @@ private struct SettingsSheet: View {
                 #if DEBUG
                 Section("Debug") {
                     NavigationLink("Library test") { LibraryTestView().environment(model) }
+                    NavigationLink("Link test") { LinkTestView().environment(model) }
                 }
                 .listRowBackground(Color.white.opacity(0.08))
+                // Last, collapsed. Debug builds only: Release has no Advanced section.
+                AdvancedSection()
                 #endif
             }
             .scrollContentBackground(.hidden)
+            #if DEBUG
+            // `-settingsBottom`: scrolls to the end (Advanced) once the sheet is up, for screenshots.
+            .modifier(DebugScrollToEnd())
+            #endif
             .endZoneConfirmation(isPresented: $confirmingEnd) { dismiss() }
             .sheet(isPresented: $savingPlaylist) { PartyPlaylistSheet(purpose: .save).environment(model) }
             #if DEBUG
             .onAppear { if ProcessInfo.processInfo.arguments.contains("-showSave") { savingPlaylist = true } }
             // `-showSignInPage`: Settings › Spotify › Sign-in page, for screenshots.
             .navigationDestination(isPresented: $debugSignInPage) { SpotifySignInPageSettings().environment(model) }
+            // `-showLinkTest`: Settings › Debug › Link test, for screenshots (it plays nothing
+            // until a button is tapped).
+            .navigationDestination(isPresented: $debugLinkTest) { LinkTestView().environment(model) }
             // `-showLibraryTest`: Settings › Debug › Library test, for screenshots (it only reads
             // until a button is tapped).
             .navigationDestination(isPresented: $debugLibraryTest) { LibraryTestView().environment(model) }
             .task {
                 let args = ProcessInfo.processInfo.arguments
-                guard args.contains("-showSignInPage") || args.contains("-showLibraryTest") else { return }
+                guard args.contains("-showSignInPage") || args.contains("-showLinkTest") || args.contains("-showLibraryTest") else { return }
                 // Once the sheet has finished coming up (a push during it is dropped).
                 try? await Task.sleep(for: .seconds(2.5))
-                if args.contains("-showSignInPage") { debugSignInPage = true } else { debugLibraryTest = true }
+                if args.contains("-showSignInPage") {
+                    debugSignInPage = true
+                } else if args.contains("-showLibraryTest") {
+                    debugLibraryTest = true
+                } else {
+                    debugLinkTest = true
+                }
             }
             #endif
             .navigationTitle("Settings")
@@ -972,6 +989,157 @@ private struct SettingsSheet: View {
         }
     }
 }
+
+// MARK: - Advanced
+
+#if DEBUG
+/// Settings' last section, collapsed until opened. Debug builds only: Release has no Advanced
+/// section, and no default server or token. The direct audio server (canopy-cmdlp) turns links
+/// guests paste into songs; empty fields use the defaults (`AppModel.linkDefaults`). Only a
+/// saved token's last four characters show. "Normalize audio" shows once the connection check
+/// (run on opening, after changes, or by Test Connection) has worked for the URL and token in use
+/// (`AppModel.linkVerified`).
+private struct AdvancedSection: View {
+    @Environment(AppModel.self) private var model
+    @State private var expanded = ProcessInfo.processInfo.arguments.contains("-showAdvanced")
+    @State private var tokenDraft = ""
+    @State private var testResult: String?
+    @State private var isTesting = false
+
+    private var draftIsEmpty: Bool { tokenDraft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
+
+    /// What the empty token field says: the saved token's last four, else whether the default is used.
+    private var tokenPrompt: String {
+        if let hint = model.linkTokenHint { return "…\(hint)" }
+        return model.linkDefaults.token == nil ? "Not set" : "Default"
+    }
+
+    var body: some View {
+        @Bindable var model = model
+        Section {
+            // A disclosure row, like the PIN row's chevron, turning down while open.
+            Button {
+                withAnimation { expanded.toggle() }
+            } label: {
+                HStack {
+                    Text("Advanced")
+                    Spacer(minLength: 16)
+                    Image(systemName: "chevron.right")
+                        .font(.footnote.weight(.semibold))
+                        .foregroundStyle(.tertiary)
+                        .rotationEffect(.degrees(expanded ? 90 : 0))
+                }
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .accessibilityValue(expanded ? "Expanded" : "Collapsed")
+            .id(DebugScrollToEnd.target)
+        }
+        .listRowBackground(Color.white.opacity(0.08))
+        if expanded {
+            Section {
+                HStack {
+                    Text("URL")
+                    Spacer(minLength: 16)
+                    TextField(model.linkDefaults.address.isEmpty ? "https://" : model.linkDefaults.address, text: $model.linkBaseURL)
+                        .multilineTextAlignment(.trailing)
+                        .textInputAutocapitalization(.never)
+                        .autocorrectionDisabled()
+                        .keyboardType(.URL)
+                        .textContentType(nil)
+                        .onChange(of: model.linkBaseURL) { testResult = nil }
+                }
+                HStack {
+                    Text("Access Token")
+                    Spacer(minLength: 16)
+                    SecureField(tokenPrompt, text: $tokenDraft)
+                        .multilineTextAlignment(.trailing)
+                        .textInputAutocapitalization(.never)
+                        .autocorrectionDisabled()
+                        .textContentType(nil)
+                        .onSubmit(saveToken)
+                    if !draftIsEmpty {
+                        Button("Save", action: saveToken)
+                            .buttonStyle(.borderless)
+                    } else if model.linkTokenHint != nil {
+                        // Back to the default token, where there is one.
+                        Button("Forget", role: .destructive) {
+                            model.forgetLinkToken()
+                            testResult = nil
+                        }
+                        .buttonStyle(.borderless)
+                    }
+                }
+                if model.linkVerified, model.linksConfigured {
+                    Toggle("Normalize audio", isOn: $model.linkNormalize)
+                }
+                HStack {
+                    Button("Test Connection") { Task { await test() } }
+                    .disabled(isTesting || model.linkAddress.isEmpty)
+                    if isTesting {
+                        Spacer()
+                        ProgressView()
+                    }
+                }
+                if let testResult {
+                    Text(testResult)
+                        .font(.subheadline)
+                        .foregroundStyle(.secondary)
+                }
+            } header: {
+                Text("Direct Audio Server")
+            } footer: {
+                Text("Self-host the direct audio server. Most people can ignore this.")
+            }
+            .listRowBackground(Color.white.opacity(0.08))
+            // Checked by itself when opened, and again a moment after the URL or token changes,
+            // so "Normalize audio" shows without a tap on Test Connection (the result isn't kept
+            // across launches).
+            .task(id: CheckKey(address: model.linkAddress, token: model.linkTokenHint)) {
+                guard model.linksConfigured, !model.linkVerified else { return }
+                try? await Task.sleep(for: .milliseconds(800))
+                guard !Task.isCancelled, !isTesting else { return }
+                await test()
+            }
+        }
+    }
+
+    private struct CheckKey: Equatable {
+        let address: String
+        let token: String?
+    }
+
+    private func test() async {
+        isTesting = true
+        testResult = nil
+        testResult = await model.testLinkConnection()
+        isTesting = false
+    }
+
+    private func saveToken() {
+        guard !draftIsEmpty else { return }
+        model.saveLinkToken(tokenDraft)
+        tokenDraft = ""
+        testResult = nil
+    }
+}
+
+/// `-settingsBottom` (with `-showSettings`; `-showAdvanced` opens it too): scrolls Settings to
+/// Advanced, at the end, once the sheet is up, for screenshots.
+private struct DebugScrollToEnd: ViewModifier {
+    static let target = "settings-advanced"
+
+    func body(content: Content) -> some View {
+        ScrollViewReader { proxy in
+            content.task {
+                guard ProcessInfo.processInfo.arguments.contains("-settingsBottom") else { return }
+                try? await Task.sleep(for: .seconds(1.5))
+                proxy.scrollTo(Self.target, anchor: .top)
+            }
+        }
+    }
+}
+#endif
 
 // MARK: - Ending the zone
 

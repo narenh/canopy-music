@@ -99,6 +99,11 @@ public struct SonosTrackReference: Hashable, Sendable {
     /// as `libraryURI(for:)`, anything else (a library copy of a catalog song too) as `uri(for:)`
     /// its id.
     public func uri(for track: QueueTrack) throws -> String {
+        // A song from a link: cmdlp's signed https address, as it is, whatever the service.
+        if let link = track.link {
+            guard link.isPlayable, let audio = link.audioURL else { throw LinkPlaybackError.notReady }
+            return audio.absoluteString
+        }
         guard track.isLibraryOnly, let libraryID = track.libraryID else { return try uri(for: track.id) }
         return try libraryURI(for: libraryID)
     }
@@ -119,6 +124,7 @@ public struct SonosTrackReference: Hashable, Sendable {
     /// protocolInfo `sonos.com-http:*:application/octet-stream:*`, and its length).
     public func metadata(for track: QueueTrack) throws -> String {
         let e = SonosXMLEscape.escape
+        if let link = track.link { return Self.linkMetadata(track, link: link) }
         let itemID: String
         var res = ""
         if track.isLibraryOnly, let libraryID = track.libraryID {
@@ -138,6 +144,19 @@ public struct SonosTrackReference: Hashable, Sendable {
         item += "<desc id=\"cdudn\" nameSpace=\"urn:schemas-rinconnetworks-com:metadata-1-0/\">\(e(resolvedToken))</desc>"
         item += "</item>"
         return Self.didlOpen + item + "</DIDL-Lite>"
+    }
+
+    /// A song from a link: minimal DIDL-Lite (its title, artist, art, and the music-track class),
+    /// no service token, as the debug Link test queued one on a real Sonos room.
+    static func linkMetadata(_ track: QueueTrack, link: LinkTrack) -> String {
+        let e = SonosXMLEscape.escape
+        var item = "<item id=\"\(e("link-\(link.id)"))\" parentID=\"-1\" restricted=\"true\">"
+        item += "<dc:title>\(e(track.title))</dc:title>"
+        if !track.artist.isEmpty { item += "<dc:creator>\(e(track.artist))</dc:creator>" }
+        if let art = track.artworkURL, art.scheme != nil { item += "<upnp:albumArtURI>\(e(art.absoluteString))</upnp:albumArtURI>" }
+        item += "<upnp:class>object.item.audioItem.musicTrack</upnp:class>"
+        item += "</item>"
+        return didlOpen + item + "</DIDL-Lite>"
     }
 
     static let didlOpen = "<DIDL-Lite xmlns:dc=\"http://purl.org/dc/elements/1.1/\" xmlns:upnp=\"urn:schemas-upnp-org:metadata-1-0/upnp/\" xmlns:r=\"urn:schemas-rinconnetworks-com:metadata-1-0/\" xmlns=\"urn:schemas-upnp-org:metadata-1-0/DIDL-Lite/\">"
@@ -166,7 +185,8 @@ public enum SonosURI {
 
     /// The track id Canopy Music uses for a service track URI: Spotify's `spotify:track:…` URI,
     /// Apple Music's catalog id, or an Apple Music library-only song's library id ("i.…", its
-    /// `QueueTrack.id`). nil for anything else (line-in, radio, TV, Spotify Connect).
+    /// `QueueTrack.id`), or a link's (`linkTrackID`). nil for anything else (line-in, radio, TV,
+    /// Spotify Connect).
     public static func canopyTrackID(of uri: String) -> String? {
         let base = uri.split(separator: "?", maxSplits: 1).first.map(String.init) ?? uri
         let decoded = base.removingPercentEncoding ?? base
@@ -190,7 +210,21 @@ public enum SonosURI {
             if let dot = id.firstIndex(of: ".") { id = id[..<dot] }
             return id.isEmpty ? nil : String(id)
         }
-        return nil
+        return linkTrackID(of: uri)
+    }
+
+    /// A song from a link (`QueueTrack.linkID`): cmdlp's `…/audio/{id}.m4a?sig=…`, read by its
+    /// path whatever Sonos makes of the rest (another scheme in front, the `.m4a` or the query
+    /// gone, escaped), so the engine still takes it for ours. nil for anything else.
+    public static func linkTrackID(of uri: String) -> String? {
+        let decoded = uri.removingPercentEncoding ?? uri
+        guard let marker = decoded.range(of: "/audio/", options: .backwards) else { return nil }
+        let rest = decoded[marker.upperBound...]
+        let id = rest.prefix { $0.isASCII && ($0.isLetter || $0.isNumber || $0 == "-" || $0 == "_") }
+        guard id.count == 22 else { return nil }
+        let after = rest.dropFirst(id.count)
+        guard after.isEmpty || after.hasPrefix(".m4a") || after.hasPrefix("?") || after.hasPrefix("&") else { return nil }
+        return QueueTrack.linkID(String(id))
     }
 
     /// The URI that plays a group's queue.

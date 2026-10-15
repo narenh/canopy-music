@@ -18,7 +18,7 @@ let package = Package(
             dependencies: ["CanopyMusicCore", .product(name: "FlyingFox", package: "FlyingFox")],
             resources: [.copy("Web")]
         ),
-        .executableTarget(name: "CanopyMusicDevServer", dependencies: ["CanopyMusicCore", "CanopyMusicServer"]),
+        .executableTarget(name: "CanopyMusicDevServer", dependencies: ["CanopyMusicCore", "CanopyMusicServer", .product(name: "FlyingFox", package: "FlyingFox")]),
         .testTarget(name: "CanopyMusicCoreTests", dependencies: ["CanopyMusicCore"], resources: [.copy("Fixtures")]),
         .testTarget(name: "CanopyMusicServerTests", dependencies: ["CanopyMusicCore", "CanopyMusicServer"]),
     ]

@@ -36,6 +36,10 @@ public struct QueueTrack: Codable, Hashable, Sendable, Identifiable {
     /// `id` too, and players fetch it from the library. nil for catalog songs. Optional in JSON:
     /// older saved queues and peers leave it out.
     public var libraryID: String?
+    /// Set for a song from a pasted link (`LinkTrack`): played from canopy-cmdlp's audio, and
+    /// `id` is `linkID(_:)`. Optional in JSON: older saved queues and peers leave it out, and
+    /// older displays show it as a plain song.
+    public var link: LinkTrack?
 
     /// Only in the hub account's library: no catalog id, so it plays from the library.
     public var isLibraryOnly: Bool { libraryID != nil && libraryID == id }
@@ -44,7 +48,7 @@ public struct QueueTrack: Codable, Hashable, Sendable, Identifiable {
         id: String, title: String, artist: String, album: String = "",
         duration: TimeInterval? = nil, artworkURL: URL? = nil, thumbnailURL: URL? = nil,
         colors: ArtworkColors? = nil, isExplicit: Bool = false, albumID: String? = nil,
-        libraryID: String? = nil
+        libraryID: String? = nil, link: LinkTrack? = nil
     ) {
         self.id = id
         self.title = title
@@ -57,6 +61,7 @@ public struct QueueTrack: Codable, Hashable, Sendable, Identifiable {
         self.isExplicit = isExplicit
         self.albumID = albumID
         self.libraryID = libraryID
+        self.link = link
     }
 
     /// A song only in the hub account's library: `id` and `libraryID` are its library id, and its
@@ -89,7 +94,7 @@ public struct QueueTrack: Codable, Hashable, Sendable, Identifiable {
     }
 
     private enum CodingKeys: String, CodingKey {
-        case id, title, artist, album, duration, artworkURL, thumbnailURL, colors, isExplicit, albumID, libraryID
+        case id, title, artist, album, duration, artworkURL, thumbnailURL, colors, isExplicit, albumID, libraryID, link
     }
 
     public init(from decoder: Decoder) throws {
@@ -105,6 +110,7 @@ public struct QueueTrack: Codable, Hashable, Sendable, Identifiable {
         isExplicit = try container.decode(Bool.self, forKey: .isExplicit)
         albumID = try container.decodeIfPresent(String.self, forKey: .albumID)
         libraryID = try container.decodeIfPresent(String.self, forKey: .libraryID)
+        link = try container.decodeIfPresent(LinkTrack.self, forKey: .link)
     }
 }
 

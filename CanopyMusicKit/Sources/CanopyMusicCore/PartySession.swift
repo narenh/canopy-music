@@ -95,6 +95,9 @@ public struct PartySnapshot: Codable, Equatable, Sendable {
     public var foreignUpcoming: [QueueItem]?
     /// Something the host should know, e.g. "Couldn't queue the next song on Spotify". nil when fine.
     public var playerIssue: String?
+    /// Whether a link pasted into a phone's search is looked up as a song (`PartySession.linkService`
+    /// is set). nil when it isn't, and from older hubs: a pasted link is then just a search.
+    public var links: Bool?
 
     // Reorder limits (`ReorderLimit`). Optional so older pages and clients still decode.
     /// The hub's "Limit reorders" setting, on or off, for the host's settings sheet and guests'
@@ -117,6 +120,9 @@ public struct PartySnapshot: Codable, Equatable, Sendable {
     /// Whether the hub's crossfade is on (on Sonos, Sonos's own), for the party page's Crossfade
     /// button. Hosts only, as `musicAccess`; nil until the hub has set it, and from older hubs.
     public var crossfade: Bool?
+    /// Apple TV hubs: the cmdlp address and the token's last four characters, for the settings
+    /// sheet's Links section. Hosts only, as `musicAccess`; never the token.
+    public var linkSetup: LinkSetup?
 }
 
 /// Owns the queue and keeps the player in step with it. Both the iPad UI and the phone server
@@ -209,6 +215,10 @@ public final class PartySession {
     public var sonosSetup: SonosSetup? {
         didSet { if sonosSetup != oldValue, remote == nil { broadcast() } }
     }
+    /// Apple TV hubs: the link settings, for hosts' snapshots (set by the app).
+    public var linkSetup: LinkSetup? {
+        didSet { if linkSetup != oldValue, remote == nil { broadcast() } }
+    }
     /// Chooses Sonos rooms, and sets their volumes, for a host's phone (set by the app).
     @ObservationIgnored public weak var sonosHandler: (any SonosOutputHandler)?
     /// A host revoked every other phone's Host Control; returns the new key for that host.
@@ -298,6 +308,42 @@ public final class PartySession {
     @ObservationIgnored private var showsSongFailure = false
     @ObservationIgnored private var songFailureShownWith: UUID?
 
+    // MARK: Links (PartySession+Links.swift)
+
+    /// canopy-cmdlp, when the hub has its address and token: links pasted on phones become songs.
+    /// nil hides links entirely (a pasted link is just a search). Set by the app.
+    @ObservationIgnored public var linkService: (any LinkService)? {
+        didSet { linkServiceChanged() }
+    }
+    /// This zone's name at cmdlp, which keeps each zone's downloads apart; deleted when the zone
+    /// ends (`end`). Set by the app, which keeps it across relaunches.
+    @ObservationIgnored public var linkZone: String?
+    /// Whether lookups ask cmdlp to normalize the link's loudness (`LinkNormalize`). Set by the
+    /// app from the hub's setting; a change applies to links looked up after it.
+    @ObservationIgnored public var linkNormalize = true
+    /// cmdlp's latest on each link this zone has looked up, by cmdlp id: the audio's address
+    /// for a phone's pick (phones never get it).
+    @ObservationIgnored var linkRecords: [String: CmdlpTrack] = [:]
+    /// Lookups in flight or just done, by link and `linkNormalize`, so a phone asking again joins
+    /// the one running (and not one from before the host changed the setting).
+    @ObservationIgnored var linkLookups: [String: Task<CmdlpTrack, any Error>] = [:]
+    /// Links added while still downloading, by cmdlp id: each joins Up Next once it's ready.
+    /// Saved beside the queue (`saveLinkPreparations`).
+    @ObservationIgnored var linkPreparations: [String: LinkPreparation] = [:]
+    /// How each link being prepared is getting on, by cmdlp id (not saved).
+    @ObservationIgnored var linkEstimates: [String: LinkPrepEstimate] = [:]
+    /// Links that failed to prepare, by the client IDs of the phones that added them, until that
+    /// phone has been told. Saved with the preparations.
+    @ObservationIgnored var linkFailures: [String: [LinkFailure]] = [:]
+    /// The once-a-second check of each link being prepared.
+    @ObservationIgnored var linkPolls: [String: Task<Void, Never>] = [:]
+    @ObservationIgnored var linkPollInterval: Duration = .seconds(1)
+    /// The app dropped this session (`shutdown`): the next one carries the links on.
+    @ObservationIgnored var linksStopped = false
+    /// How long a phone's request waits for a lookup before it's told to ask again: well inside
+    /// the server's 15 s for a request.
+    @ObservationIgnored var linkLookupWait: TimeInterval = 10
+
     /// Where the current song is. The engine's time, except after a skip or previous the player
     /// hasn't followed yet: that's the song before's, and the new song is at 0:00 until it plays.
     public var position: TimeInterval { playerOnOldSong ? 0 : engine.currentTime }
@@ -315,7 +361,8 @@ public final class PartySession {
     /// Snapshot listeners, whether each gets the Wi‑Fi details (displays do, phones don't), and
     /// the Host Control key it connected with (hosts also get `musicAccess`).
     @ObservationIgnored private var listeners: [UUID: (continuation: AsyncStream<PartySnapshot>.Continuation, withWifi: Bool, hostKey: String?)] = [:]
-    @ObservationIgnored private let storeURL: URL?
+    /// Where the hub's queue is saved (and, beside it, reorders spent and links being prepared).
+    @ObservationIgnored let storeURL: URL?
     @ObservationIgnored private var saveTask: Task<Void, Never>?
     @ObservationIgnored private var tickTask: Task<Void, Never>?
     /// The engine stages late, so the ticker runs whenever music plays (`resumeTicker`).
@@ -350,6 +397,9 @@ public final class PartySession {
         } else {
             state = QueueState()
         }
+        // Links still being prepared, and failures not yet told: cmdlp's downloads went on
+        // while the app was gone, and are watched again once the app sets `linkService`.
+        if let storeURL { restoreLinkPreparations(beside: storeURL) }
         engine.onEvent = { [weak self] event in self?.handle(event) }
         if !engine.canReplaceStaged { startLateStagingTicker() }
         // A followed player (Spotify) or a Sonos group keeps playing while the app is gone: after
@@ -537,6 +587,7 @@ public final class PartySession {
         displayExpiry?.cancel()
         displayExpiry = nil
         resetFollow(keepPlayerQueue: false)
+        endLinks()
         state.clear()
         broadcast()
         if let storeURL { try? FileManager.default.removeItem(at: storeURL) }
@@ -569,6 +620,10 @@ public final class PartySession {
         driftTask = nil
         displayExpiry?.cancel()
         displayExpiry = nil
+        // The zone goes on with the next session (its links being prepared too, read back from
+        // their file), which checks them again.
+        stopLinkPolls()
+        linksStopped = true
     }
 
     public var hasParty: Bool { state.current != nil || !state.upNext.isEmpty }
@@ -1049,13 +1104,14 @@ public final class PartySession {
     // MARK: Snapshots
 
     /// What phones see; `includingWifi` adds the guest Wi‑Fi, for displays, and a valid Host
-    /// Control `hostKey` adds what only hosts see (`musicAccess`).
+    /// Control `hostKey` adds what only hosts see (`musicAccess`). Never a link's audio address:
+    /// only the hub plays it.
     public func snapshot(includingWifi: Bool = false, hostKey key: String? = nil) -> PartySnapshot {
         var snap = PartySnapshot(
             version: state.version,
             playlistName: state.playlistName,
-            current: state.current,
-            upNext: state.upNext,
+            current: state.current?.forGuests,
+            upNext: state.upNext.map(\.forGuests),
             lockedNextID: state.lockedNextID,
             playback: PlaybackSnapshot(isPlaying: engine.isPlaying, position: position, capturedAt: Date()),
             canReorder: phonesCanReorder,
@@ -1066,7 +1122,7 @@ public final class PartySession {
             hubDevice: hubDevice,
             service: serviceName,
             displaysCanControl: displaysCanControl,
-            history: Array(state.history.prefix(20)),
+            history: state.history.prefix(20).map(\.forGuests),
             canQueue: phonesCanQueue,
             hostPhones: hostPhoneCount,
             hubID: hubID,
@@ -1077,7 +1133,8 @@ public final class PartySession {
             epoch: epoch,
             externalCurrent: externalCurrent,
             foreignUpcoming: foreignUpcoming.isEmpty ? nil : foreignUpcoming,
-            playerIssue: playerIssue
+            playerIssue: playerIssue,
+            links: linksEnabled ? true : nil
         )
         if remote == nil {
             snap.reorderLimit = reorderLimit
@@ -1101,6 +1158,7 @@ public final class PartySession {
         snap.spotify = spotifySetup
         snap.sonos = sonosSetup
         snap.crossfade = crossfade
+        snap.linkSetup = linkSetup
     }
 
     /// Emits the current snapshot immediately, then again after every change. `includingWifi`
@@ -1136,7 +1194,7 @@ public final class PartySession {
     /// song already is, a lock already in place) isn't sent or saved. Staging is still checked:
     /// a stage that failed is retried on the next change, however small.
     @discardableResult
-    private func mutate<Result>(_ body: (inout QueueState) -> Result) -> Result {
+    func mutate<Result>(_ body: (inout QueueState) -> Result) -> Result {
         let version = state.version
         let result = body(&state)
         if state.version != version {
@@ -1712,7 +1770,7 @@ public final class PartySession {
         }
     }
 
-    private func broadcast() {
+    func broadcast() {
         guard !listeners.isEmpty else { return }
         let snap = snapshot()
         lastSentPlayback = snap.playback

@@ -1,0 +1,10 @@
+// The project's Debug configuration (both apps). Release builds don't use this file.
+//
+// CMDLP_DEV_TOKEN: the dev builds' default access token for the direct audio server
+// (canopy-cmdlp), read through the CMDLPDevToken Info.plist key (LinkDefaults in
+// CanopyMusicCore). Empty unless Config/Secrets.xcconfig sets it: that file is gitignored, and
+// optional, so builds work without it. Copy Config/Secrets.example.xcconfig to make it.
+
+CMDLP_DEV_TOKEN =
+
+#include? "Secrets.xcconfig"

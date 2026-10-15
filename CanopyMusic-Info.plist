@@ -2,6 +2,8 @@
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
+	<key>CMDLPDevToken</key>
+	<string>$(CMDLP_DEV_TOKEN)</string>
 	<key>NSBonjourServices</key>
 	<array>
 		<string>_canopymusic._tcp</string>

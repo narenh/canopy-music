@@ -201,6 +201,9 @@ public enum SonosPlaybackRules {
 @MainActor
 public final class SonosEngine: PlaybackEngine {
     public let canReplaceStaged = true
+    /// A link's audio goes in the group's queue as its plain https address, for Apple Music
+    /// and Spotify zones alike (`SonosTrackReference.uri(for:)`).
+    public var canPlayLinks: Bool { true }
     public var onEvent: (@MainActor (PlaybackEvent) -> Void)?
 
     /// Where it plays now. Rooms join and leave while it plays (`addRoom`, `removeRoom`), and the
@@ -323,13 +326,15 @@ public final class SonosEngine: PlaybackEngine {
         stagedNumber = nil
         hasStarted = true
         attached = false
-        // The steps whose refusal, on the first song from the account, is the account's.
+        // The steps whose refusal, on the first song from the account, is the account's. A
+        // link's audio isn't the account's: its refusal says nothing of it.
+        let fromAccount = track.link == nil
         var accountStep = false
         do {
             try await groupRoomsIfNeeded(retaking: retaking)
             try await reporting("RemoveAllTracksFromQueue") { try await client.clearQueue() }
             queued = [track.id]
-            accountStep = true
+            accountStep = fromAccount
             let number = try await reporting("AddURIToQueue") { try await client.addToQueue(uri: uri, metadata: metadata, position: 0, asNext: false) }
             accountStep = false
             try await reporting("SetAVTransportURI") { try await client.setTransportURI(SonosURI.queue(of: target.coordinator.id)) }
@@ -337,10 +342,10 @@ public final class SonosEngine: PlaybackEngine {
             try? await client.setPlayModeNormal()
             if let crossfade { try? await client.setCrossfade(crossfade) }
             try await reporting("Seek") { try await client.seek(trackNumber: number) }
-            accountStep = true
+            accountStep = fromAccount
             try await reporting("Play") { try await client.play() }
             accountStep = false
-            accountPlayed = true
+            if fromAccount { accountPlayed = true }
             currentTrack = track
             currentNumber = number
         } catch {

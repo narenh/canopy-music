@@ -180,6 +180,12 @@ final class TVModel {
         // Apple Music player's own session. Left at the default (not mixable), the music starting
         // interrupted this session and paused the video. Ambient mixes, so it never is.
         try? AVAudioSession.sharedInstance().setCategory(.ambient)
+        #if DEBUG
+        // `-cmdlpBaseURL <address> -cmdlpToken <token>`: links set up at launch, as a host's
+        // phone would (`CanopyMusicDevServer -onlyCmdlp` in the simulator: any token).
+        let args = ProcessInfo.processInfo.arguments
+        if let i = args.firstIndex(of: "-cmdlpToken"), i + 1 < args.count { linkTokens.save(args[i + 1]) }
+        #endif
         HubLibraryArtwork.follow(session)
         restoreZoneIfNeeded()
     }
@@ -301,14 +307,22 @@ final class TVModel {
         let (catalog, engine, serviceName) = serviceParts()
         session = PartySession(catalog: catalog, engine: engine, storeURL: Self.storeURL)
         if fresh {
-            // The same clearing as End. The new zone is recorded once its music starts.
+            // The same clearing as End (an earlier zone's cmdlp downloads too). The new zone is
+            // recorded once its music starts, with a cmdlp zone of its own.
+            session.linkZone = linkZone
+            session.linkService = currentLinkService()
             session.end()
+            startNewLinkZone()
             zoneRecord.ended()
         } else {
             zoneRecord.resumedHosting()
         }
         // A zone that had a host (or a playlist) is past "Scan to host".
         hostJoined = !fresh && (zoneRecord.hostJoined || session.hasParty || session.state.playlistName != nil)
+        #if DEBUG
+        // `-hostJoined` (with `-createZone`): as if a phone had scanned, for screenshots of what follows.
+        if ProcessInfo.processInfo.arguments.contains("-hostJoined") { hostJoined = true }
+        #endif
         hostname.rename(to: FriendlyHostname.localName(forZone: zoneName))
         session.configureHub(kind: .tv, id: deviceID, zoneName: zoneName, serviceName: serviceName)
         // Same settings, saved under the same names, as an iPad hub.
@@ -362,6 +376,7 @@ final class TVModel {
             self.pushSonosSetup()
         }
         role = .hub
+        applyLinkSettings()
         // Zones on the account (Spotify plays one stream per account).
         browser.start()
         pushSpotifySetup()
@@ -382,10 +397,11 @@ final class TVModel {
             #if DEBUG
             // `-sonosFake`: the demo songs with ids Sonos can carry, on the simulated household.
             if usesDemo, Self.isSonosFake { return (SonosFakeCatalog(), sonosEngine ?? DemoPlaybackEngine(), "Demo") }
-            if usesDemo { return (DemoCatalog(), DemoPlaybackEngine(), "Demo") }
+            // Links play for real between the demo's silent songs (`CanopyMusicDevServer -onlyCmdlp`).
+            if usesDemo { return (DemoCatalog(), makeLinkHandoffEngine(music: DemoPlaybackEngine()), "Demo") }
             #endif
             let cache = SongCache()
-            return (AppleMusicCatalog(cache: cache), sonosEngine ?? AppleMusicEngine(cache: cache), "Apple Music")
+            return (AppleMusicCatalog(cache: cache), sonosEngine ?? makeLinkHandoffEngine(music: AppleMusicEngine(cache: cache)), "Apple Music")
         case .spotify:
             #if DEBUG
             // Spotify's engine can't replace a staged song, so neither does this one.
@@ -396,6 +412,73 @@ final class TVModel {
             #endif
             return (SpotifyCatalog(api: spotify.api), sonosEngine ?? SpotifyEngine(api: spotify.api), "Spotify")
         }
+    }
+
+    /// Apple Music on this TV, with songs from links in an AVPlayer between its songs
+    /// (`LinkHandoffEngine`); Apple Music's engine alone until links are set up. The TV's app
+    /// session stays `.ambient` (the music is the player's own): AVPlayer plays in it as it is.
+    private func makeLinkHandoffEngine(music: any HandoffSide) -> LinkHandoffEngine {
+        let links = LinkPlayerEngine()
+        let engine = LinkHandoffEngine(music: music, links: links)
+        #if DEBUG
+        engine.log = { [weak self] line in self?.debugLog("[handoff] \(line)") }
+        links.log = { [weak self] line in self?.debugLog("[link-player] \(line)") }
+        #endif
+        return engine
+    }
+
+    // MARK: Links (canopy-cmdlp)
+
+    @ObservationIgnored private let linkTokens: any LinkTokenStore = KeychainLinkTokenStore()
+    /// The last check of the connection, for the host's settings sheet.
+    @ObservationIgnored private var linkStatus: String?
+    /// That check worked, for the address and token in use now (any change clears it): the
+    /// sheet's "Normalize audio" shows only then.
+    @ObservationIgnored private var linkVerified = false
+    @ObservationIgnored private var linkCheck: Task<Void, Never>?
+    /// Debug builds: cmdlp's address and token when the host hasn't set them (`LinkDefaults`).
+    private let linkDefaults = LinkDefaults.current
+
+    /// The address in use: the host's, else the default.
+    private var linkAddress: String { linkDefaults.address(typed: defaults.string(forKey: "cmdlpBaseURL") ?? "") }
+
+    /// This zone's name at cmdlp: kept across relaunches, and a new one for each zone.
+    private var linkZone: String {
+        if let zone = defaults.string(forKey: "cmdlpZone"), LinkZone.isValid(zone) { return zone }
+        let zone = LinkZone.make()
+        defaults.set(zone, forKey: "cmdlpZone")
+        return zone
+    }
+
+    /// The hub's session takes links once a host has set cmdlp's address and token on their
+    /// phone (`/api/host/links`); hosts' snapshots show the address and the token's last four.
+    private func applyLinkSettings() {
+        guard role == .hub else { return }
+        let normalize = LinkNormalize.isOn(in: defaults)
+        session.linkZone = linkZone
+        session.linkNormalize = normalize
+        session.linkService = currentLinkService()
+        (session.engine as? LinkHandoffEngine)?.linksEnabled = { [weak session] in session?.linksEnabled ?? false }
+        var setup = LinkSetup(address: defaults.string(forKey: "cmdlpBaseURL") ?? "", tokenHint: LinkTokenHint.of(linkTokens.load()),
+                              status: linkStatus, normalize: normalize, verified: linkVerified)
+        #if DEBUG
+        // The page's Advanced section, with the defaults it falls back to. Never in Release.
+        setup.advanced = true
+        setup.defaultAddress = linkDefaults.address
+        setup.hasDefaultToken = linkDefaults.token != nil
+        #endif
+        session.linkSetup = setup
+    }
+
+    /// cmdlp, once its address and a token are both set (the host's, else the defaults).
+    private func currentLinkService() -> CmdlpClient? {
+        guard let base = CmdlpClient.baseURL(linkAddress), let token = linkDefaults.token(saved: linkTokens.load()) else { return nil }
+        return CmdlpClient(baseURL: base, token: token)
+    }
+
+    /// The zone ended (and its cmdlp zone with it, `PartySession.end`): the next one gets its own.
+    private func startNewLinkZone() {
+        defaults.set(LinkZone.make(), forKey: "cmdlpZone")
     }
 
     // MARK: Sonos
@@ -436,6 +519,7 @@ final class TVModel {
         guard session.replaceService(catalog: catalog, engine: engine, serviceName: title) else { return }
         old.shutDown()
         sonos.connect(session)
+        applyLinkSettings()
         debugLog("sonos: plays on \(sonos.output?.target.name ?? "this TV")")
     }
 
@@ -635,7 +719,9 @@ final class TVModel {
     /// server stops once they have been (`PartyServer.end`).
     func stopZone() {
         server?.sayGoodbye()
+        // Deletes the zone's cmdlp downloads too; the next zone gets a cmdlp zone of its own.
         session.end()
+        startNewLinkZone()
         zoneRecord.ended()
         closeZone(ended: true)
     }
@@ -933,6 +1019,7 @@ extension TVModel: HubSetupHandler {
             return false
         }
         sonos.connect(session)
+        applyLinkSettings()
         defaults.set(next.rawValue, forKey: "provider")
         debugLog("service: \(next.rawValue)")
         checkService(asking: false)
@@ -959,6 +1046,48 @@ extension TVModel: HubSetupHandler {
     func checkSpotifyConflict() async -> String? {
         guard role == .hub, session.isWaitingForSetup else { return nil }
         return await confirmSpotifyConflict()?.name
+    }
+
+    /// From a host's settings sheet (its Advanced section, Debug builds only): the address is
+    /// saved as typed (empty falls back to the default, `LinkDefaults`, or turns links off where
+    /// there's none), a new token goes in the TV's Keychain (forgetting it falls back the same),
+    /// then the connection is checked and the sheet shows how it went (`LinkSetup.status`,
+    /// `verified`). "Normalize audio" (`normalize`) is saved for links added from then on;
+    /// changed on its own, the connection isn't checked again. Release builds take none of it:
+    /// they have no Advanced section.
+    func setLinks(address: String?, token: String?, forgetToken: Bool, normalize: Bool?) -> Bool {
+        #if DEBUG
+        guard role == .hub else { return false }
+        if let normalize { LinkNormalize.save(normalize, to: defaults) }
+        if address == nil, token == nil, !forgetToken {
+            applyLinkSettings()
+            return true
+        }
+        if let address { defaults.set(address.trimmingCharacters(in: .whitespacesAndNewlines), forKey: "cmdlpBaseURL") }
+        if forgetToken {
+            linkTokens.save(nil)
+        } else if let token = token?.trimmingCharacters(in: .whitespacesAndNewlines), !token.isEmpty {
+            linkTokens.save(token)
+        }
+        linkStatus = nil
+        linkVerified = false
+        applyLinkSettings()
+        let address = linkAddress
+        let token = linkDefaults.token(saved: linkTokens.load())
+        linkCheck?.cancel()
+        guard !address.isEmpty else { return true }
+        linkCheck = Task { [weak self] in
+            let outcome = await LinkConnectionCheck.check(baseURL: address, token: token)
+            guard let self, !Task.isCancelled else { return }
+            self.debugLog("links: \(outcome.message)")
+            self.linkStatus = outcome.message
+            self.linkVerified = outcome.connected
+            self.applyLinkSettings()
+        }
+        return true
+        #else
+        return false
+        #endif
     }
 
     /// Shows the zone already on this Spotify account as a display, after the page has its

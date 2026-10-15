@@ -278,6 +278,15 @@
 
   // MARK: Rendering
 
+  /** Links this phone added that the hub is still preparing (downloading), by song id: their
+   * progress from `/api/link/progress`, shown on their result rows. */
+  const preparing = new Map();
+  /** Links that left `preparing` without failing: queued, which a snapshot will show. */
+  const awaitingQueue = new Set();
+  let preparationsChecked = false;
+  let preparationsTimer = null;
+  let checkingPreparations = false;
+
   function applySnapshot(next) {
     if (dragging) { pendingSnap = next; return; }
     // A different hub now answers at this address (the old one left and another took the name):
@@ -301,6 +310,10 @@
     // The Crossfade button showed what was asked; the hub says so now.
     if (crossfadeWanted !== null && next.crossfade === crossfadeWanted) crossfadeWanted = null;
     render();
+    noteQueuedLinks();
+    // Links this phone added that the hub is still preparing, or that failed while the page was
+    // closed: asked once the hub says it takes links.
+    if (next.links && !preparationsChecked) { preparationsChecked = true; checkPreparations(); }
     openSettingsFromLink();
     hideSplash();
     followRename();
@@ -1110,6 +1123,8 @@
   let results = [];
   let searchAbort = null;
   let searchTimer = null;
+  /** The results are a pasted link's (or its lookup), and the field was emptied for it. */
+  let linkLookedUp = false;
 
   function openSearch() {
     $("search").hidden = false;
@@ -1151,11 +1166,64 @@
     if (event.key === "Enter") { event.preventDefault(); clearTimeout(searchTimer); runSearch(); $("search-input").blur(); }
   });
 
+  /** A whole query that's one http(s) address: a link to look up as a song, once the hub takes
+   * links (`snap.links`). Otherwise it's searched for, as any text. */
+  function linkIn(term) {
+    if (!snap || !snap.links || /\s/.test(term) || term.length > 2048) return null;
+    try {
+      const url = new URL(term);
+      return (url.protocol === "http:" || url.protocol === "https:") && url.hostname.includes(".") ? url.href : null;
+    } catch { return null; }
+  }
+
+  /** Looks a pasted link up on the hub: one result, or the hub's sentence for why not. A lookup can
+   * take a while (the hub answers 202 until it's done), so it says so meanwhile. */
+  async function lookUpLink(term, link, signal) {
+    results = [];
+    // The field empties, ready for the next song; the link's row (and its preparing) stays until
+    // something new is typed (`runSearch`). Setting the value doesn't fire "input".
+    linkLookedUp = true;
+    $("search-input").value = "";
+    $("search-clear").hidden = true;
+    renderResults(term, "Checking link…", true);
+    try {
+      for (;;) {
+        const res = await fetch("/api/link", {
+          method: "POST", headers: { "Content-Type": "application/json" }, signal,
+          body: JSON.stringify({ url: link, clientId, key: hosting() ? hostKey : undefined }),
+        });
+        if (res.status === 202) {
+          await new Promise((done) => setTimeout(done, 1000));
+          if (signal.aborted) return;
+          continue;
+        }
+        if (!res.ok) {
+          const reply = await res.json().catch(() => null);
+          renderResults(term, (reply && reply.error) || "That link can't be added right now.");
+          return;
+        }
+        results = [await res.json()];
+        renderResults(term);
+        return;
+      }
+    } catch (error) {
+      if (error.name === "AbortError") return;
+      results = [];
+      renderResults(term, "That link can't be looked up right now. Try again in a moment.");
+    }
+  }
+
   async function runSearch() {
     const term = $("search-input").value.trim();
+    // The field was emptied for a pasted link: nothing new to search, so its row (or its lookup)
+    // stays.
+    if (!term && linkLookedUp) return;
+    linkLookedUp = false;
     if (searchAbort) searchAbort.abort();
     if (!term) { results = []; renderResults(); return; }
     searchAbort = new AbortController();
+    const link = linkIn(term);
+    if (link) return lookUpLink(term, link, searchAbort.signal);
     try {
       // Hosts also find the hub's own library songs.
       const key = hosting() ? `&key=${encodeURIComponent(hostKey)}` : "";
@@ -1170,7 +1238,7 @@
     }
   }
 
-  function renderResults(term, errorText) {
+  function renderResults(term, errorText, spinning = false) {
     const list = $("results");
     list.innerHTML = "";
     for (const track of results) {
@@ -1201,7 +1269,9 @@
       }
       const sub = document.createElement("p");
       sub.className = "row-sub";
-      sub.textContent = track.album ? `${track.artist} · ${track.album}` : track.artist;
+      // A song from a link: where it's from ("YouTube") in place of the album.
+      const from = track.link ? (track.link.service !== track.artist ? track.link.service : null) : track.album;
+      sub.textContent = from ? `${track.artist} · ${from}` : track.artist;
       meta.append(title, sub);
       const button = document.createElement("button");
       button.type = "button";
@@ -1213,6 +1283,7 @@
     const empty = $("results-empty");
     empty.hidden = results.length > 0 || !term;
     empty.textContent = errorText || `No songs found for “${term || ""}”.`;
+    if (spinning) { const s = document.createElement("span"); s.className = "spinner"; empty.prepend(s); }
     updateResultButtons();
   }
 
@@ -1222,7 +1293,8 @@
     const playing = snap.current && snap.current.track.id;
     for (const li of $("results").children) {
       const button = li.querySelector(".add-btn");
-      if (button.dataset.busy) continue;
+      showPreparing(li, preparing.get(li.dataset.trackId));
+      if (button.dataset.busy || li.dataset.preparing) continue;
       const id = li.dataset.trackId;
       if (id === playing) { setButton(button, "Playing", true); }
       else if (queued.has(id)) { setButton(button, "Queued", true); }
@@ -1249,6 +1321,14 @@
     button.textContent = "…";
     try {
       const reply = await api("/api/add", { track, name: myName, clientId, key: hosting() ? hostKey : undefined });
+      if (reply.result === "preparing") {
+        // A link still downloading: the hub queues it once it's ready (`checkPreparations`).
+        delete button.dataset.busy;
+        preparing.set(reply.progress.id, reply.progress);
+        updateResultButtons();
+        schedulePreparations();
+        return;
+      }
       if (reply.result === "added") {
         addedWhileSearching.push(reply.itemId);
         toast(`Added · #${reply.index + 1} in line`);
@@ -1259,11 +1339,102 @@
       }
       delete button.dataset.busy;
       setButton(button, "Queued", true);
-    } catch {
+    } catch (error) {
       delete button.dataset.busy;
       setButton(button, "Add", false);
-      toast("Couldn't add that. Try again.");
+      // A link the hub refused says why ("Zone player does not support direct audio.").
+      toast((error.reason && error.reason.error) || "Couldn't add that. Try again.", error.reason ? 4000 : 2200);
     }
+  });
+
+  // MARK: Links being prepared
+
+  /** A result row for a link being prepared: the spinner in place of Add, "Preparing… 37%", and
+   * once the hub expects it to take more than 15 seconds, a line saying it will queue by itself.
+   * Without `prep`, the row goes back to how it was. */
+  function showPreparing(li, prep) {
+    const sub = li.querySelector(".row-sub");
+    const button = li.querySelector(".add-btn");
+    if (!prep) {
+      if (!li.dataset.preparing) return;
+      delete li.dataset.preparing;
+      sub.textContent = li.dataset.sub;
+      const note = li.querySelector(".row-note");
+      if (note) note.remove();
+      li.classList.remove("has-note");
+      button.classList.remove("preparing");
+      setButton(button, "Add", false);
+      return;
+    }
+    if (!li.dataset.preparing) {
+      li.dataset.preparing = "1";
+      li.dataset.sub = sub.textContent;
+      button.classList.add("preparing");
+      button.disabled = true;
+      button.innerHTML = '<span class="spinner"></span>';
+      button.setAttribute("aria-label", "Preparing");
+    }
+    sub.textContent = prep.percent != null ? `Preparing… ${prep.percent}%` : "Preparing…";
+    if (prep.takesLong && !li.querySelector(".row-note")) {
+      // Its own line under the row (art, text, and spinner), centered.
+      const note = document.createElement("p");
+      note.className = "row-note";
+      note.textContent = "Your song will queue automatically when it's finished preparing.";
+      li.classList.add("has-note");
+      li.append(note);
+    }
+  }
+
+  function schedulePreparations() {
+    if (!preparationsTimer) preparationsTimer = setTimeout(checkPreparations, 1000);
+  }
+
+  /** Asks the hub how this phone's links are getting on: about once a second while any are
+   * preparing, and when the page opens or comes back. A failure is toasted (the hub tells each
+   * once); one that's done is toasted once a snapshot shows it in Up Next. */
+  async function checkPreparations() {
+    clearTimeout(preparationsTimer);
+    preparationsTimer = null;
+    if (checkingPreparations) return;
+    checkingPreparations = true;
+    let reply = null;
+    try { reply = await api("/api/link/progress", { clientId }); } catch {}
+    checkingPreparations = false;
+    if (reply) {
+      const failed = new Set(reply.failed.map((f) => f.id));
+      const still = new Map(reply.preparing.map((p) => [p.id, p]));
+      for (const [id, p] of still) {
+        // Never back (a hub relaunched starts its figures over), and the note once shown stays.
+        const before = preparing.get(id);
+        if (!before) continue;
+        if (before.percent != null && (p.percent == null || p.percent < before.percent)) p.percent = before.percent;
+        p.takesLong = p.takesLong || before.takesLong;
+      }
+      for (const id of preparing.keys()) if (!still.has(id) && !failed.has(id)) awaitingQueue.add(id);
+      preparing.clear();
+      still.forEach((p, id) => preparing.set(id, p));
+      for (const f of reply.failed) toast(f.text, 4000);
+      updateResultButtons();
+      noteQueuedLinks();
+    }
+    if (preparing.size) schedulePreparations();
+  }
+
+  /** A link this phone added has reached Up Next: said as an add is. */
+  function noteQueuedLinks() {
+    if (!snap || !awaitingQueue.size) return;
+    for (const id of awaitingQueue) {
+      const index = snap.upNext.findIndex((i) => i.track.id === id);
+      if (index >= 0) {
+        if (!$("search").hidden) addedWhileSearching.push(snap.upNext[index].id);
+        toast(`Added · #${index + 1} in line`);
+      }
+      if (index >= 0 || (snap.current && snap.current.track.id === id)) awaitingQueue.delete(id);
+    }
+  }
+
+  document.addEventListener("visibilitychange", () => {
+    if (document.visibilityState === "visible" && snap && snap.links) checkPreparations();
   });
 
   // MARK: Toast
@@ -1314,7 +1485,7 @@
     const on = hosting();
     $("settings-btn").hidden = !on;
     if (!on) {
-      for (const id of ["setup", "settings-modal", "edit-modal", "wifi-modal", "invite-modal", "playlists", "conflict-modal", "devices-modal"]) $(id).hidden = true;
+      for (const id of ["setup", "settings-modal", "edit-modal", "wifi-modal", "links-modal", "invite-modal", "playlists", "conflict-modal", "devices-modal"]) $(id).hidden = true;
       if (hostChecked) askNameIfNeeded();
       return;
     }
@@ -2706,12 +2877,36 @@
     // Apple TV hubs only (an iPad never sleeps).
     $("settings-screen").hidden = snap.hubKind !== "tv";
     $("settings-screensaver").checked = snap.screensaverWhilePlaying === true;
+    fillLinks();
     const hosts = snap.hostPhones || 0;
     $("settings-hosts").textContent = hosts === 1 ? "1 phone" : `${hosts} phones`;
     $("settings-forget").hidden = hosts < 2;
     $("settings-stop").textContent = `End ${snap.zoneName || "this zone"}`;
     fillWifi();
     fillPartyRow();
+  }
+
+  /** Settings' Advanced section: an Apple TV hub's direct audio server (hosts' snapshots carry it,
+   * with `advanced` only from Debug builds of the TV). Its URL (empty: the default), the token's
+   * last four characters, the TV's check of the connection, and "Normalize audio" once that check
+   * worked for the URL and token in use. */
+  let linksChecking = false; // Test Connection or a save asked the TV to check; no answer yet
+  const hostOf = (address) => { try { return new URL(address).host; } catch { return address; } };
+  function fillLinks() {
+    const links = snap.hubKind === "tv" && snap.linkSetup && snap.linkSetup.advanced ? snap.linkSetup : null;
+    $("settings-advanced").hidden = !links;
+    if (!links) return;
+    const address = links.address || links.defaultAddress || "";
+    const hasToken = !!links.tokenHint || links.hasDefaultToken === true;
+    $("settings-links-server").textContent = links.address ? hostOf(links.address) : links.defaultAddress ? `Default (${hostOf(links.defaultAddress)})` : "Not set";
+    $("settings-links-token").textContent = links.tokenHint ? `…${links.tokenHint}` : links.hasDefaultToken ? "Default" : "Not set";
+    $("settings-normalize-row").hidden = !(links.verified && address && hasToken);
+    $("settings-normalize").checked = links.normalize !== false;
+    $("settings-links-test").disabled = !address;
+    if (links.status) linksChecking = false;
+    const status = links.status || (linksChecking ? "Checking…" : "");
+    $("settings-links-status").hidden = !status;
+    $("settings-links-status").textContent = status;
   }
 
   /** "Limit reorders", under Reorder from phones (and only while that's on; older hubs don't
@@ -2795,6 +2990,7 @@
   $("settings-btn").addEventListener("click", () => {
     wifiDetails = null;
     partyInfo = null;
+    $("settings-advanced").open = false; // collapsed each time the sheet opens
     fillSettings();
     const list = $("settings-display-list");
     list.innerHTML = "";
@@ -2854,6 +3050,53 @@
     $("wifi-password").focus();
   });
   $("wifi-cancel").addEventListener("click", () => { $("wifi-modal").hidden = true; });
+
+  // The direct audio server's dialog: the token field is write-only (empty keeps the saved one),
+  // and an empty URL uses the default.
+  $("settings-links-btn").addEventListener("click", () => {
+    const links = snap.linkSetup || {};
+    $("links-address").value = links.address || "";
+    $("links-address").placeholder = links.defaultAddress || "https://cmdlp.example.com";
+    $("links-token").value = "";
+    $("links-token").placeholder = links.tokenHint ? `Saved (…${links.tokenHint}). Paste to replace`
+      : links.hasDefaultToken ? "Default. Paste to replace" : "Paste the token";
+    $("links-forget").hidden = !links.tokenHint;
+    $("links-modal").hidden = false;
+    setTimeout(() => $("links-address").focus(), 50);
+  });
+  $("links-address").addEventListener("keydown", (event) => {
+    if (event.key !== "Enter") return;
+    event.preventDefault();
+    $("links-token").focus();
+  });
+  $("links-cancel").addEventListener("click", () => { $("links-modal").hidden = true; });
+  /** Saves a change to the server or token; the TV then checks the connection (when there's a
+   * URL to check), and the sheet says "Checking…" until it answers. */
+  async function saveLinks(change) {
+    try {
+      await api("/api/host/links", { key: hostKey, ...change });
+      $("links-modal").hidden = true;
+      // As the TV does: the last check no longer counts.
+      const links = { ...snap.linkSetup, status: null, verified: false };
+      snap = { ...snap, linkSetup: links };
+      linksChecking = !!((change.address ?? links.address) || links.defaultAddress);
+      fillLinks();
+    } catch { toast("Couldn't save that"); }
+  }
+  $("links-forget").addEventListener("click", () => saveLinks({ forgetToken: true }));
+  $("links-form").addEventListener("submit", (event) => {
+    event.preventDefault();
+    const token = $("links-token").value.trim();
+    saveLinks({ address: $("links-address").value.trim(), token: token || undefined });
+  });
+  // Test Connection: the same URL again, which the TV checks.
+  $("settings-links-test").addEventListener("click", () => saveLinks({ address: (snap.linkSetup || {}).address || "" }));
+  // "Normalize audio" saves on its own, without checking the connection again.
+  $("settings-normalize").addEventListener("change", async (event) => {
+    const on = event.target.checked;
+    try { await api("/api/host/links", { key: hostKey, normalize: on }); }
+    catch { toast("Couldn't save that"); event.target.checked = !on; }
+  });
   $("wifi-form").addEventListener("submit", async (event) => {
     event.preventDefault();
     const next = { ...wifiDetails, ssid: $("wifi-ssid").value.trim(), password: $("wifi-password").value };

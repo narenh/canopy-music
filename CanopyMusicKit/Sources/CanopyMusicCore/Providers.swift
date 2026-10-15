@@ -120,12 +120,16 @@ public protocol PlaybackEngine: AnyObject {
     /// resumes it rather than starting it over. nil otherwise. A followed engine reports this
     /// through `playerTrackID` instead.
     var attachedTrackID: String? { get }
+    /// Whether it plays songs from links (`QueueTrack.link`): a device's Apple Music
+    /// (`LinkHandoffEngine`) and Sonos do; Spotify Connect doesn't. False by default.
+    var canPlayLinks: Bool { get }
 }
 
 public extension PlaybackEngine {
     func shutDown() {}
     func attach(expecting current: QueueTrack, next: QueueTrack?) {}
     var attachedTrackID: String? { nil }
+    var canPlayLinks: Bool { false }
 }
 
 /// A player that belongs to an account other things also control (Spotify): the session follows

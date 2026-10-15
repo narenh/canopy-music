@@ -59,8 +59,10 @@ struct AppleMusicCatalog: MusicCatalog {
     var artworkHints: LibraryArtworkHints = .shared
     /// How the most recent library playlist loads went, including which tracks were left out.
     var reports = PlaylistLoadReports()
-    /// The songs of library albums a host's search named, by album (`searchLibrarySongs`).
-    private let albumTracks = LibraryAlbumTracks()
+    /// The songs of library albums a host's search named, by album, and the library searches it
+    /// made, kept across keystrokes (`searchLibrarySongs`).
+    private let albumTracks = KeptResults<[LibrarySongResource]>(lifetime: 10 * 60)
+    private let librarySearches = KeptResults<LibrarySearchResponse.Results>(lifetime: 2 * 60)
     /// Animated album artwork for Now Playing (see `MotionArtwork`).
     let motionArtwork: MotionArtworkLookup? = MotionArtworkLookup(
         fetchReportingURL: AppleMusicCatalog.catalogData,
@@ -102,7 +104,15 @@ struct AppleMusicCatalog: MusicCatalog {
         var completed = suggestions?.suggestions.first?.searchTerm
         if completed?.caseInsensitiveCompare(term) == .orderedSame { completed = nil }
         let completedSongs = if let completed { (try? await catalogSearch(completed)) ?? [] } else { [Song]() }
-        let typed = try await typedSongs
+        let typed: [Song]
+        do {
+            typed = try await typedSongs
+        } catch {
+            #if DEBUG
+            print("[search] \"\(term)\" catalog search failed: \(Self.describe(error))")
+            #endif
+            throw error
+        }
         let library = await librarySongs ?? []
         let libraryCatalogSongs = library.compactMap(\.song)
         #if DEBUG
@@ -137,34 +147,73 @@ struct AppleMusicCatalog: MusicCatalog {
     /// find by album title (`LibraryAlbumSearch`), from the same request; each album's tracks are
     /// fetched once and kept a while (`LibraryAlbumTracks`), so typing on costs nothing more.
     private func searchLibrarySongs(_ term: String, byAlbum: Bool) async throws -> [LoadedTrack] {
-        let encoded = term.replacingOccurrences(of: " ", with: "+")
-            .addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? term
         let types = byAlbum ? "library-songs,library-albums" : "library-songs"
-        let response: LibrarySearchResponse = try await fetch("/v1/me/library/search?term=\(encoded)&types=\(types)&limit=10&include=catalog")
-        var resources = response.results.librarySongs?.data ?? []
+        // A host's: also with fewer words, kept where every typed word is in the song's title,
+        // artist or album (`LibraryAlbumSearch`). Both at once; each answer kept a while.
+        let broader = byAlbum ? LibraryAlbumSearch.broaderTerm(for: term) : nil
+        async let fullResults = librarySearch(term, types: types)
+        async let broadResults = broadLibrarySearch(broader, types: types)
+        let full: LibrarySearchResponse.Results
+        do {
+            full = try await fullResults
+        } catch {
+            #if DEBUG
+            print("[search] \"\(term)\" library search failed: \(Self.describe(error))")
+            #endif
+            throw error
+        }
+        let broad = await broadResults
+        var resources = full.librarySongs?.data ?? []
+        var seen = Set(resources.compactMap(\.id))
+        let broadSongs = (broad?.librarySongs?.data ?? []).filter { song in
+            LibraryAlbumSearch.matches(title: song.attributes?.name ?? "", artist: song.attributes?.artistName ?? "",
+                                       album: song.attributes?.albumName ?? "", term: term)
+        }
+        resources += broadSongs.filter { $0.id.map { seen.insert($0).inserted } ?? true }
+        var wanted: [LibraryAlbumSearch.Album] = []
+        var albumSongs = 0
         if byAlbum {
-            let albums = (response.results.libraryAlbums?.data ?? []).map {
+            var albumIDs = Set<String>()
+            let albums = ((full.libraryAlbums?.data ?? []) + (broad?.libraryAlbums?.data ?? [])).filter { albumIDs.insert($0.id).inserted }.map {
                 LibraryAlbumSearch.Album(id: $0.id, name: $0.attributes?.name ?? "", artist: $0.attributes?.artistName ?? "")
             }
-            let wanted = LibraryAlbumSearch.albumsToExpand(albums, for: term)
+            wanted = LibraryAlbumSearch.albumsToExpand(albums, for: term)
             let tracks = await withTaskGroup(of: (String, [LibrarySongResource]).self) { group in
                 for album in wanted {
-                    group.addTask { (album.id, await albumTracks.tracks(of: album.id) { try await libraryAlbumSongs(id: $0) }) }
+                    group.addTask { (album.id, (try? await albumTracks.value(for: album.id) { try await libraryAlbumSongs(id: album.id) }) ?? []) }
                 }
                 var tracks: [String: [LibrarySongResource]] = [:]
                 for await (id, songs) in group { tracks[id] = songs }
                 return tracks
             }
-            var seen = Set(resources.compactMap(\.id))
-            resources += LibraryAlbumSearch.songs(of: wanted, from: tracks).filter { $0.id.map { seen.insert($0).inserted } ?? true }
-            #if DEBUG
-            if !albums.isEmpty {
-                print("[search] \"\(term)\": library albums \(albums.count), expanded \(wanted.map(\.name)) (\(tracks.values.map(\.count).reduce(0, +)) songs)")
-            }
-            #endif
+            let added = LibraryAlbumSearch.songs(of: wanted, from: tracks).filter { $0.id.map { seen.insert($0).inserted } ?? true }
+            albumSongs = added.count
+            resources += added
         }
+        #if DEBUG
+        // Every search: what the API sent (an API miss) and what was kept (our filter).
+        let broadLine = broader.map { "; broader \"\($0)\": songs \(broad?.librarySongs?.data.count ?? 0) (\(broadSongs.count) match), albums \(broad?.libraryAlbums?.data.count ?? 0)" } ?? ""
+        print("[search] \"\(term)\" library: songs \(full.librarySongs?.data.count ?? 0), albums \(full.libraryAlbums?.data.count ?? 0)\(broadLine); "
+              + "albums expanded \(wanted.map(\.name)) (+\(albumSongs) songs); library songs \(resources.count)")
+        #endif
         // Uses remembered matches for uploads but doesn't search for them: this runs as you type.
         return try await catalogSongs(for: resources, searchUnlabelled: false).loaded
+    }
+
+    /// The API's library search for `term`, kept a couple of minutes (`librarySearches`): typing
+    /// asks for the same broader words, and backspacing for the same words, again.
+    private func librarySearch(_ term: String, types: String) async throws -> LibrarySearchResponse.Results {
+        let encoded = term.replacingOccurrences(of: " ", with: "+")
+            .addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? term
+        return try await librarySearches.value(for: "\(types)|\(term.lowercased())") {
+            let response: LibrarySearchResponse = try await fetch("/v1/me/library/search?term=\(encoded)&types=\(types)&limit=25&include=catalog")
+            return response.results
+        }
+    }
+
+    private func broadLibrarySearch(_ term: String?, types: String) async -> LibrarySearchResponse.Results? {
+        guard let term else { return nil }
+        return try? await librarySearch(term, types: types)
     }
 
     /// A library album's songs, with their catalog songs, up to 100 (one page; a search adds
@@ -780,6 +829,9 @@ private struct APIPage<Resource: Decodable>: Decodable {
     var meta: Meta?
 }
 
+/// Search answers are kept across keystrokes (`KeptResults`).
+extension APIPage: Sendable where Resource: Sendable {}
+
 private struct APIArtwork: Decodable {
     var url: String
     /// Hex without "#", when the API sends them.
@@ -787,8 +839,9 @@ private struct APIArtwork: Decodable {
     var textColor1: String?
     var textColor2: String?
 
+    /// As MusicKit fills it (`LibraryArtworkHint.url`: `{c}` and `{f}` too).
     func url(size: Int) -> URL? {
-        URL(string: url.replacingOccurrences(of: "{w}", with: "\(size)").replacingOccurrences(of: "{h}", with: "\(size)"))
+        LibraryArtworkHint.url(url, size: size)
     }
 
     var colors: ArtworkColors? {
@@ -832,27 +885,30 @@ private struct LibraryAlbumResource: Decodable {
     var attributes: Attributes?
 }
 
-/// Library albums' songs, by album id, for a host's search as they type (`searchLibrarySongs`):
-/// each album fetched once however many keystrokes ask at once, and kept `lifetime`, so the next
-/// keystrokes add no request. An album that fails to load is asked again next time.
-private actor LibraryAlbumTracks {
-    static let lifetime: TimeInterval = 10 * 60
-    static let maxAlbums = 50
+/// Answers for a host's search as they type (`searchLibrarySongs`: library searches, library
+/// albums' songs), by key: each fetched once however many keystrokes ask at once, and kept
+/// `lifetime`, so the next keystrokes asking the same add no request. A failure isn't kept.
+private actor KeptResults<Value: Sendable> {
+    static var maxKept: Int { 50 }
 
-    private var albums: [String: (songs: [LibrarySongResource], at: Date)] = [:]
-    private var loading: [String: Task<[LibrarySongResource]?, Never>] = [:]
+    let lifetime: TimeInterval
+    private var kept: [String: (value: Value, at: Date)] = [:]
+    private var loading: [String: Task<Value, Error>] = [:]
 
-    func tracks(of id: String, load: @escaping @Sendable (String) async throws -> [LibrarySongResource]) async -> [LibrarySongResource] {
-        if let kept = albums[id], Date().timeIntervalSince(kept.at) < Self.lifetime { return kept.songs }
-        let task = loading[id] ?? Task { try? await load(id) }
-        loading[id] = task
-        let songs = await task.value
-        loading[id] = nil
-        guard let songs else { return [] }
-        if albums.count >= Self.maxAlbums { albums = albums.filter { Date().timeIntervalSince($0.value.at) < Self.lifetime } }
-        if albums.count >= Self.maxAlbums { albums = [:] }
-        albums[id] = (songs, Date())
-        return songs
+    init(lifetime: TimeInterval) {
+        self.lifetime = lifetime
+    }
+
+    func value(for key: String, load: @escaping @Sendable () async throws -> Value) async throws -> Value {
+        if let entry = kept[key], Date().timeIntervalSince(entry.at) < lifetime { return entry.value }
+        let task = loading[key] ?? Task { try await load() }
+        loading[key] = task
+        defer { loading[key] = nil }
+        let value = try await task.value
+        if kept.count >= Self.maxKept { kept = kept.filter { Date().timeIntervalSince($0.value.at) < lifetime } }
+        if kept.count >= Self.maxKept { kept = [:] }
+        kept[key] = (value, Date())
+        return value
     }
 }
 

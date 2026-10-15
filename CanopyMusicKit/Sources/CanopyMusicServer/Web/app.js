@@ -278,8 +278,14 @@
 
   // MARK: Rendering
 
-  /** The last `notice` toasted (undefined until the first snapshot). */
-  let shownNotice;
+  /** Links this phone added that the hub is still preparing (downloading), by song id: their
+   * progress from `/api/link/progress`, shown on their result rows. */
+  const preparing = new Map();
+  /** Links that left `preparing` without failing: queued, which a snapshot will show. */
+  const awaitingQueue = new Set();
+  let preparationsChecked = false;
+  let preparationsTimer = null;
+  let checkingPreparations = false;
 
   function applySnapshot(next) {
     if (dragging) { pendingSnap = next; return; }
@@ -303,13 +309,11 @@
     if (next.sonos !== undefined) sonosSetup = next.sonos;
     // The Crossfade button showed what was asked; the hub says so now.
     if (crossfadeWanted !== null && next.crossfade === crossfadeWanted) crossfadeWanted = null;
-    // Something everyone hears about once (a link that couldn't download); not one from before
-    // this page opened.
-    if (next.notice && next.notice.id !== shownNotice) {
-      if (shownNotice !== undefined) toast(next.notice.text, 5000);
-      shownNotice = next.notice.id;
-    } else if (shownNotice === undefined) shownNotice = null;
     render();
+    noteQueuedLinks();
+    // Links this phone added that the hub is still preparing, or that failed while the page was
+    // closed: asked once the hub says it takes links.
+    if (next.links && !preparationsChecked) { preparationsChecked = true; checkPreparations(); }
     openSettingsFromLink();
     hideSplash();
     followRename();
@@ -598,7 +602,7 @@
     title.textContent = item.track.title;
     const sub = document.createElement("p");
     sub.className = "row-sub";
-    sub.textContent = rowSub(item.track);
+    sub.textContent = item.track.artist;
     meta.append(title, sub);
     li.append(art, meta);
 
@@ -639,21 +643,10 @@
     for (const e of entries) { if (e.isIntersecting) onScreen.add(e.target); else onScreen.delete(e.target); }
   });
 
-  /** A row's second line: the artist, and while a song from a link downloads, how far it's got. */
-  function rowSub(track) {
-    const link = track.link;
-    if (!link || link.status !== "pending") return track.artist;
-    const progress = link.stage === "queued" ? "Waiting to download"
-      : link.stage === "converting" ? "Converting"
-      : link.percent != null ? `Downloading ${Math.floor(link.percent)}%` : "Downloading";
-    // First, so a narrow row cuts the artist rather than the progress.
-    return track.artist ? `${progress} · ${track.artist}` : progress;
-  }
-
   /** Everything fillRow draws from, so a row is rebuilt only when it would look different. */
   function rowSignature(item) {
     const t = item.track, label = requesterLabel(item);
-    return [t.title, rowSub(t), t.thumbnailURL || t.artworkURL || "", t.colors ? t.colors.background + t.colors.secondary : "",
+    return [t.title, t.artist, t.thumbnailURL || t.artworkURL || "", t.colors ? t.colors.background + t.colors.secondary : "",
       snap.lockedNextID === item.id, isForeign(item), label ? `${label.text}${label.mine}` : "", hosting(), dragAllowed].join("|");
   }
 
@@ -1289,7 +1282,8 @@
     const playing = snap.current && snap.current.track.id;
     for (const li of $("results").children) {
       const button = li.querySelector(".add-btn");
-      if (button.dataset.busy) continue;
+      showPreparing(li, preparing.get(li.dataset.trackId));
+      if (button.dataset.busy || li.dataset.preparing) continue;
       const id = li.dataset.trackId;
       if (id === playing) { setButton(button, "Playing", true); }
       else if (queued.has(id)) { setButton(button, "Queued", true); }
@@ -1316,6 +1310,14 @@
     button.textContent = "…";
     try {
       const reply = await api("/api/add", { track, name: myName, clientId, key: hosting() ? hostKey : undefined });
+      if (reply.result === "preparing") {
+        // A link still downloading: the hub queues it once it's ready (`checkPreparations`).
+        delete button.dataset.busy;
+        preparing.set(reply.progress.id, reply.progress);
+        updateResultButtons();
+        schedulePreparations();
+        return;
+      }
       if (reply.result === "added") {
         addedWhileSearching.push(reply.itemId);
         toast(`Added · #${reply.index + 1} in line`);
@@ -1332,6 +1334,86 @@
       // A link the hub refused says why ("Links can't play in this zone.").
       toast((error.reason && error.reason.error) || "Couldn't add that. Try again.", error.reason ? 4000 : 2200);
     }
+  });
+
+  // MARK: Links being prepared
+
+  /** A result row for a link being prepared: the spinner in place of Add, "Preparing… 37%", and
+   * once the hub expects it to take more than 15 seconds, a line saying it will queue by itself.
+   * Without `prep`, the row goes back to how it was. */
+  function showPreparing(li, prep) {
+    const sub = li.querySelector(".row-sub");
+    const button = li.querySelector(".add-btn");
+    if (!prep) {
+      if (!li.dataset.preparing) return;
+      delete li.dataset.preparing;
+      sub.textContent = li.dataset.sub;
+      const note = li.querySelector(".row-note");
+      if (note) note.remove();
+      button.classList.remove("preparing");
+      setButton(button, "Add", false);
+      return;
+    }
+    if (!li.dataset.preparing) {
+      li.dataset.preparing = "1";
+      li.dataset.sub = sub.textContent;
+      button.classList.add("preparing");
+      button.disabled = true;
+      button.innerHTML = '<span class="spinner"></span>';
+      button.setAttribute("aria-label", "Preparing");
+    }
+    sub.textContent = prep.percent != null ? `Preparing… ${prep.percent}%` : "Preparing…";
+    if (prep.takesLong && !li.querySelector(".row-note")) {
+      const note = document.createElement("p");
+      note.className = "row-note";
+      note.textContent = "Your song will queue automatically when it's finished preparing.";
+      li.querySelector(".row-meta").append(note);
+    }
+  }
+
+  function schedulePreparations() {
+    if (!preparationsTimer) preparationsTimer = setTimeout(checkPreparations, 1000);
+  }
+
+  /** Asks the hub how this phone's links are getting on: about once a second while any are
+   * preparing, and when the page opens or comes back. A failure is toasted (the hub tells each
+   * once); one that's done is toasted once a snapshot shows it in Up Next. */
+  async function checkPreparations() {
+    clearTimeout(preparationsTimer);
+    preparationsTimer = null;
+    if (checkingPreparations) return;
+    checkingPreparations = true;
+    let reply = null;
+    try { reply = await api("/api/link/progress", { clientId }); } catch {}
+    checkingPreparations = false;
+    if (reply) {
+      const failed = new Set(reply.failed.map((f) => f.id));
+      const still = new Map(reply.preparing.map((p) => [p.id, p]));
+      for (const id of preparing.keys()) if (!still.has(id) && !failed.has(id)) awaitingQueue.add(id);
+      preparing.clear();
+      still.forEach((p, id) => preparing.set(id, p));
+      for (const f of reply.failed) toast(f.text, 4000);
+      updateResultButtons();
+      noteQueuedLinks();
+    }
+    if (preparing.size) schedulePreparations();
+  }
+
+  /** A link this phone added has reached Up Next: said as an add is. */
+  function noteQueuedLinks() {
+    if (!snap || !awaitingQueue.size) return;
+    for (const id of awaitingQueue) {
+      const index = snap.upNext.findIndex((i) => i.track.id === id);
+      if (index >= 0) {
+        if (!$("search").hidden) addedWhileSearching.push(snap.upNext[index].id);
+        toast(`Added · #${index + 1} in line`);
+      }
+      if (index >= 0 || (snap.current && snap.current.track.id === id)) awaitingQueue.delete(id);
+    }
+  }
+
+  document.addEventListener("visibilitychange", () => {
+    if (document.visibilityState === "visible" && snap && snap.links) checkPreparations();
   });
 
   // MARK: Toast

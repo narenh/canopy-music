@@ -272,6 +272,43 @@ struct HostSettingsTests {
         #expect(display == 200)
     }
 
+    /// "Limit reorders", set from the web page: the hub counts guests' moves by client ID and
+    /// refuses them once they're out; hosts and displays carry on, and a page that doesn't say
+    /// who it is can't move anything while the limit is on.
+    @Test func limitReordersCountsGuestsNotHostsOrDisplays() async throws {
+        let hub = PartySession(catalog: DemoCatalog(), engine: DemoPlaybackEngine())
+        hub.configureHub(kind: .tv, zoneName: "Living Room", serviceName: "Demo")
+        hub.hostKey = "secret"
+        let playlist = try #require(try await DemoCatalog().libraryPlaylists().first)
+        try await hub.load(playlist: playlist)
+        try await hub.play()
+        let (server, task) = try #require(await PartyServer.start(session: hub, ports: [18931]))
+        defer { task.cancel(); Task { await server.stop() } }
+
+        let limit: [String: Any] = ["isOn": true, "allowance": 1, "refillMinutes": 15]
+        let (set, _) = try await post(18931, "/api/host/settings", ["key": "secret", "reorderLimit": limit])
+        #expect(set == 200)
+        #expect(hub.reorderLimit == ReorderLimit(isOn: true, allowance: 1, refillMinutes: 15))
+
+        let song = try #require(hub.state.upNext.last).id.uuidString
+        let (first, _) = try await post(18931, "/api/move", ["id": song, "clientId": "guest"])
+        #expect(first == 200)
+        let (second, _) = try await post(18931, "/api/move", ["id": song, "after": try #require(hub.state.upNext.last).id.uuidString, "clientId": "guest"])
+        #expect(second == 403)
+        let (anonymous, _) = try await post(18931, "/api/move", ["id": song])
+        #expect(anonymous == 403)
+        let (host, _) = try await post(18931, "/api/move", ["id": song, "after": try #require(hub.state.upNext.last).id.uuidString, "key": "secret"])
+        #expect(host == 200)
+        _ = try await post(18931, "/api/display/hello", ["clientId": "kitchen", "name": "Kitchen iPad", "kind": "ipad"])
+        let (display, _) = try await post(18931, "/api/move", ["id": song, "clientId": "kitchen"])
+        #expect(display == 200)
+        // Off again: no limit, and nobody needs to say who they are.
+        let (off, _) = try await post(18931, "/api/host/settings", ["key": "secret", "reorderLimit": ["isOn": false, "allowance": 1, "refillMinutes": 15]])
+        #expect(off == 200)
+        let (unlimited, _) = try await post(18931, "/api/move", ["id": song, "after": try #require(hub.state.upNext.last).id.uuidString])
+        #expect(unlimited == 200)
+    }
+
     /// The playlist past the live Up Next comes a page at a time, to the web page and to displays.
     @Test func upcomingPages() async throws {
         let hub = PartySession(catalog: DemoCatalog(), engine: DemoPlaybackEngine())

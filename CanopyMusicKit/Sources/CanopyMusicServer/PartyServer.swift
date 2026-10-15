@@ -210,8 +210,17 @@ public final class PartyServer: Sendable {
             let allowed = await session.phonesCanReorder
             let isHost = await session.isHost(key: body.key)
             guard allowed || isHost else { return HTTPResponse(statusCode: .forbidden) }
-            let ok = await session.move(body.id, after: body.after)
-            return HTTPResponse(statusCode: ok ? .ok : .conflict)
+            if isHost { return HTTPResponse(statusCode: await session.move(body.id, after: body.after) ? .ok : .conflict) }
+            // A guest's move counts against "Limit reorders" by its client ID (a display's is its
+            // device ID, which isn't counted). A page from before the limit doesn't say who's
+            // moving, so while the limit is on it can't move anything.
+            let limited = await session.reorderLimit.isOn
+            guard body.clientId != nil || !limited else { return HTTPResponse(statusCode: .forbidden) }
+            switch await session.move(body.id, after: body.after, asClient: body.clientId) {
+            case .moved: return HTTPResponse(statusCode: .ok)
+            case .refused: return HTTPResponse(statusCode: .conflict)
+            case .outOfReorders: return HTTPResponse(statusCode: .forbidden)
+            }
         }
 
         await server.appendRoute("POST /api/remove") { request in
@@ -310,6 +319,7 @@ public final class PartyServer: Sendable {
                 zoneName: body.zoneName?.trimmingCharacters(in: .whitespacesAndNewlines).prefix(40).description,
                 phonesCanQueue: body.phonesCanQueue,
                 phonesCanReorder: body.phonesCanReorder,
+                reorderLimit: body.reorderLimit,
                 displaysCanControl: body.displaysCanControl,
                 wifi: body.wifi.map { WifiDetails(ssid: String($0.ssid.prefix(32)), password: String($0.password.prefix(63)), simpleQR: $0.simpleQR) },
                 screensaverWhilePlaying: body.screensaverWhilePlaying,
@@ -682,6 +692,8 @@ struct SettingsBody: Decodable {
     var zoneName: String?
     var phonesCanQueue: Bool?
     var phonesCanReorder: Bool?
+    /// "Limit reorders", whole (the page sends all three values with any change).
+    var reorderLimit: ReorderLimit?
     var displaysCanControl: Bool?
     /// Apple TV hubs only.
     var screensaverWhilePlaying: Bool?
@@ -710,6 +722,8 @@ struct MoveBody: Decodable {
     var id: UUID
     var after: UUID?
     var key: String?
+    /// Who's moving, for "Limit reorders"; nil from pages and displays from before it.
+    var clientId: String?
 }
 
 struct RemoveBody: Decodable {

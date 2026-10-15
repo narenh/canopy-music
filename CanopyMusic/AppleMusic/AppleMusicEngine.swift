@@ -77,6 +77,8 @@ final class AppleMusicEngine: PlaybackEngine {
     /// A library song watched in `play` until it has played this far.
     static let librarySettle: TimeInterval = 2
     private var currentIsLibraryOnly = false
+    /// A library song's start, on tvOS: the time the watch last read it playing at, and when.
+    private var startReading: (time: TimeInterval, at: Date)?
     private var stagedIsLibraryOnly = false
     private var readsOffMain: Bool { Self.readsLibrarySongsOffMain && (currentIsLibraryOnly || stagedIsLibraryOnly) }
     /// A read on another thread is out; its answer counts only for the `play` it was made for.
@@ -173,6 +175,10 @@ final class AppleMusicEngine: PlaybackEngine {
         // `poll` runs while we await below; it must not mistake our own queue swap for the
         // player landing on an unexpected entry (that fed back into another `play`, forever).
         isReplacingQueue = true
+        // The song before's time stops here: a library song's start takes a second or more
+        // (watched below), and the bar ran on from the old song's time meanwhile.
+        cache(playing: false, time: 0)
+        startReading = nil
         let start = ContinuousClock.now
         player.queue = ApplicationMusicPlayer.Queue(for: [song])
         log("play \(track.title)\(track.isLibraryOnly ? " (library only)" : ""): queue set")
@@ -192,7 +198,8 @@ final class AppleMusicEngine: PlaybackEngine {
         isReplacingQueue = false
         pollingPaused = false
         currentTrack = track
-        cache(playing: true, time: 0)
+        // Where the watch last saw it (a library song on tvOS has played a moment by now), else 0.
+        cache(playing: true, time: startReading.map { $0.time + Date().timeIntervalSince($0.at) } ?? 0)
         cachedDuration = song.duration ?? track.duration
         tracker.start(duration: cachedDuration, at: Date())
         noteCommand()
@@ -223,6 +230,7 @@ final class AppleMusicEngine: PlaybackEngine {
         while deadline.timeIntervalSinceNow > 0 {
             guard let reading = await PlayerReading.takeOffMain(within: min(Self.readDeadline, deadline.timeIntervalSinceNow)),
                   !pausedByUs else { return false }
+            if reading.status == .playing { startReading = (reading.time, Date()) }
             switch reading.status {
             case .playing where reading.time >= Self.librarySettle:
                 return false
@@ -249,6 +257,7 @@ final class AppleMusicEngine: PlaybackEngine {
                 throw AppleMusicError.libraryPlaybackStalled
             }
             if reading.status == .playing {
+                startReading = (reading.time, Date())
                 log("library song \(track.title): playing after \((ContinuousClock.now - start).inMilliseconds), t=\(reading.time) (read off the main thread)")
                 return reading.entryID
             }

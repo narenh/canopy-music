@@ -29,7 +29,7 @@ struct TVMotionArtworkView: View {
     @Environment(\.screenCovered) private var screenCovered
     @Environment(\.displayScale) private var displayScale
 
-    /// To try, as the iPad's (`MotionArtworkView.fadesWhilePaused`): paused, the video fades to
+    /// As the iPad's (`MotionArtworkView.fadesWhilePaused`; off, a plain pause): paused, the video fades to
     /// the still art, still moving until it's gone, then stops; it plays and fades back in.
     static let fadesWhilePaused = true
     static let pauseFade: TimeInterval = 0.8

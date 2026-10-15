@@ -47,7 +47,7 @@ struct MotionArtworkView: View {
     /// always can. On an iPad hub on iOS 27 the video is cut off from the audio session
     /// (`LoopingVideoView.start`); a Mac hub on macOS 27 has no cut-off but was seen not to pause.
     /// Before 27 a hub keeps the still art: a paused party is far worse than art that doesn't move.
-    /// To try (against a plain pause, false): paused, the video fades to the still art over
+    /// Off, a plain pause. On: paused, the video fades to the still art over
     /// `pauseFade`, still moving until it's gone, then stops; it plays and fades back in with the
     /// music over `resumeFade`.
     static let fadesWhilePaused = true
@@ -377,7 +377,7 @@ private final class LoopingVideoView: UIView {
         wantsToPlay = wanted
         pauseTimer?.invalidate()
         pauseTimer = nil
-        motionLog("\(wanted ? "play" : "pause") at \(String(format: "%.3f", player.currentTime().seconds)) s (active: \(active), music playing: \(playing))")
+        motionLog("\(wanted ? "play" : "pause") (active: \(active), music playing: \(playing))")
         if wanted {
             player.play()
         } else if animated, active, MotionArtworkView.fadesWhilePaused {
@@ -427,7 +427,7 @@ private final class LoopingVideoView: UIView {
         case .waitingToPlayAtSpecifiedRate: "waiting (\(player.reasonForWaitingToPlay?.rawValue ?? "?"))"
         @unknown default: "unknown"
         }
-        motionLog("video \(status), rate \(player.rate), at \(String(format: "%.3f", player.currentTime().seconds)) s, wants to play: \(wantsToPlay)")
+        motionLog("video \(status), rate \(player.rate), wants to play: \(wantsToPlay)")
         // Waiting (a stall while playing) leaves it as it was.
         switch player.timeControlStatus {
         case .playing: onMoving?(true)

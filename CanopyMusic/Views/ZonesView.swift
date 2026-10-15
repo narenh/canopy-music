@@ -4,6 +4,9 @@ import SwiftUI
 
 /// Every launch starts here: the zones on this Wi‑Fi, plus "Create a new zone" (docs/multi-device.md).
 struct ZoneListView: View {
+    #if DEBUG
+    @MainActor static var didAutoJoin = false
+    #endif
     @Environment(AppModel.self) private var model
     /// The list's content height, so it's only as tall as its rows and the whole screen can be
     /// centered (a List otherwise takes all the height it's offered).
@@ -52,6 +55,20 @@ struct ZoneListView: View {
                         if height > 1 { listHeight = height }
                     }
                     .frame(maxWidth: 560, maxHeight: listHeight)
+                    // "Living Room ended", for a moment, after a display's zone ended. Below the
+                    // list without moving it.
+                    .overlay(alignment: .bottom) {
+                        if let note = model.zoneListNote {
+                            Text(note)
+                                .font(.system(size: 15, weight: .medium))
+                                .foregroundStyle(.white.opacity(0.7))
+                                .lineLimit(1)
+                                .fixedSize()
+                                .offset(y: 30)
+                                .transition(.opacity)
+                        }
+                    }
+                    .animation(.easeInOut(duration: 0.3), value: model.zoneListNote)
                     Spacer(minLength: 24)
                     // A little more room below than above, so it looks centered rather than sitting low.
                     Color.clear.frame(height: 64)
@@ -101,10 +118,12 @@ struct ZoneListView: View {
         .onAppear { model.zoneBrowser.start() }
         #if DEBUG
         // `-joinZone <name>`: joins that zone as soon as it shows up (testing displays in the simulator).
+        // Once per launch, so a zone that ends comes back to this list (it's still listed a moment).
         .onChange(of: zones.map(\.id), initial: true) {
             let args = ProcessInfo.processInfo.arguments
-            guard let i = args.firstIndex(of: "-joinZone"), i + 1 < args.count,
+            guard !Self.didAutoJoin, let i = args.firstIndex(of: "-joinZone"), i + 1 < args.count,
                   let zone = zones.first(where: { $0.name == args[i + 1] }) else { return }
+            Self.didAutoJoin = true
             model.join(zone)
         }
         #endif

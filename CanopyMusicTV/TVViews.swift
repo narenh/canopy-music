@@ -351,6 +351,20 @@ struct TVZoneListView: View {
                 .focused($focused, equals: "create")
             }
             .frame(width: 900)
+            // "Living Room ended", for a moment, after a display's zone ended. Below the rows
+            // without moving them.
+            .overlay(alignment: .bottom) {
+                if let note = model.zoneListNote {
+                    Text(note)
+                        .font(.system(size: 24, weight: .medium))
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                        .fixedSize()
+                        .offset(y: 50)
+                        .transition(.opacity)
+                }
+            }
+            .animation(.easeInOut(duration: 0.3), value: model.zoneListNote)
             if model.authorizationDenied {
                 Text("Canopy Music needs Apple Music access to play here. Turn it on in Settings › General › Privacy & Security › Media & Apple Music.")
                     .font(.system(size: 24))

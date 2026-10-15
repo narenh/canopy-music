@@ -44,6 +44,12 @@ public struct ZoneListing: Identifiable, Hashable, Sendable {
 
     public var baseURL: URL? { URL(string: "http://\(address)") }
 
+    /// Whether this zone is among `zones`: the same hub, or (an older hub that doesn't say which
+    /// it is) the same announcement.
+    public func isListed(in zones: [ZoneListing]) -> Bool {
+        zones.contains { other in hubID.map { other.hubID == $0 } ?? (other.id == id) }
+    }
+
     /// Other zones announcing this Spotify account (`fingerprint`), in list order. Only what the
     /// announcements say: a hub that quit without a Bonjour goodbye stays listed for a while, so
     /// before anything is blocked, `ZoneProbe` asks each one whether it's really there. A
@@ -284,10 +290,16 @@ public final class ZoneAdvertiser: @unchecked Sendable {
 
 // MARK: - Displays: browse
 
+/// The zones on the network, as a display sees them (a `ZoneBrowser`; a fake in tests).
+@MainActor
+public protocol ZoneList: AnyObject {
+    var zones: [ZoneListing] { get }
+}
+
 /// Live list of zones on the network.
 @MainActor
 @Observable
-public final class ZoneBrowser {
+public final class ZoneBrowser: ZoneList {
     public private(set) var zones: [ZoneListing] = []
     /// True once the first browse results (or a definite "nothing") have come in.
     public private(set) var hasSearched = false
@@ -347,15 +359,67 @@ public final class ZoneBrowser {
 
 // MARK: - Displays: connect
 
+/// The backstop for a hub that goes away without saying its zone ended (quit, crashed, lost
+/// power): its display gives up once it has been disconnected for `disconnectedFor` and the zone
+/// has been missing from the zone list for `unlistedFor`, each without a break. Never while the
+/// zone is listed: a hub restarting its server (back from the background) stays listed, but for
+/// the moment it takes to announce again, which `unlistedFor` rides out. A display resting in
+/// the background, or off the network itself, starts both over.
+public struct HubVanishing: Sendable {
+    public var disconnectedFor: TimeInterval = 25
+    public var unlistedFor: TimeInterval = 10
+    private(set) var disconnectedSince: Date?
+    private(set) var unlistedSince: Date?
+
+    public init() {}
+
+    mutating func connected() {
+        disconnectedSince = nil
+    }
+
+    mutating func disconnected(at now: Date) {
+        if disconnectedSince == nil { disconnectedSince = now }
+    }
+
+    /// In the background, or off the network: nothing it sees then counts.
+    mutating func startOver() {
+        disconnectedSince = nil
+        unlistedSince = nil
+    }
+
+    /// Whether the hub is gone, with the zone `listed` or not now.
+    mutating func isGone(listed: Bool, at now: Date) -> Bool {
+        if listed {
+            unlistedSince = nil
+        } else if unlistedSince == nil {
+            unlistedSince = now
+        }
+        guard let disconnectedSince, let unlistedSince else { return false }
+        return now.timeIntervalSince(disconnectedSince) >= disconnectedFor && now.timeIntervalSince(unlistedSince) >= unlistedFor
+    }
+}
+
 /// A display's connection to its hub: mirrors the hub's queue into a `PartySession` over the
 /// same WebSocket the guest page uses, and sends edits over the JSON API.
 @MainActor
 @Observable
 public final class ZoneConnection: ZoneRemote {
+    /// Why a display stopped showing its zone by itself.
+    public enum Ending: Equatable, Sendable {
+        /// The hub said the zone ended (`ZoneMessage.ended`).
+        case ended
+        /// The hub went away without a goodbye (`HubVanishing`).
+        case vanished
+    }
+
     public let baseURL: URL
     public private(set) var isConnected = false
     /// True once a snapshot has arrived (so the UI can wait before showing the party screen).
     public private(set) var hasSnapshot = false
+    /// Set once the zone has ended, or its hub has gone: the connection has stopped for good.
+    public private(set) var ending: Ending?
+    /// Called once, as `ending` is set: the app goes back to the zone list.
+    @ObservationIgnored public var onEnding: (@MainActor (Ending) -> Void)?
 
     @ObservationIgnored public let clientID: String
     @ObservationIgnored private let name: String
@@ -364,6 +428,14 @@ public final class ZoneConnection: ZoneRemote {
     @ObservationIgnored private weak var session: PartySession?
     @ObservationIgnored private var loop: Task<Void, Never>?
     @ObservationIgnored private var heartbeat: Task<Void, Never>?
+    /// Looks for the zone in `zoneList` every few seconds while disconnected (`checkHub`).
+    @ObservationIgnored private var watcher: Task<Void, Never>?
+    @ObservationIgnored private var zoneList: (any ZoneList)?
+    @ObservationIgnored private var listing: ZoneListing?
+    @ObservationIgnored var vanishing = HubVanishing()
+    /// The clock and the network check (replaced in tests).
+    @ObservationIgnored var now: () -> Date = Date.init
+    @ObservationIgnored var isOnNetwork: () -> Bool = { LocalNetwork.lanAddress() != nil }
     /// The socket open now (or opening), so `suspend` and `stop` can close it.
     @ObservationIgnored private var socket: URLSessionWebSocketTask?
     /// In the background (`suspend`): nothing runs until `resume`.
@@ -385,8 +457,17 @@ public final class ZoneConnection: ZoneRemote {
         self.device = device
     }
 
-    public func start(session: PartySession) {
+    /// `listing` is the zone as `zoneList` shows it: once the hub has been gone a while without a
+    /// goodbye (`HubVanishing`), the connection ends (`.vanished`). Without them it never does.
+    public func start(session: PartySession, listing: ZoneListing? = nil, in zoneList: (any ZoneList)? = nil) {
+        guard ending == nil else { return }
         self.session = session
+        if let listing, let zoneList {
+            self.listing = listing
+            self.zoneList = zoneList
+        }
+        // Not connected yet: a hub that never answers counts from now.
+        vanishing.disconnected(at: now())
         loop?.cancel()
         loop = Task { [weak self] in await self?.run() }
         heartbeat?.cancel()
@@ -396,18 +477,31 @@ public final class ZoneConnection: ZoneRemote {
                 try? await Task.sleep(for: .seconds(10))
             }
         }
+        watcher?.cancel()
+        if self.zoneList != nil {
+            watcher = Task { [weak self] in
+                while !Task.isCancelled {
+                    try? await Task.sleep(for: .seconds(2))
+                    self?.checkHub()
+                }
+            }
+        }
     }
 
     /// The app went to the background: no check-ins, and the socket closes, until `resume`. The
     /// hub drops the display from its list after `PartySession.displayTimeout` (30 s), as it
-    /// does one iOS has suspended; a quick trip away keeps it listed.
+    /// does one iOS has suspended; a quick trip away keeps it listed. Resting isn't the hub
+    /// going away: `HubVanishing` starts over when it's back.
     public func suspend() {
         guard loop != nil else { return }
         isSuspended = true
         loop?.cancel()
         heartbeat?.cancel()
+        watcher?.cancel()
         loop = nil
         heartbeat = nil
+        watcher = nil
+        vanishing.startOver()
         socket?.cancel(with: .goingAway, reason: nil)
         socket = nil
         isConnected = false
@@ -427,14 +521,48 @@ public final class ZoneConnection: ZoneRemote {
             let bye = Bye(clientId: clientID)
             Task { [self] in _ = try? await post("/api/display/bye", bye) }
         }
+        stopRunning()
+        isSuspended = false
+    }
+
+    private func stopRunning() {
         loop?.cancel()
         heartbeat?.cancel()
+        watcher?.cancel()
         loop = nil
         heartbeat = nil
-        isSuspended = false
+        watcher = nil
         socket?.cancel(with: .goingAway, reason: nil)
         socket = nil
         isConnected = false
+    }
+
+    /// The zone ended, or its hub is gone: nothing more is tried (and no goodbye is posted to a
+    /// hub that isn't there), and the app is told.
+    private func end(_ ending: Ending) {
+        guard self.ending == nil else { return }
+        stopRunning()
+        isSuspended = false
+        self.ending = ending
+        onEnding?(ending)
+    }
+
+    /// The backstop (`HubVanishing`), every few seconds: whether the hub has been gone long
+    /// enough, by the zone list.
+    func checkHub() {
+        guard ending == nil, !isSuspended, let zoneList, let listing else { return }
+        if isConnected {
+            vanishing.connected()
+            return
+        }
+        // Off the network, this display sees no zones at all; that isn't the hub going away.
+        guard isOnNetwork() else {
+            vanishing.startOver()
+            return
+        }
+        let now = now()
+        vanishing.disconnected(at: now)
+        if vanishing.isGone(listed: listing.isListed(in: zoneList.zones), at: now) { end(.vanished) }
     }
 
     private func run() async {
@@ -447,17 +575,27 @@ public final class ZoneConnection: ZoneRemote {
             do {
                 while !Task.isCancelled {
                     let message = try await socket.receive()
-                    guard case .string(let text) = message,
-                          let snapshot = try? JSONDecoder.api.decode(PartySnapshot.self, from: Data(text.utf8)) else { continue }
-                    session?.apply(snapshot)
+                    guard case .string(let text) = message else { continue }
+                    guard let snapshot = try? JSONDecoder.api.decode(PartySnapshot.self, from: Data(text.utf8)) else {
+                        // The hub's last word before it stops: the zone has ended.
+                        if ZoneMessage.isEnded(text) {
+                            end(.ended)
+                            return
+                        }
+                        continue
+                    }
+                    // Relayed library art loads from this hub, not from this device.
+                    session?.apply(snapshot.resolvingArtwork(against: baseURL))
                     hasSnapshot = true
                     isConnected = true
+                    vanishing.connected()
                     attempt = 0
                 }
             } catch {
                 socket.cancel(with: .goingAway, reason: nil)
             }
             isConnected = false
+            vanishing.disconnected(at: now())
             attempt += 1
             try? await Task.sleep(for: .seconds(min(Double(attempt), 5)))
         }
@@ -509,7 +647,7 @@ public final class ZoneConnection: ZoneRemote {
         components.queryItems = [URLQueryItem(name: "q", value: term)]
         let (data, response) = try await urlSession.data(from: components.url!)
         try Self.check(response)
-        return try JSONDecoder.api.decode([QueueTrack].self, from: data)
+        return try JSONDecoder.api.decode([QueueTrack].self, from: data).map { $0.resolvingArtwork(against: baseURL) }
     }
 
     public func upcoming(offset: Int, limit: Int) async throws -> UpcomingPage {
@@ -517,13 +655,13 @@ public final class ZoneConnection: ZoneRemote {
         components.queryItems = [URLQueryItem(name: "offset", value: "\(offset)"), URLQueryItem(name: "limit", value: "\(limit)")]
         let (data, response) = try await urlSession.data(from: components.url!)
         try Self.check(response)
-        return try JSONDecoder.api.decode(UpcomingPage.self, from: data)
+        return try JSONDecoder.api.decode(UpcomingPage.self, from: data).resolvingArtwork(against: baseURL)
     }
 
     private func refresh() async {
         guard let (data, _) = try? await urlSession.data(from: baseURL.appending(path: "api/state")),
               let snapshot = try? JSONDecoder.api.decode(PartySnapshot.self, from: data) else { return }
-        session?.apply(snapshot, force: true)
+        session?.apply(snapshot.resolvingArtwork(against: baseURL), force: true)
     }
 
     @discardableResult

@@ -12,21 +12,57 @@ public final class PartyServer: Sendable {
     public let port: UInt16
     private let session: PartySession
     private let server: HTTPServer
+    private let libraryArtwork: LibraryArtworkRelay
+    /// It made its relay, so it warms it too (`LibraryArtworkRelay.warmAhead`); an app passing
+    /// its own warms it itself, for as long as its session lasts.
+    private let warmsLibraryArtwork: Bool
     private let snapshotEncoder = SnapshotEncoder()
+    private let sockets = OpenSockets()
 
-    public init(session: PartySession, port: UInt16 = 8080) {
+    /// `libraryArtwork`: the relay for the hub's library art, shared with the app's own views (the
+    /// apps hold one with a disk cache); nil makes one in memory only.
+    public init(session: PartySession, port: UInt16 = 8080, libraryArtwork: LibraryArtworkRelay? = nil) {
         self.session = session
         self.port = port
         self.server = HTTPServer(port: port, logger: .disabled)
+        self.libraryArtwork = libraryArtwork ?? LibraryArtworkRelay(disk: nil)
+        warmsLibraryArtwork = libraryArtwork == nil
     }
 
     /// Runs until cancelled.
     public func run() async throws {
         await registerRoutes()
+        let session = session, relay = libraryArtwork
+        let warming = warmsLibraryArtwork ? Task { await relay.warmAhead(of: session) } : nil
+        defer { warming?.cancel() }
         try await server.run()
     }
 
+    private func relayedArtwork(path: String, size: Int?) async -> Data? {
+        guard let source = await session.catalog.libraryArtwork else { return nil }
+        return await libraryArtwork.image(path: path, size: size, from: source)
+    }
+
     public func stop() async {
+        await server.stop()
+    }
+
+    /// The zone was ended on purpose (End Zone, or a host's phone asking): every page and display
+    /// connected now, and any that connects before the server stops, is told so (`ZoneMessage`)
+    /// and its socket closes. At once, so nothing sent after it (the queue being cleared) reaches
+    /// them. Displays from before the message skip it and just see the socket close.
+    public func sayGoodbye() {
+        sockets.sayGoodbye()
+    }
+
+    /// Says goodbye, then stops once every socket has written it and closed, or after `timeout`
+    /// (a phone that stopped reading). Not on quit: displays notice by themselves then.
+    public func end(timeout: TimeInterval = 1) async {
+        sayGoodbye()
+        let deadline = Date().addingTimeInterval(timeout)
+        while sockets.connections > 0, Date() < deadline {
+            try? await Task.sleep(for: .milliseconds(10))
+        }
         await server.stop()
     }
 
@@ -36,14 +72,15 @@ public final class PartyServer: Sendable {
 
     /// Starts on the first port that binds (port 80 gives guests a URL without `:port`).
     /// Returns the running server and the task driving it.
-    public static func start(session: PartySession, ports: [UInt16] = [80, 8080, 8081]) async -> (PartyServer, Task<Void, Error>)? {
+    public static func start(session: PartySession, ports: [UInt16] = [80, 8080, 8081],
+                             libraryArtwork: LibraryArtworkRelay? = nil) async -> (PartyServer, Task<Void, Error>)? {
         for port in ports {
             // Right after a restart the previous socket can hold port 80 briefly; retry the
             // preferred port before falling back.
             let attempts = port == ports.first ? 3 : 1
             for attempt in 0..<attempts {
                 if attempt > 0 { try? await Task.sleep(for: .milliseconds(400)) }
-                let server = PartyServer(session: session, port: port)
+                let server = PartyServer(session: session, port: port, libraryArtwork: libraryArtwork)
                 let task = Task { try await server.run() }
                 do {
                     try await server.waitUntilListening(timeout: 1.5)
@@ -128,11 +165,23 @@ public final class PartyServer: Sendable {
             return try .json(await session.upcoming(offset: offset, limit: limit))
         }
 
+        // The art of songs only in the hub's library (`LibraryArtwork`), which only the hub can
+        // load: for the page, displays, and the hub's own views. Library ids don't change, so
+        // browsers may keep it.
+        await server.appendRoute("GET /api/artwork/*") { [self] request in
+            guard let data = await relayedArtwork(path: request.path, size: request.query["size"].flatMap { Int($0) }) else {
+                return HTTPResponse(statusCode: .notFound, headers: [.cacheControl: "no-store"])
+            }
+            return HTTPResponse(statusCode: .ok, headers: [.contentType: "image/jpeg", .cacheControl: "max-age=86400"], body: data)
+        }
+
+        // Hosts (`key`) also find the hub's own library songs (`searchShowsLibrary`).
         await server.appendRoute("GET /api/search") { request in
             let term = request.query["q"]?.trimmingCharacters(in: .whitespaces) ?? ""
             guard !term.isEmpty else { return try .json([QueueTrack]()) }
+            let library = Self.searchShowsLibrary(isHost: await session.isHost(key: request.query["key"]))
             do {
-                return try .json(try await session.catalog.searchSongs(term))
+                return try .json(try await session.catalog.searchSongs(term, includingLibrary: library))
             } catch {
                 return .serviceFailed(error)
             }
@@ -457,10 +506,12 @@ public final class PartyServer: Sendable {
 
         // Displays (`/ws?display=1`) also get the guest Wi‑Fi, to show its QR code; phones don't.
         // Hosts' pages (`/ws?key=<Host Control key>`) also get what only hosts see.
-        let encoder = snapshotEncoder
-        await server.appendRoute("GET /ws?display=1", to: .webSocket(SnapshotSocket(session: session, includesWifi: true, encoder: encoder)))
+        let encoder = snapshotEncoder, sockets = sockets
+        let displays = SnapshotSocket(session: session, includesWifi: true, encoder: encoder, sockets: sockets)
+        await server.appendRoute("GET /ws?display=1", to: WebSocketHTTPHandler(handler: CountedWSHandler(displays)))
         await server.appendRoute("GET /ws") { request in
-            try await WebSocketHTTPHandler.webSocket(SnapshotSocket(session: session, hostKey: request.query["key"], encoder: encoder)).handleRequest(request)
+            let socket = SnapshotSocket(session: session, hostKey: request.query["key"], encoder: encoder, sockets: sockets)
+            return try await WebSocketHTTPHandler(handler: CountedWSHandler(socket)).handleRequest(request)
         }
 
         #if DEBUG
@@ -702,6 +753,13 @@ struct HostSonosBody: Decodable {
 }
 
 extension PartyServer {
+    /// Whether guests' searches (phones without Host Control, and displays) find the hub's own
+    /// library songs too, as hosts' do. `true` opens them to everyone.
+    static let guestsSearchTheLibrary = false
+
+    /// Whether a search from the page includes the hub's library (`MusicCatalog.searchSongs(_:includingLibrary:)`).
+    static func searchShowsLibrary(isHost: Bool) -> Bool { isHost || guestsSearchTheLibrary }
+
     @MainActor
     static func playback(_ body: PlaybackBody, session: PartySession) async -> HTTPResponse {
         switch body.action {
@@ -777,6 +835,8 @@ struct SnapshotSocket: WSMessageHandler {
     var hostKey: String?
     /// Shared by the server's sockets, so each snapshot is encoded once per kind of page.
     var encoder: SnapshotEncoder
+    /// The server's open sockets, told when the zone ends (nil in tests that don't end it).
+    var sockets: OpenSockets?
 
     /// Pages that connected the same way get the same snapshots: guests', displays', and hosts'
     /// with the same key.
@@ -784,8 +844,9 @@ struct SnapshotSocket: WSMessageHandler {
 
     func makeMessages(for client: AsyncStream<WSMessage>) async throws -> AsyncStream<WSMessage> {
         let snapshots = await session.snapshots(includingWifi: includesWifi, hostKey: hostKey)
-        let kind = kind, encoder = encoder
+        let kind = kind, encoder = encoder, sockets = sockets
         return AsyncStream { continuation in
+            let outbox = SocketOutbox(continuation)
             let pump = Task {
                 var last: PartySnapshot?
                 for await snapshot in snapshots {
@@ -794,22 +855,149 @@ struct SnapshotSocket: WSMessageHandler {
                     if let last, snapshot.showsTheSame(as: last) { continue }
                     last = snapshot
                     if let text = encoder.text(for: snapshot, kind: kind) {
-                        continuation.yield(.text(text))
+                        outbox.send(text)
                     }
                 }
-                continuation.finish()
+                outbox.finish()
             }
             // Drain the client side; when the phone disconnects, stop pushing.
             let drain = Task {
                 for await _ in client {}
                 pump.cancel()
-                continuation.finish()
+                outbox.finish()
             }
             continuation.onTermination = { _ in
                 pump.cancel()
                 drain.cancel()
+                sockets?.remove(outbox)
             }
+            sockets?.add(outbox)
         }
+    }
+}
+
+/// What a socket gets, besides snapshots. `ended` is the last message when a zone is ended on
+/// purpose (`PartyServer.sayGoodbye`); then the socket closes. Not a snapshot, so displays from
+/// before it skip it and just see the close.
+public enum ZoneMessage {
+    public static let ended = #"{"type":"zoneEnded"}"#
+
+    /// Whether a socket's text is the zone saying it has ended.
+    public static func isEnded(_ text: String) -> Bool {
+        struct Typed: Decodable { var type: String }
+        return (try? JSONDecoder().decode(Typed.self, from: Data(text.utf8)))?.type == "zoneEnded"
+    }
+}
+
+/// One socket's way out: snapshots until the zone says goodbye, which is the last thing sent.
+final class SocketOutbox: @unchecked Sendable {
+    private let lock = NSLock()
+    private var isClosed = false
+    private let continuation: AsyncStream<WSMessage>.Continuation
+
+    init(_ continuation: AsyncStream<WSMessage>.Continuation) {
+        self.continuation = continuation
+    }
+
+    func send(_ text: String) {
+        lock.withLock { if !isClosed { continuation.yield(.text(text)) } }
+    }
+
+    /// The zone ended: says so, then closes the socket.
+    func sayGoodbye() {
+        lock.withLock {
+            guard !isClosed else { return }
+            isClosed = true
+            continuation.yield(.text(ZoneMessage.ended))
+            continuation.yield(.close(.normalClosure))
+        }
+        continuation.finish()
+    }
+
+    func finish() {
+        lock.withLock { isClosed = true }
+        continuation.finish()
+    }
+}
+
+/// A snapshot socket's frames as the connection writes them: the connection asks for each frame
+/// once the one before is written, so when it asks past the last (the goodbye's close), all of
+/// it has gone out, and `OpenSockets` counts the connection closed.
+struct CountedWSHandler: WSHandler {
+    let socket: SnapshotSocket
+
+    init(_ socket: SnapshotSocket) {
+        self.socket = socket
+    }
+
+    func makeFrames(for client: AsyncThrowingStream<WSFrame, any Error>) async throws -> AsyncStream<WSFrame> {
+        let frames = try await MessageFrameWSHandler(handler: socket).makeFrames(for: client)
+        guard let sockets = socket.sockets else { return frames }
+        let written = Written(frames, sockets: sockets)
+        return AsyncStream(unfolding: { await written.next() }, onCancel: { written.close() })
+    }
+
+    private final class Written: @unchecked Sendable {
+        private var iterator: AsyncStream<WSFrame>.Iterator
+        private let sockets: OpenSockets
+        private let lock = NSLock()
+        private var isOpen = true
+
+        init(_ frames: AsyncStream<WSFrame>, sockets: OpenSockets) {
+            iterator = frames.makeAsyncIterator()
+            self.sockets = sockets
+            sockets.connectionOpened()
+        }
+
+        /// Only the connection asks, one frame at a time.
+        func next() async -> WSFrame? {
+            if let frame = await iterator.next() { return frame }
+            close()
+            return nil
+        }
+
+        func close() {
+            guard lock.withLock({ defer { isOpen = false }; return isOpen }) else { return }
+            sockets.connectionClosed()
+        }
+    }
+}
+
+/// A server's open sockets, so ending the zone can say goodbye on each. Once it has, a socket
+/// that opens after (a phone reconnecting before the server stops) is told at once.
+final class OpenSockets: @unchecked Sendable {
+    private let lock = NSLock()
+    private var outboxes: [ObjectIdentifier: SocketOutbox] = [:]
+    private var saidGoodbye = false
+    private var openConnections = 0
+
+    /// How many are open (tests).
+    var count: Int { lock.withLock { outboxes.count } }
+    /// WebSocket connections still writing (`CountedWSHandler`).
+    var connections: Int { lock.withLock { openConnections } }
+
+    func connectionOpened() { lock.withLock { openConnections += 1 } }
+    func connectionClosed() { lock.withLock { openConnections -= 1 } }
+
+    func add(_ outbox: SocketOutbox) {
+        let ended = lock.withLock {
+            if !saidGoodbye { outboxes[ObjectIdentifier(outbox)] = outbox }
+            return saidGoodbye
+        }
+        if ended { outbox.sayGoodbye() }
+    }
+
+    func remove(_ outbox: SocketOutbox) {
+        _ = lock.withLock { outboxes.removeValue(forKey: ObjectIdentifier(outbox)) }
+    }
+
+    func sayGoodbye() {
+        let all = lock.withLock {
+            saidGoodbye = true
+            defer { outboxes = [:] }
+            return Array(outboxes.values)
+        }
+        for outbox in all { outbox.sayGoodbye() }
     }
 }
 

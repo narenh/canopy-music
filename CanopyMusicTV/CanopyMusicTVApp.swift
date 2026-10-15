@@ -12,8 +12,17 @@ import UIKit
 /// shows it as a display. See docs/multi-device.md.
 @main
 struct CanopyMusicTVApp: App {
-    @State private var model = TVModel()
+    @State private var model: TVModel
     @Environment(\.scenePhase) private var scenePhase
+
+    init() {
+        #if DEBUG
+        // As on the iPad: each debug line out at once when stdout is a pipe (`devicectl …
+        // --console`), not in 4 KB batches that leave the last lines unseen.
+        setvbuf(stdout, nil, _IOLBF, 0)
+        #endif
+        _model = State(initialValue: TVModel())
+    }
 
     var body: some Scene {
         scene
@@ -25,6 +34,8 @@ struct CanopyMusicTVApp: App {
             #if DEBUG
             if ProcessInfo.processInfo.arguments.contains("-playTest") {
                 TVPlayTestView()
+            } else if let libraryID = TVLibraryPlayTestView.libraryID {
+                TVLibraryPlayTestView(libraryID: libraryID)
             } else {
                 TVRootView()
                     .environment(model)
@@ -77,7 +88,10 @@ final class TVModel {
     /// Why the zone list's Resume didn't go back in (Spotify signed out, or another zone on the
     /// account). Cleared by the next attempt.
     private(set) var resumeProblem: String?
-    private(set) var session: PartySession
+    private(set) var session: PartySession {
+        // The hub's library art follows the session the views show (`HubLibraryArtwork`).
+        didSet { HubLibraryArtwork.follow(session) }
+    }
     let browser = ZoneBrowser()
     private(set) var guestURL: URL?
     private(set) var friendlyURL: URL?
@@ -166,6 +180,7 @@ final class TVModel {
         // Apple Music player's own session. Left at the default (not mixable), the music starting
         // interrupted this session and paused the video. Ambient mixes, so it never is.
         try? AVAudioSession.sharedInstance().setCategory(.ambient)
+        HubLibraryArtwork.follow(session)
         restoreZoneIfNeeded()
     }
 
@@ -246,7 +261,7 @@ final class TVModel {
         guard zoneRecord.restoresOnLaunch, LocalNetwork.lanAddress() != nil, canPlay else { return }
         #if DEBUG
         let args = ProcessInfo.processInfo.arguments
-        guard !args.contains("-playTest"), !args.contains("-noRestore") else { return }
+        guard !args.contains("-playTest"), !args.contains("-libraryPlayTest"), !args.contains("-noRestore") else { return }
         #endif
         debugLog("restoring zone")
         #if DEBUG
@@ -614,10 +629,13 @@ final class TVModel {
     /// Ends the zone (Menu › End, or a host on the web page) and goes back to the zone list: stops
     /// the music, the server, the Bonjour announcement and the `.local` name, and clears the queue
     /// and the saved queue, so the next zone starts empty. Settings and Host Control stay.
+    /// Displays and phones are told it has ended first, before the queue is cleared, and the
+    /// server stops once they have been (`PartyServer.end`).
     func stopZone() {
+        server?.sayGoodbye()
         session.end()
         zoneRecord.ended()
-        closeZone()
+        closeZone(ended: true)
     }
 
     /// Menu › End offers to save the party once someone has added a song, played or not (and the
@@ -637,12 +655,13 @@ final class TVModel {
         try await session.savePartyPlaylist(name: partyPlaylistName(typed: typedName), onlyRequests: true)
     }
 
-    /// Back to the zone list without touching the zone itself (`stopZone` ends it first).
-    private func closeZone() {
+    /// Back to the zone list without touching the zone itself (`stopZone` ends it first, and
+    /// says so: `ended`).
+    private func closeZone(ended: Bool = false) {
         spotify.signIn.cancel()
         session.shutdown()
         session = PartySession(catalog: DemoOrEmptyCatalog(), engine: SilentEngine())
-        stopServer()
+        stopServer(ended: ended)
         hostname.unregister()
         advertiser.stop()
         guestURL = nil
@@ -714,8 +733,8 @@ final class TVModel {
         await serverOperation { await self.startServerNow() }.value
     }
 
-    private func stopServer() {
-        serverOperation { await self.stopServerNow() }
+    private func stopServer(ended: Bool = false) {
+        serverOperation { await self.stopServerNow(ended: ended) }
     }
 
     /// Nothing if the zone has closed, or its server is already running.
@@ -725,7 +744,7 @@ final class TVModel {
         await stopServerNow()
         debugLog("starting server")
         let session = session
-        guard let (server, task) = await PartyServer.start(session: session) else {
+        guard let (server, task) = await PartyServer.start(session: session, libraryArtwork: HubLibraryArtwork.relay) else {
             debugLog("server failed to start")
             return
         }
@@ -765,9 +784,14 @@ final class TVModel {
         advertise()
     }
 
-    /// Nothing if no server is running.
-    private func stopServerNow() async {
+    /// Nothing if no server is running. `ended`: the zone was ended, so every socket gets the
+    /// goodbye out (at most 1 s) first.
+    private func stopServerNow(ended: Bool = false) async {
         guard let server else { return }
+        if ended {
+            debugLog("zone ended: saying goodbye")
+            await server.end()
+        }
         debugLog("stopping server")
         serverTask?.cancel()
         serverTask = nil
@@ -805,7 +829,12 @@ final class TVModel {
         let mirror = PartySession(remote: connection)
         session.shutdown()
         session = mirror
-        connection.start(session: mirror)
+        connection.onEnding = { [weak self, weak connection] _ in
+            guard let self, self.connection === connection else { return }
+            self.shownZoneEnded()
+        }
+        // The zone list too, for a hub that goes away without saying the zone ended.
+        connection.start(session: mirror, listing: zone, in: browser)
         self.connection = connection
         shownZone = zone
         role = .display
@@ -821,6 +850,25 @@ final class TVModel {
         session = PartySession(catalog: DemoOrEmptyCatalog(), engine: SilentEngine())
         role = .choosing
     }
+
+    /// The zone this display showed has ended (its hub said so, or has been gone a while
+    /// without a word): back to the zone list, which says so for a moment.
+    private func shownZoneEnded() {
+        let name = session.zoneName ?? shownZone?.name ?? "The zone"
+        debugLog("display: \(name) ended (\(connection?.ending.map { "\($0)" } ?? "-"))")
+        leave()
+        zoneListNote = "\(name) ended"
+        zoneListNoteTask?.cancel()
+        zoneListNoteTask = Task { [weak self] in
+            try? await Task.sleep(for: .seconds(6))
+            guard !Task.isCancelled else { return }
+            self?.zoneListNote = nil
+        }
+    }
+
+    /// A line on the zone list for a moment: "Living Room ended".
+    private(set) var zoneListNote: String?
+    @ObservationIgnored private var zoneListNoteTask: Task<Void, Never>?
 
     /// The "Join Wi‑Fi" code next to the guest QR: this hub's Wi‑Fi, set by a host on the web page.
     /// A display shows its hub's, from snapshots.

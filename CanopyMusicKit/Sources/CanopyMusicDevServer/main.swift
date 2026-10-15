@@ -23,6 +23,20 @@ if args.contains("-tvSetup") {
 }
 
 guard let (server, task) = await PartyServer.start(session: session) else { fatalError("No port available") }
+// A host's End Zone (or `-endAfter <seconds>`): the pages are told the zone has ended, as a hub
+// tells them, and the server stops.
+func endZone() async {
+    await server.end()
+    print("Zone ended")
+    exit(0)
+}
+session.onStopRequested = { Task { await endZone() } }
+if let i = args.firstIndex(of: "-endAfter"), i + 1 < args.count, let seconds = Double(args[i + 1]) {
+    Task {
+        try? await Task.sleep(for: .seconds(seconds))
+        await endZone()
+    }
+}
 let hostname = FriendlyHostname(name: "music-dev")
 let ip = LocalNetwork.lanAddress() ?? "127.0.0.1"
 let registered = hostname.register(address: ip)

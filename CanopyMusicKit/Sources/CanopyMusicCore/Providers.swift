@@ -3,6 +3,11 @@ import Foundation
 /// Search and playlists for one music service.
 public protocol MusicCatalog: Sendable {
     func searchSongs(_ term: String) async throws -> [QueueTrack]
+    /// A host's search: `searchSongs`, with the account's own library songs as its library copies
+    /// (`QueueTrack.libraryID`), songs only in the library included, each song once
+    /// (`LibraryDuplicates`). `includingLibrary` false is `searchSongs`. Catalogs without library
+    /// songs answer as `searchSongs`.
+    func searchSongs(_ term: String, includingLibrary: Bool) async throws -> [QueueTrack]
     func libraryPlaylists() async throws -> [PlaylistSummary]
     func searchPlaylists(_ term: String) async throws -> [PlaylistSummary]
     func tracks(in playlist: PlaylistSummary) async throws -> [QueueTrack]
@@ -21,10 +26,31 @@ public protocol MusicCatalog: Sendable {
     /// Finds animated album artwork for Now Playing (see `MotionArtwork`). nil for services
     /// without it.
     var motionArtwork: MotionArtworkLookup? { get }
+    /// Loads the art of songs only in the account's library, which the hub relays
+    /// (`LibraryArtwork`). nil for services without such songs.
+    var libraryArtwork: (any LibraryArtworkSource)? { get }
+}
+
+/// The image of a song only in the account's library (`QueueTrack.libraryID`), which has no public
+/// URL: only the hub can load it, and it serves it to everything else (`/api/artwork/…`).
+public protocol LibraryArtworkSource: Sendable {
+    /// The song's art as image data ImageIO can read, ideally at least `size` pixels square; the
+    /// hub scales it. nil when the song has none (or isn't in the library).
+    func artwork(libraryID: String, size: Int) async throws -> Data?
+    /// What the service already said of the song's art when it listed it (a playlist, a search):
+    /// its image's URL template, so the hub downloads it without asking the service again
+    /// (`LibraryArtworkHints`). nil when it hasn't listed the song; `artwork` then finds it.
+    func artworkHint(libraryID: String) async -> LibraryArtworkHint?
+}
+
+public extension LibraryArtworkSource {
+    func artworkHint(libraryID: String) async -> LibraryArtworkHint? { nil }
 }
 
 public extension MusicCatalog {
+    func searchSongs(_ term: String, includingLibrary: Bool) async throws -> [QueueTrack] { try await searchSongs(term) }
     var motionArtwork: MotionArtworkLookup? { nil }
+    var libraryArtwork: (any LibraryArtworkSource)? { nil }
     func songCount(of playlist: PlaylistSummary) async throws -> Int? { playlist.songCount }
     func loadReport(for playlist: PlaylistSummary) async -> PlaylistLoadReport? { nil }
     var playlistDestination: String? { nil }

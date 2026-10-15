@@ -255,8 +255,13 @@
       el.style.backgroundImage = !url && track.colors ? `linear-gradient(135deg, ${track.colors.background}, ${track.colors.secondary})` : "";
       let img = el.querySelector("img");
       if (url) {
-        if (!img) { img = document.createElement("img"); img.loading = "lazy"; img.decoding = "async"; img.alt = ""; el.append(img); }
-        if (img.getAttribute("src") !== url) img.src = url;
+        if (!img) {
+          img = document.createElement("img"); img.loading = "lazy"; img.decoding = "async"; img.alt = "";
+          // No broken-image icon where there's no art (a library song the hub has none for).
+          img.onerror = () => { img.style.visibility = "hidden"; };
+          el.append(img);
+        }
+        if (img.getAttribute("src") !== url) { img.style.visibility = ""; img.src = url; }
       } else if (img) {
         img.remove();
       }
@@ -377,7 +382,7 @@
    * host gets the setup sheet). */
   function hideSplash() {
     const splash = $("splash");
-    if (!snap || !hostChecked || splash.hidden || splash.classList.contains("gone")) return;
+    if (!snap || !hostChecked || zoneEnded || splash.hidden || splash.classList.contains("gone")) return;
     // A sheet that opened as the first screen is already in place under the splash; it doesn't
     // also slide in while the splash fades.
     for (const sheet of document.querySelectorAll(".sheet")) if (!sheet.hidden) sheet.classList.add("instant");
@@ -822,8 +827,10 @@
   let retries = 0;
   let offlineTimer = null;
   let reconnectTimer = null;
+  /** The hub said its zone has ended: nothing more to connect to. */
+  let zoneEnded = false;
   function connect() {
-    if (socket && socket.readyState <= 1) return;
+    if (zoneEnded || (socket && socket.readyState <= 1)) return;
     // One way back at a time: a connect from elsewhere (the page shown again) replaces the
     // waiting one rather than start a second chain of retries.
     clearTimeout(reconnectTimer);
@@ -839,9 +846,14 @@
       // The rest of Up next, if it couldn't load while the hub was away.
       if (later.retryTimer) loadMoreLater();
     };
-    ws.onmessage = (event) => applySnapshot(JSON.parse(event.data));
+    ws.onmessage = (event) => {
+      const message = JSON.parse(event.data);
+      // The hub's last word when its zone is ended on purpose; then it closes the socket.
+      if (message.type === "zoneEnded") { showEnded(); return; }
+      applySnapshot(message);
+    };
     ws.onclose = () => {
-      if (ws !== socket) return;
+      if (ws !== socket || zoneEnded) return;
       clearTimeout(offlineTimer);
       offlineTimer = setTimeout(() => { $("offline").hidden = false; }, 1500);
       clearTimeout(reconnectTimer);
@@ -857,6 +869,18 @@
     const ws = socket;
     socket = null;
     if (ws) ws.close();
+  }
+  /** The zone was ended on the hub (or by a host's phone): the splash again, saying so, over
+   * whatever was open. No retries and no offline banner; reloading starts over. */
+  function showEnded() {
+    zoneEnded = true;
+    debugLog("zone ended");
+    clearTimeout(reconnectTimer);
+    clearTimeout(offlineTimer);
+    reconnectTimer = null;
+    $("offline").hidden = true;
+    $("splash").classList.add("ended");
+    showSplash("The party has ended");
   }
   document.addEventListener("visibilitychange", () => { if (document.hidden) disconnect(); else connect(); });
   addEventListener("online", () => { if (!document.hidden) connect(); });
@@ -1068,7 +1092,9 @@
     if (!term) { results = []; renderResults(); return; }
     searchAbort = new AbortController();
     try {
-      const res = await fetch(`/api/search?q=${encodeURIComponent(term)}`, { signal: searchAbort.signal });
+      // Hosts also find the hub's own library songs.
+      const key = hosting() ? `&key=${encodeURIComponent(hostKey)}` : "";
+      const res = await fetch(`/api/search?q=${encodeURIComponent(term)}${key}`, { signal: searchAbort.signal });
       if (!res.ok) throw new Error(`${res.status}`);
       results = await res.json();
       renderResults(term);
@@ -1100,6 +1126,13 @@
         badge.textContent = "E";
         badge.title = "Explicit";
         title.append(" ", badge);
+      }
+      // The hub's own library copy (a host's search): its art and titles are the library's.
+      if (track.libraryID) {
+        const tag = document.createElement("span");
+        tag.className = "library-tag";
+        tag.textContent = "Library";
+        title.append(" ", tag);
       }
       const sub = document.createElement("p");
       sub.className = "row-sub";
@@ -2804,7 +2837,8 @@
   async function endZone() {
     closeParty();
     $("settings-modal").hidden = true;
-    try { await api("/api/host/stop", { key: hostKey }); } catch { toast("Couldn't end the zone"); }
+    // The hub may stop before it answers; the zone ending (`showEnded`) says it worked.
+    try { await api("/api/host/stop", { key: hostKey }); } catch { if (!zoneEnded) toast("Couldn't end the zone"); }
   }
 
   $("party-save").addEventListener("change", updateParty);

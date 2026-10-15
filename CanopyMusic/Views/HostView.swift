@@ -678,6 +678,7 @@ private struct SettingsSheet: View {
     #if DEBUG
     @State private var debugSignInPage = false
     @State private var debugLinkTest = false
+    @State private var debugLibraryTest = false
     #endif
 
     var body: some View {
@@ -789,6 +790,7 @@ private struct SettingsSheet: View {
                 }
                 #if DEBUG
                 Section("Debug") {
+                    NavigationLink("Library test") { LibraryTestView().environment(model) }
                     NavigationLink("Link test") { LinkTestView().environment(model) }
                 }
                 .listRowBackground(Color.white.opacity(0.08))
@@ -804,12 +806,21 @@ private struct SettingsSheet: View {
             // `-showLinkTest`: Settings › Debug › Link test, for screenshots (it plays nothing
             // until a button is tapped).
             .navigationDestination(isPresented: $debugLinkTest) { LinkTestView().environment(model) }
+            // `-showLibraryTest`: Settings › Debug › Library test, for screenshots (it only reads
+            // until a button is tapped).
+            .navigationDestination(isPresented: $debugLibraryTest) { LibraryTestView().environment(model) }
             .task {
                 let args = ProcessInfo.processInfo.arguments
-                guard args.contains("-showSignInPage") || args.contains("-showLinkTest") else { return }
+                guard args.contains("-showSignInPage") || args.contains("-showLinkTest") || args.contains("-showLibraryTest") else { return }
                 // Once the sheet has finished coming up (a push during it is dropped).
                 try? await Task.sleep(for: .seconds(2.5))
-                if args.contains("-showSignInPage") { debugSignInPage = true } else { debugLinkTest = true }
+                if args.contains("-showSignInPage") {
+                    debugSignInPage = true
+                } else if args.contains("-showLibraryTest") {
+                    debugLibraryTest = true
+                } else {
+                    debugLinkTest = true
+                }
             }
             #endif
             .navigationTitle("Settings")

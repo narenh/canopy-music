@@ -351,7 +351,9 @@ struct PartyView: View {
         isSearching = true
         defer { isSearching = false }
         do {
-            let found = try await session.catalog.searchSongs(term)
+            // The hub's own screen is a host's: it finds the library's songs too. (A display's
+            // search goes to its hub as a guest's does.)
+            let found = try await session.catalog.searchSongs(term, includingLibrary: true)
             guard !Task.isCancelled else { return }
             results = found
             searchMessage = found.isEmpty ? "No songs found for “\(term)”." : nil

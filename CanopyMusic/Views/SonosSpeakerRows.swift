@@ -194,19 +194,11 @@ private struct SonosTakeoverDialog: ViewModifier {
     }
 }
 
-/// The tick at the end of a room's row, as the system's selection checks: a white check on
-/// green when ticked, a quiet ring when not, a spinner while it joins.
+/// The tick at the end of a room's row: a dark check on white when ticked (quieter than a
+/// coloured fill on dark glass), a quiet ring when not, a spinner while it joins.
 struct SonosCheck: View {
     let ticked: Bool
     let joining: Bool
-
-    /// The system green as Increase Contrast draws it in light mode (#248A3D): dark enough for
-    /// the white check to read, on dark glass and the start screen's dark list alike. The
-    /// usual dark-mode green is too light for a white check.
-    static let green = Color(UIColor.systemGreen.resolvedColor(with: UITraitCollection { traits in
-        traits.userInterfaceStyle = .light
-        traits.accessibilityContrast = .high
-    }))
 
     var body: some View {
         Group {
@@ -215,7 +207,7 @@ struct SonosCheck: View {
             } else if ticked {
                 Image(systemName: "checkmark.circle.fill")
                     .symbolRenderingMode(.palette)
-                    .foregroundStyle(.white, Self.green)
+                    .foregroundStyle(.black, .white)
             } else {
                 Image(systemName: "circle")
                     .foregroundStyle(.secondary)

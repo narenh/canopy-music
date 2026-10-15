@@ -43,6 +43,9 @@ enum AppleMusicError: LocalizedError {
     /// tvOS: a song only in the library didn't start, or the player stopped answering
     /// (`AppleMusicEngine.libraryStartDeadline`).
     case libraryPlaybackStalled
+    /// tvOS: a song only in the library isn't lined up in the player, nor anything behind one
+    /// (`AppleMusicEngine.stage`); it starts when the song before ends.
+    case libraryStagingRefused
     case badResponse
 
     var errorDescription: String? {
@@ -50,6 +53,7 @@ enum AppleMusicError: LocalizedError {
         case .songNotFound: "That song isn't available on Apple Music."
         case .librarySongNotFound: "That song isn't in this Apple Music library."
         case .libraryPlaybackStalled: "That library song didn't start playing."
+        case .libraryStagingRefused: "Library songs aren't queued ahead on Apple TV."
         case .badResponse: "Apple Music sent back something unexpected."
         }
     }

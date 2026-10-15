@@ -271,6 +271,15 @@ final class AppleMusicEngine: PlaybackEngine {
         tracker.unstage()
         stagedIsLibraryOnly = track?.isLibraryOnly ?? false
         guard let track else { return }
+        // tvOS: lining a song only in the library up in the player dropped the player's
+        // connection and froze the main thread on a real Apple TV, so neither it nor anything
+        // behind one is lined up. The session's `.reachedEnd` then starts the next song itself,
+        // after a short gap (the clock notices the end: `EntrylessTracker`).
+        if Self.readsLibrarySongsOffMain, track.isLibraryOnly || currentIsLibraryOnly {
+            stagedIsLibraryOnly = false
+            log("not lining up \(track.title) (a library song on tvOS)")
+            throw AppleMusicError.libraryStagingRefused
+        }
         // A song only in the library is fetched from it by its library id, which is its id here
         // too, so the player's entry for it (`poll`) matches as a catalog song's does.
         let song = try await cache.song(for: track)

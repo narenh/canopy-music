@@ -5,6 +5,7 @@ import SwiftUI
 /// The party screen's Speakers button, in AirPlay's place while the zone plays through Sonos
 /// (never on displays). It opens `SonosSpeakersPanel`.
 struct SonosSpeakersButton: View {
+    @Environment(AppModel.self) private var model
     @State private var isPresented = false
 
     var body: some View {
@@ -19,7 +20,9 @@ struct SonosSpeakersButton: View {
         .glassEffect(.regular.interactive(), in: Circle())
         .accessibilityLabel("Speakers")
         .popover(isPresented: $isPresented, arrowEdge: .bottom) {
+            // Passed on, as every sheet here does: on a Mac the popover doesn't inherit it.
             SonosSpeakersPanel()
+                .environment(model)
                 .presentationCompactAdaptation(.popover)
         }
         #if DEBUG

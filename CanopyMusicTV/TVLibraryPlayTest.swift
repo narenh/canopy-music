@@ -1,5 +1,6 @@
 #if DEBUG
 import CanopyMusicCore
+import MediaPlayer
 @preconcurrency import MusicKit
 import SwiftUI
 
@@ -72,6 +73,15 @@ struct TVLibraryPlayTestView: View {
             return
         }
 
+        // `-libraryPlayTestVia mediaplayer|system`: the same song through another player instead,
+        // since `ApplicationMusicPlayer` took it but had no entry and stopped at once on a real TV.
+        let args = ProcessInfo.processInfo.arguments
+        if let i = args.firstIndex(of: "-libraryPlayTestVia"), i + 1 < args.count {
+            await playVia(args[i + 1], track: track, cache: cache)
+            log("done")
+            return
+        }
+
         // 2. Played by the engine, as a zone plays it ("[engine]" lines: queue set, play()
         // returned or threw, and on tvOS the off-main check that it started).
         let engine = AppleMusicEngine(cache: cache)
@@ -97,6 +107,55 @@ struct TVLibraryPlayTestView: View {
         engine.pause()
         engine.shutDown()
         log("done")
+    }
+
+    /// "mediaplayer": `MPMusicPlayerController.applicationQueuePlayer` from the song's play
+    /// parameters (tvOS has no MediaPlayer library queries, but takes play parameters). "system":
+    /// `SystemMusicPlayer`, which plays through the TV's Music app. Read every second for 15 s.
+    private func playVia(_ via: String, track: QueueTrack, cache: SongCache) async {
+        guard let song = try? await cache.song(for: track) else { log("\(via): song gone"); return }
+        let clock = ContinuousClock()
+        let start = clock.now
+        switch via {
+        case "mediaplayer":
+            guard let parameters = song.playParameters,
+                  let data = try? JSONEncoder().encode(parameters),
+                  let dictionary = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+                  let playParameters = MPMusicPlayerPlayParameters(dictionary: dictionary) else {
+                log("mediaplayer: no play parameters"); return
+            }
+            log("mediaplayer: play parameters \(dictionary)")
+            let player = MPMusicPlayerController.applicationQueuePlayer
+            player.setQueue(with: MPMusicPlayerPlayParametersQueueDescriptor(playParametersQueue: [playParameters]))
+            do {
+                try await player.prepareToPlay()
+                log("mediaplayer: prepared after \((clock.now - start).inMilliseconds)")
+            } catch {
+                log("mediaplayer: prepareToPlay threw after \((clock.now - start).inMilliseconds): \(error)")
+            }
+            player.play()
+            for second in 1...15 {
+                try? await Task.sleep(for: .seconds(1))
+                log("mediaplayer \(second) s: state=\(player.playbackState.rawValue) time=\(String(format: "%.1f", player.currentPlaybackTime)) item=\(player.nowPlayingItem?.title ?? "nil")")
+            }
+            player.stop()
+        case "system":
+            let player = SystemMusicPlayer.shared
+            player.queue = [song]
+            do {
+                try await player.play()
+                log("system: play() returned after \((clock.now - start).inMilliseconds)")
+            } catch {
+                log("system: play() threw after \((clock.now - start).inMilliseconds): \(error)")
+            }
+            for second in 1...15 {
+                try? await Task.sleep(for: .seconds(1))
+                log("system \(second) s: status=\(player.state.playbackStatus) time=\(String(format: "%.1f", player.playbackTime)) entry=\(player.queue.currentEntry?.title ?? "nil")")
+            }
+            player.pause()
+        default:
+            log("unknown -libraryPlayTestVia \(via)")
+        }
     }
 }
 

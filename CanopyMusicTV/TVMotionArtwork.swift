@@ -58,6 +58,9 @@ struct TVMotionArtworkView: View {
                 // still a stopped frame. The video itself stays opaque: see-through, it was seen
                 // to dim until the fade ended (on the iPad).
                 TVArtwork(track: track, large: true, cornerRadius: cornerRadius)
+                    // Faded as one image: otherwise its placeholder gradient, under the picture,
+                    // fades too and darkens the middle of the fade (as recorded on the iPad).
+                    .compositingGroup()
                     .opacity(isShowing && !movesShown ? 1 : 0)
                     .animation(.easeInOut(duration: Self.pauseFade), value: movesShown)
             }

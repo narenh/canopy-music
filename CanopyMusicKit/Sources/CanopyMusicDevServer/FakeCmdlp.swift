@@ -49,12 +49,14 @@ actor FakeCmdlp {
         }
         await server.appendRoute("POST /resolve") { [self] request in
             guard Self.authorized(request) else { return Self.error(401, "unauthorized", "No bearer token, or the wrong one.") }
-            struct Body: Decodable { var url: String; var zone: String }
+            // `normalize` is optional, on by default, as cmdlp's.
+            struct Body: Decodable { var url: String; var zone: String; var normalize: Bool? }
             guard let body = try? JSONDecoder().decode(Body.self, from: await request.bodyData) else {
                 return Self.error(400, "bad_json", "That isn't JSON.")
             }
-            print("[fake-cmdlp] POST /resolve \(body.url) in \(body.zone)")
-            return await resolve(body.url, zone: body.zone)
+            let normalize = body.normalize ?? true
+            print("[fake-cmdlp] POST /resolve \(body.url) in \(body.zone)\(normalize ? "" : ", not normalized")")
+            return await resolve(body.url, zone: body.zone, normalize: normalize)
         }
         await server.appendRoute("GET /tracks/*") { [self] request in
             guard Self.authorized(request) else { return Self.error(401, "unauthorized", "No bearer token, or the wrong one.") }
@@ -81,7 +83,9 @@ actor FakeCmdlp {
 
     // MARK: API
 
-    private func resolve(_ link: String, zone: String) async -> HTTPResponse {
+    /// `normalize` is only echoed (the tone is the same either way), but as cmdlp, the same link
+    /// the other way is a track of its own.
+    private func resolve(_ link: String, zone: String, normalize: Bool) async -> HTTPResponse {
         guard let url = URL(string: link), let host = url.host()?.lowercased() else {
             return Self.error(400, "bad_url", "That isn't an http(s) link.")
         }
@@ -95,7 +99,7 @@ actor FakeCmdlp {
         }
         if lower.contains("live") { return Self.error(422, "live", "That's a live stream. Paste a link to a song or video that has finished.") }
         if lower.contains("blocked") { return Self.error(502, "blocked", "YouTube asked to confirm this isn't a bot. Try again later.") }
-        let id = Self.trackID(zone: zone, link: link)
+        let id = Self.trackID(zone: zone, link: link, normalize: normalize)
         if var track = tracks[id] {
             // A failed one is tried again.
             if current(id)?.status == .failed {
@@ -112,7 +116,8 @@ actor FakeCmdlp {
         let service = sites.first { host == $0 || host.hasSuffix(".\($0)") }.map(Self.serviceName) ?? "YouTube"
         let api = CmdlpTrack(id: id, zone: zone, status: .pending, title: "Fake Song \(number)", artist: "The Fakes",
                              duration: seconds, artwork: "http://127.0.0.1:\(port)/artwork/\(id).jpg", service: service,
-                             stage: "queued", audioUrl: "http://127.0.0.1:\(port)/audio/\(id).m4a?sig=fake-\(id.prefix(6))")
+                             stage: "queued", audioUrl: "http://127.0.0.1:\(port)/audio/\(id).m4a?sig=fake-\(id.prefix(6))",
+                             normalize: normalize)
         let download: TimeInterval? = lower.contains("stuck") ? nil : lower.contains("quick") ? 2 : 8
         tracks[id] = Track(api: api, link: link, created: Date(), downloadSeconds: download, fails: lower.contains("fail"),
                            seconds: seconds, pitch: 220 * pow(2, Double(number % 12) / 12))
@@ -195,10 +200,11 @@ actor FakeCmdlp {
         return HTTPResponse(statusCode: HTTPStatusCode(status, phrase: ""), headers: [.contentType: "application/json"], body: body)
     }
 
-    /// 22 characters of base64url, the same for the same link in a zone.
-    private static func trackID(zone: String, link: String) -> String {
+    /// 22 characters of base64url, the same for the same link in a zone, normalized or not.
+    private static func trackID(zone: String, link: String, normalize: Bool) -> String {
         var hash: UInt64 = 1469598103934665603
-        for byte in "\(zone)|\(link)".utf8 { hash = (hash ^ UInt64(byte)) &* 1099511628211 }
+        // Normalized keeps the ids it always had.
+        for byte in "\(zone)|\(link)\(normalize ? "" : "|as-is")".utf8 { hash = (hash ^ UInt64(byte)) &* 1099511628211 }
         let alphabet = Array("ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_")
         var id = ""
         var value = hash

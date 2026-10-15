@@ -63,14 +63,45 @@ final class StubCmdlp: URLProtocol, @unchecked Sendable {
     @Test func resolvePostsTheLinkAndZoneWithTheToken() async throws {
         let client = client()
         StubCmdlp.handler = { _ in (200, Self.trackJSON) }
-        let track = try await client.resolve("https://soundcloud.com/forss/flickermood", zone: "z1")
+        let track = try await client.resolve("https://soundcloud.com/forss/flickermood", zone: "z1", normalize: true)
         #expect(track.id == "M9xQFZLlR5L-VkfG3YQQLp")
+        #expect(track.normalize == nil)
         let request = try #require(StubCmdlp.requests.first)
         #expect(request.method == "POST")
         #expect(request.url.absoluteString == "https://cmdlp.example.com/resolve")
         #expect(request.authorization == "Bearer cmdlp_secret")
-        let body = try #require(try JSONSerialization.jsonObject(with: request.body ?? Data()) as? [String: String])
-        #expect(body == ["url": "https://soundcloud.com/forss/flickermood", "zone": "z1"])
+        let body = try #require(try JSONSerialization.jsonObject(with: request.body ?? Data()) as? [String: Any])
+        #expect(body["url"] as? String == "https://soundcloud.com/forss/flickermood")
+        #expect(body["zone"] as? String == "z1")
+        #expect(body["normalize"] as? Bool == true)
+        #expect(body.count == 3)
+    }
+
+    /// "Normalize audio" off goes as `"normalize": false`, a JSON boolean; cmdlp's track says
+    /// which it is.
+    @Test func resolveSendsNormalizeOff() async throws {
+        let client = client()
+        StubCmdlp.handler = { _ in (200, Self.trackJSON.replacingOccurrences(of: #""status":"pending""#, with: #""status":"pending","normalize":false"#)) }
+        let track = try await client.resolve("https://youtu.be/abc", zone: "z1", normalize: false)
+        #expect(track.normalize == false)
+        let request = try #require(StubCmdlp.requests.first)
+        let text = String(decoding: request.body ?? Data(), as: UTF8.self)
+        #expect(text.contains(#""normalize":false"#))
+        let body = try #require(try JSONSerialization.jsonObject(with: request.body ?? Data()) as? [String: Any])
+        #expect(body["normalize"] as? Bool == false)
+    }
+
+    /// The hub's "Normalize audio": on until the host turns it off, and kept.
+    @Test func normalizeIsOnByDefaultAndKept() throws {
+        let suite = "CmdlpClientTests.normalize.\(UUID().uuidString)"
+        let defaults = try #require(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+        #expect(LinkNormalize.isOn(in: defaults))
+        LinkNormalize.save(false, to: defaults)
+        #expect(!LinkNormalize.isOn(in: defaults))
+        #expect(!LinkNormalize.isOn(in: try #require(UserDefaults(suiteName: suite))))
+        LinkNormalize.save(true, to: defaults)
+        #expect(LinkNormalize.isOn(in: defaults))
     }
 
     @Test func pollingAndZoneDelete() async throws {
@@ -89,7 +120,7 @@ final class StubCmdlp: URLProtocol, @unchecked Sendable {
         let client = client()
         StubCmdlp.handler = { _ in (422, #"{"error":"That's a playlist, album, or set, not one track.","reason":"playlist"}"#) }
         await #expect(throws: CmdlpError(status: 422, reason: "playlist", message: "That's a playlist, album, or set, not one track.")) {
-            try await client.resolve("https://youtube.com/playlist?list=x", zone: "z1")
+            try await client.resolve("https://youtube.com/playlist?list=x", zone: "z1", normalize: true)
         }
         StubCmdlp.handler = { _ in (404, #"{"error":"No such track.","reason":"not_found"}"#) }
         await #expect(throws: CmdlpError(status: 404, reason: "not_found", message: "No such track.")) {

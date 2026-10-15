@@ -442,11 +442,13 @@ final class TVModel {
     /// phone (`/api/host/links`); hosts' snapshots show the address and the token's last four.
     private func applyLinkSettings() {
         guard role == .hub else { return }
+        let normalize = LinkNormalize.isOn(in: defaults)
         session.linkZone = linkZone
+        session.linkNormalize = normalize
         session.linkService = currentLinkService()
         (session.engine as? LinkHandoffEngine)?.linksEnabled = { [weak session] in session?.linksEnabled ?? false }
         session.linkSetup = LinkSetup(address: defaults.string(forKey: "cmdlpBaseURL") ?? "",
-                                      tokenHint: LinkTokenHint.of(linkTokens.load()), status: linkStatus)
+                                      tokenHint: LinkTokenHint.of(linkTokens.load()), status: linkStatus, normalize: normalize)
     }
 
     /// cmdlp, once its address and a token are both set.
@@ -1031,9 +1033,15 @@ extension TVModel: HubSetupHandler {
     /// answer. This zone was never started, so there's nothing of it to keep.
     /// From a host's settings sheet: the address is saved as typed (empty turns links off), a new
     /// token goes in the TV's Keychain, then the connection is checked and the sheet shows how
-    /// it went (`LinkSetup.status`).
-    func setLinks(address: String?, token: String?, forgetToken: Bool) -> Bool {
+    /// it went (`LinkSetup.status`). "Normalize audio" (`normalize`) is saved for links added from
+    /// then on; changed on its own, the connection isn't checked again.
+    func setLinks(address: String?, token: String?, forgetToken: Bool, normalize: Bool?) -> Bool {
         guard role == .hub else { return false }
+        if let normalize { LinkNormalize.save(normalize, to: defaults) }
+        if address == nil, token == nil, !forgetToken {
+            applyLinkSettings()
+            return true
+        }
         if let address { defaults.set(address.trimmingCharacters(in: .whitespacesAndNewlines), forKey: "cmdlpBaseURL") }
         if forgetToken {
             linkTokens.save(nil)

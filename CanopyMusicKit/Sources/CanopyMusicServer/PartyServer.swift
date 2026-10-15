@@ -486,11 +486,12 @@ public final class PartyServer: Sendable {
             try .json(SpotifyConflictReply(zone: await handler.checkSpotifyConflict()))
         }
         // An Apple TV hub's link settings, from the settings sheet: the cmdlp address and (when
-        // typed) the token, or `forgetToken`. The token is never sent back: hosts' snapshots carry
-        // its last four characters (`linkSetup`), and the TV's check of the connection.
+        // typed) the token, or `forgetToken`; and `normalize` (the hub's "Normalize audio"). The
+        // token is never sent back: hosts' snapshots carry its last four characters (`linkSetup`),
+        // and the TV's check of the connection.
         await hostSetup("POST /api/host/links") { body, _, handler in
             let ok = await handler.setLinks(address: body.address.map { String($0.prefix(300)) }, token: body.token.map { String($0.prefix(200)) },
-                                            forgetToken: body.forgetToken == true)
+                                            forgetToken: body.forgetToken == true, normalize: body.normalize)
             return HTTPResponse(statusCode: ok ? .noContent : .notImplemented)
         }
         // Another zone already plays from this Spotify account: the TV shows that zone as a
@@ -818,6 +819,8 @@ struct HostSetupBody: Decodable {
     /// cmdlp's API token, when the host typed a new one.
     var token: String?
     var forgetToken: Bool?
+    /// The hub's "Normalize audio" for links (`LinkNormalize`); absent keeps it.
+    var normalize: Bool?
 }
 
 /// The hub's Sonos rooms, from a host's phone.

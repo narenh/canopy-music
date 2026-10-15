@@ -318,10 +318,14 @@ public final class PartySession {
     /// This zone's name at cmdlp, which keeps each zone's downloads apart; deleted when the zone
     /// ends (`end`). Set by the app, which keeps it across relaunches.
     @ObservationIgnored public var linkZone: String?
+    /// Whether lookups ask cmdlp to normalize the link's loudness (`LinkNormalize`). Set by the
+    /// app from the hub's setting; a change applies to links looked up after it.
+    @ObservationIgnored public var linkNormalize = true
     /// cmdlp's latest on each link this zone has looked up, by cmdlp id: the audio's address
     /// for a phone's pick (phones never get it).
     @ObservationIgnored var linkRecords: [String: CmdlpTrack] = [:]
-    /// Lookups in flight or just done, by link, so a phone asking again joins the one running.
+    /// Lookups in flight or just done, by link and `linkNormalize`, so a phone asking again joins
+    /// the one running (and not one from before the host changed the setting).
     @ObservationIgnored var linkLookups: [String: Task<CmdlpTrack, any Error>] = [:]
     /// Links added while still downloading, by cmdlp id: each joins Up Next once it's ready.
     /// Saved beside the queue (`saveLinkPreparations`).

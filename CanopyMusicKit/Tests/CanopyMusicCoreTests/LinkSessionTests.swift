@@ -15,7 +15,7 @@ final class FakeLinkService: LinkService {
     var lookupDelay: Duration = .zero
     /// `track(id:)` answers this instead (cmdlp unreachable, or a 404).
     var trackError: (any Error)?
-    private(set) var resolveCalls: [(url: String, zone: String)] = []
+    private(set) var resolveCalls: [(url: String, zone: String, normalize: Bool)] = []
     private(set) var trackCalls = 0
     private(set) var deletedZones: [String] = []
 
@@ -33,8 +33,8 @@ final class FakeLinkService: LinkService {
                    audioUrl: "https://cmdlp.example/audio/\(id).m4a?sig=secret-\(id)", error: error)
     }
 
-    func resolve(_ url: String, zone: String) async throws -> CmdlpTrack {
-        resolveCalls.append((url, zone))
+    func resolve(_ url: String, zone: String, normalize: Bool) async throws -> CmdlpTrack {
+        resolveCalls.append((url, zone, normalize))
         if lookupDelay > .zero { try await Task.sleep(for: lookupDelay) }
         if let refusal = refusals[url] { throw refusal }
         guard let track = tracks[url] else { throw CmdlpError(status: 422, reason: "unsupported_link", message: "Not one of the five sites.") }
@@ -153,6 +153,23 @@ final class FakeLinkService: LinkService {
         #expect(found.link?.audioURL == nil)
         #expect(service.resolveCalls.map(\.zone) == ["zone-1"])
         #expect(service.resolveCalls.map(\.url) == [Self.youtube])
+        #expect(service.resolveCalls.map(\.normalize) == [true])
+    }
+
+    /// "Normalize audio" off: lookups ask for the link as it is. A lookup kept from before the
+    /// change isn't joined, since cmdlp makes that a track of its own.
+    @Test func lookupsCarryTheHubsNormalizeSetting() async throws {
+        let service = FakeLinkService()
+        service.add(Self.youtube, id: "L1", steps: [])
+        let session = try await session(service)
+        #expect(session.linkNormalize)
+        _ = try await session.resolveLink(Self.youtube)
+        _ = try await session.resolveLink(Self.youtube)
+        session.linkNormalize = false
+        _ = try await session.resolveLink(Self.youtube)
+        _ = try await session.resolveLink(Self.youtube)
+        #expect(service.resolveCalls.map(\.normalize) == [true, false])
+        #expect(service.resolveCalls.map(\.url) == [Self.youtube, Self.youtube])
     }
 
     @Test func cmdlpsRefusalReachesThePhone() async throws {

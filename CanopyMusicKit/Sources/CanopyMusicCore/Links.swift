@@ -103,10 +103,13 @@ public struct CmdlpTrack: Codable, Equatable, Sendable {
     public var progress: Progress?
     public var audioUrl: String?
     public var error: String?
+    /// Whether cmdlp brought its loudness to about Apple Music's (`LinkNormalize`); nil from
+    /// cmdlp versions before the choice existed.
+    public var normalize: Bool?
 
     public init(id: String, zone: String? = nil, status: LinkTrack.Status, title: String? = nil, artist: String? = nil,
                 duration: Double? = nil, artwork: String? = nil, service: String? = nil, stage: String? = nil,
-                progress: Progress? = nil, audioUrl: String? = nil, error: String? = nil) {
+                progress: Progress? = nil, audioUrl: String? = nil, error: String? = nil, normalize: Bool? = nil) {
         self.id = id
         self.zone = zone
         self.status = status
@@ -119,6 +122,7 @@ public struct CmdlpTrack: Codable, Equatable, Sendable {
         self.progress = progress
         self.audioUrl = audioUrl
         self.error = error
+        self.normalize = normalize
     }
 
     public var link: LinkTrack {
@@ -295,8 +299,9 @@ public struct CmdlpError: Error, Equatable, LocalizedError {
 
 /// What the hub asks of cmdlp. `CmdlpClient` in the apps; a fake in tests.
 public protocol LinkService: Sendable {
-    /// Looks the link up and starts downloading it, in `zone`. The same link again is the same track.
-    func resolve(_ url: String, zone: String) async throws -> CmdlpTrack
+    /// Looks the link up and starts downloading it, in `zone`. The same link again is the same
+    /// track; with the other `normalize`, a track of its own (`LinkNormalize`).
+    func resolve(_ url: String, zone: String, normalize: Bool) async throws -> CmdlpTrack
     func track(id: String) async throws -> CmdlpTrack
     /// The zone's party is over: its downloads stop and its files go.
     func deleteZone(_ zone: String) async throws
@@ -324,9 +329,11 @@ public struct CmdlpClient: LinkService {
         return url
     }
 
-    public func resolve(_ url: String, zone: String) async throws -> CmdlpTrack {
+    public func resolve(_ url: String, zone: String, normalize: Bool) async throws -> CmdlpTrack {
+        // Always sent, so the hub's choice holds whatever cmdlp's default; older cmdlps ignore it.
+        struct Body: Encodable { var url: String; var zone: String; var normalize: Bool }
         // A lookup can take up to 90 s on cmdlp's side.
-        try await call("POST", "/resolve", body: ["url": url, "zone": zone], timeout: 100)
+        return try await call("POST", "/resolve", body: Body(url: url, zone: zone, normalize: normalize), timeout: 100)
     }
 
     public func track(id: String) async throws -> CmdlpTrack {
@@ -359,7 +366,7 @@ public struct CmdlpClient: LinkService {
         }
     }
 
-    private func call<T: Decodable>(_ method: String, _ path: String, body: [String: String]? = nil, timeout: TimeInterval) async throws -> T {
+    private func call<T: Decodable>(_ method: String, _ path: String, body: (any Encodable)? = nil, timeout: TimeInterval) async throws -> T {
         var request = URLRequest(url: baseURL.appending(path: path), timeoutInterval: timeout)
         request.httpMethod = method
         request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
@@ -440,11 +447,35 @@ public struct LinkSetup: Codable, Equatable, Sendable {
     public var address: String
     public var tokenHint: String?
     public var status: String?
+    /// Whether links are brought to about Apple Music's loudness (`LinkNormalize`); nil from
+    /// hubs before the choice existed.
+    public var normalize: Bool?
 
-    public init(address: String, tokenHint: String?, status: String? = nil) {
+    public init(address: String, tokenHint: String?, status: String? = nil, normalize: Bool? = nil) {
         self.address = address
         self.tokenHint = tokenHint
         self.status = status
+        self.normalize = normalize
+    }
+}
+
+/// The hub's "Normalize audio" choice for links, on unless the host turns it off. On, cmdlp
+/// measures each link's loudness and re-encodes it to about Apple Music's level (a few seconds
+/// more per song); off, it copies the site's AAC as it is, so links are ready sooner but play at
+/// the site's own loudness. Sent with every lookup (`LinkService.resolve`): the same link the
+/// other way is a track of its own, so a change applies to links added after it, and those
+/// already queued keep theirs. Saved per hub, beside its other link settings.
+public enum LinkNormalize {
+    /// The iPad, Mac, and Apple TV hubs keep it under one name.
+    static let defaultsKey = "cmdlpNormalize"
+
+    /// The saved choice; on when there's none.
+    public static func isOn(in defaults: UserDefaults) -> Bool {
+        defaults.object(forKey: defaultsKey) as? Bool ?? true
+    }
+
+    public static func save(_ isOn: Bool, to defaults: UserDefaults) {
+        defaults.set(isOn, forKey: defaultsKey)
     }
 }
 

@@ -41,12 +41,15 @@ extension PartySession {
             throw LinkRefusal.unavailable
         }
         guard engine.canPlayLinks else { throw LinkRefusal.notHere }
-        let key = url.absoluteString
+        let link = url.absoluteString
+        // Normalized or not, the same link is two tracks at cmdlp.
+        let normalize = linkNormalize
+        let key = "\(normalize ? "normalized" : "as-is") \(link)"
         let lookup: Task<CmdlpTrack, any Error>
         if let running = linkLookups[key] {
             lookup = running
         } else {
-            lookup = Task { try await service.resolve(key, zone: zone) }
+            lookup = Task { try await service.resolve(link, zone: zone, normalize: normalize) }
             linkLookups[key] = lookup
             // Kept a while for a phone asking again; cmdlp answers the same link the same anyway.
             Task { [weak self] in

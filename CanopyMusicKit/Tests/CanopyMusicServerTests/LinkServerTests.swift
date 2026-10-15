@@ -16,13 +16,15 @@ import Testing
         var refusal: CmdlpError?
         var status: LinkTrack.Status = .ready
         private(set) var resolved: [String] = []
+        private(set) var normalized: [Bool] = []
 
         static let track = CmdlpTrack(id: "L1L1L1L1L1L1L1L1L1L1L1", zone: "zone-1", status: .pending, title: "Pasted", artist: "Uploader",
                                       duration: 180, artwork: "https://i.ytimg.com/vi/x/hqdefault.jpg", service: "YouTube", stage: "queued",
                                       audioUrl: "https://cmdlp.example/audio/L1L1L1L1L1L1L1L1L1L1L1.m4a?sig=TOPSECRETSIG")
 
-        func resolve(_ url: String, zone: String) async throws -> CmdlpTrack {
+        func resolve(_ url: String, zone: String, normalize: Bool) async throws -> CmdlpTrack {
             resolved.append(url)
+            normalized.append(normalize)
             if lookupDelay > .zero { try await Task.sleep(for: lookupDelay) }
             if let refusal { throw refusal }
             return Self.track
@@ -39,15 +41,15 @@ import Testing
     }
 
     final class Setup: HubSetupHandler {
-        var links: [(address: String?, token: String?, forget: Bool)] = []
+        var links: [(address: String?, token: String?, forget: Bool, normalize: Bool?)] = []
         func chooseService(_ service: String) -> Bool { true }
         func setSpotifyClientID(_ clientID: String) {}
         func setSpotifySignInPage(_ typed: String) async -> SpotifyRelay.PageCheck { .ok }
         func chooseSpotifyDevice(id: String) -> Bool { true }
         func checkSpotifyConflict() async -> String? { nil }
         func joinSpotifyConflict() -> String? { nil }
-        func setLinks(address: String?, token: String?, forgetToken: Bool) -> Bool {
-            links.append((address, token, forgetToken))
+        func setLinks(address: String?, token: String?, forgetToken: Bool, normalize: Bool?) -> Bool {
+            links.append((address, token, forgetToken, normalize))
             return true
         }
     }
@@ -283,5 +285,37 @@ import Testing
         let (forget, _) = try await post("\(hub.base)/api/host/links", ["key": "secret", "forgetToken": true])
         #expect(forget == 204)
         #expect(setup.links.last?.forget == true)
+        #expect(setup.links.allSatisfy { $0.normalize == nil })
+    }
+
+    /// An Apple TV's "Normalize audio", from a host's settings sheet: on its own, the address
+    /// and token untouched; hosts' snapshots say which it is.
+    @Test func aTVsNormalizeSettingComesFromHosts() async throws {
+        let hub = try await hub(port: 18961)
+        defer { Task { await hub.stop() } }
+        let setup = Setup()
+        hub.session.setupHandler = setup
+        let (denied, _) = try await post("\(hub.base)/api/host/links", ["key": "wrong", "normalize": false])
+        #expect(denied == 403)
+        #expect(setup.links.isEmpty)
+        let (off, _) = try await post("\(hub.base)/api/host/links", ["key": "secret", "normalize": false])
+        #expect(off == 204)
+        let (on, _) = try await post("\(hub.base)/api/host/links", ["key": "secret", "normalize": true])
+        #expect(on == 204)
+        #expect(setup.links.map(\.normalize) == [false, true])
+        #expect(setup.links.allSatisfy { $0.address == nil && $0.token == nil && !$0.forget })
+        hub.session.linkSetup = LinkSetup(address: "https://cmdlp.example", tokenHint: "1234", normalize: false)
+        let host = try await firstSnapshot("ws://127.0.0.1:18961/ws?key=secret")
+        #expect(host.contains("\"normalize\":false"))
+    }
+
+    /// The hub's setting goes with each phone's lookup.
+    @Test func aPhonesLookupCarriesTheHubsNormalizeSetting() async throws {
+        let hub = try await hub(port: 18962)
+        defer { Task { await hub.stop() } }
+        hub.session.linkNormalize = false
+        let (status, _) = try await post("\(hub.base)/api/link", ["url": "https://youtu.be/abc", "clientId": "phone-1"])
+        #expect(status == 200)
+        #expect(hub.links.normalized == [false])
     }
 }

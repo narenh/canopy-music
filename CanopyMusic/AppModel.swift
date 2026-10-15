@@ -310,6 +310,7 @@ final class AppModel {
         }
         #endif
         linkTokenHint = LinkTokenHint.of(linkTokens.load())
+        linkNormalize = LinkNormalize.isOn(in: defaults)
         if let zone = defaults.string(forKey: "cmdlpZone"), LinkZone.isValid(zone) {
             linkZone = zone
         } else {
@@ -489,6 +490,15 @@ final class AppModel {
     }
     /// The token's last four characters, all Settings shows of it; nil when there's none.
     private(set) var linkTokenHint: String?
+    /// "Normalize audio": cmdlp brings links to about Apple Music's loudness (`LinkNormalize`).
+    /// On unless the host turns it off; applies to links added after a change.
+    var linkNormalize: Bool {
+        didSet {
+            guard linkNormalize != oldValue else { return }
+            LinkNormalize.save(linkNormalize, to: defaults)
+            applyLinkSettings()
+        }
+    }
     @ObservationIgnored private let linkTokens: any LinkTokenStore = KeychainLinkTokenStore()
     /// This zone's name at cmdlp: kept across relaunches, and a new one for each zone (`clearZone`).
     @ObservationIgnored private var linkZone: String
@@ -515,6 +525,7 @@ final class AppModel {
     private func applyLinkSettings() {
         guard !isDisplay else { return }
         session.linkZone = linkZone
+        session.linkNormalize = linkNormalize
         if let base = CmdlpClient.baseURL(linkBaseURL), let token = linkTokens.load() {
             session.linkService = CmdlpClient(baseURL: base, token: token)
         } else {

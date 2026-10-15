@@ -495,7 +495,8 @@ struct NowPlayingView: View {
                 HStack(alignment: .firstTextBaseline, spacing: 12) {
                     if item != nil {
                         EqualizerBars(isAnimating: session.isPlaying)
-                            .frame(width: 24, height: 24)
+                            // Trying 16 × 22 (was 24 × 24): lighter beside the title.
+                            .frame(width: 16, height: 22)
                             // On the title's baseline, as a SwiftUI shape would be (a UIKit
                             // view's baseline isn't its bottom).
                             .alignmentGuide(.firstTextBaseline) { $0[.bottom] }

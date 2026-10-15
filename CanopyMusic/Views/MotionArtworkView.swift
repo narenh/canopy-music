@@ -52,7 +52,7 @@ struct MotionArtworkView: View {
             if let url {
                 LoopingVideo(
                     url: url, pixels: side * displayScale,
-                    isActive: !inBackground && !isHidden && !screenCovered, isPlaying: isPlaying
+                    isActive: !inBackground && !isHidden && !screenCovered && !LowPowerMode.shared.isOn, isPlaying: isPlaying
                 ) {
                     withAnimation(.easeIn(duration: 0.8)) { isShowing = true }
                 }
@@ -88,10 +88,22 @@ struct MotionArtworkView: View {
             startIfReady()
         }
         .onChange(of: waits) { startIfReady() }
+        // Low Power Mode: the video fades out to the still art and goes; it comes back without.
+        .onChange(of: LowPowerMode.shared.isOn) { _, lowPower in
+            guard lowPower else {
+                // Back before it had gone: it fades back in.
+                if url != nil { withAnimation(.easeIn(duration: 0.8)) { isShowing = true } }
+                startIfReady()
+                return
+            }
+            withAnimation(.easeOut(duration: 0.8)) { isShowing = false } completion: {
+                if LowPowerMode.shared.isOn { url = nil }
+            }
+        }
     }
 
     private func startIfReady() {
-        if !waits, url == nil { url = found }
+        if !waits, !LowPowerMode.shared.isOn, url == nil { url = found }
     }
 }
 

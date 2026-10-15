@@ -141,8 +141,8 @@ enum BlurredArtwork {
 /// The background art's slow drift (`BackgroundDrift` has the maths): `content` is laid out as a
 /// square as big as the window's longer side, centred, and moved, turned and scaled so no edge
 /// of it ever shows, in any window shape. It keeps going through song changes, and stands still
-/// where it is while `moves` is false (the music paused, or hidden), carrying on from there
-/// (`DriftClock`); Reduce Motion stops it (the art then rests at 1.3×, centred).
+/// where it is while `moves` is false (the music paused, or hidden) or in Low Power Mode, carrying
+/// on from there (`DriftClock`); Reduce Motion stops it (the art then rests at 1.3×, centred).
 struct ArtworkDrift<Content: View>: View {
     var moves = true
     @ViewBuilder let content: Content
@@ -185,7 +185,7 @@ struct ArtworkDrift<Content: View>: View {
 
     var body: some View {
         let strength = reduceMotion ? 0 : Self.strength
-        let runs = moves && !screenCovered && strength > 0
+        let runs = moves && !screenCovered && !LowPowerMode.shared.isOn && strength > 0
         GeometryReader { geo in
             let (width, height) = (Double(geo.size.width), Double(geo.size.height))
             let side = BackgroundDrift.artSide(width: width, height: height)

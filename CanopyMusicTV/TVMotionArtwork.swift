@@ -17,6 +17,8 @@ struct TVMotionArtworkView: View {
     var isPlaying: Bool
     var cornerRadius: CGFloat
 
+    /// The video found for the song, until it can start (not in Low Power Mode).
+    @State private var found: URL?
     @State private var url: URL?
     @State private var isShowing = false
     /// The artwork's side, for the most video worth streaming.
@@ -32,7 +34,7 @@ struct TVMotionArtworkView: View {
             if let url {
                 TVLoopingVideo(
                     url: url, pixels: side * displayScale,
-                    isActive: scenePhase != .background && !screenCovered, isPlaying: isPlaying
+                    isActive: scenePhase != .background && !screenCovered && !LowPowerMode.shared.isOn, isPlaying: isPlaying
                 ) {
                     withAnimation(.easeIn(duration: 0.8)) { isShowing = true }
                 }
@@ -45,6 +47,7 @@ struct TVMotionArtworkView: View {
         .allowsHitTesting(false)
         .accessibilityHidden(true)
         .task(id: track?.id) {
+            found = nil
             url = nil
             isShowing = false
             guard MotionArtwork.isEnabled, let track else { return }
@@ -53,16 +56,34 @@ struct TVMotionArtworkView: View {
             // simulator (which can't reach Apple Music) or with any service.
             let args = ProcessInfo.processInfo.arguments
             if let i = args.firstIndex(of: "-motionArtworkTestURL"), i + 1 < args.count {
-                url = URL(string: args[i + 1])
+                found = URL(string: args[i + 1])
+                startIfReady()
                 return
             }
             #endif
             // Nil for Spotify and demo hubs. A display TV has its own (service only, Apple Music songs).
             guard let lookup = catalog.motionArtwork else { return }
-            let found = await lookup.videoURL(for: track)
+            let video = await lookup.videoURL(for: track)
             guard !Task.isCancelled else { return }
-            url = found
+            found = video
+            startIfReady()
         }
+        // Low Power Mode: the video fades out to the still art and goes; it comes back without.
+        .onChange(of: LowPowerMode.shared.isOn) { _, lowPower in
+            guard lowPower else {
+                // Back before it had gone: it fades back in.
+                if url != nil { withAnimation(.easeIn(duration: 0.8)) { isShowing = true } }
+                startIfReady()
+                return
+            }
+            withAnimation(.easeOut(duration: 0.8)) { isShowing = false } completion: {
+                if LowPowerMode.shared.isOn { url = nil }
+            }
+        }
+    }
+
+    private func startIfReady() {
+        if !LowPowerMode.shared.isOn, url == nil { url = found }
     }
 }
 

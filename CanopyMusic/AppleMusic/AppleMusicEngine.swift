@@ -56,7 +56,17 @@ final class AppleMusicEngine: PlaybackEngine {
     // read on another thread (`PlayerReading.takeOffMain`), one read at a time, and a read that
     // doesn't come back stops the reads (the music shows paused) rather than freeze the TV. Its
     // start counts only once a read finds it playing, within `libraryStartDeadline`; otherwise
-    // `play` throws, and the session moves on past it. Not yet tried on a real Apple TV.
+    // `play` throws, and the session moves on past it.
+    //
+    // On a real Apple TV such a song plays, and its status and time read fine, but its current
+    // entry never arrives: the player service's now-playing reply names the user's library by
+    // account (DSID), and this app, which can't read the TV's accounts, has only a library with
+    // none, so MediaPlayer drops the reply. So while the player has no entry, which of our songs
+    // it's on comes from our own order and the clock (`EntrylessTracker`): the move to the staged
+    // song is the time starting over at the current one's end, and the end is the time reaching
+    // its length. An entry that does arrive still says it first. A library song that halts on its
+    // own within seconds of starting (the first try after an install once did) is started once
+    // more; a second time, `play` throws, or past `play`, the session moves on.
     #if os(tvOS)
     private static let readsLibrarySongsOffMain = true
     #else
@@ -64,12 +74,22 @@ final class AppleMusicEngine: PlaybackEngine {
     #endif
     static let readDeadline: TimeInterval = 5
     static let libraryStartDeadline: TimeInterval = 8
+    /// A library song watched in `play` until it has played this far.
+    static let librarySettle: TimeInterval = 2
     private var currentIsLibraryOnly = false
     private var stagedIsLibraryOnly = false
     private var readsOffMain: Bool { Self.readsLibrarySongsOffMain && (currentIsLibraryOnly || stagedIsLibraryOnly) }
     /// A read on another thread is out; its answer counts only for the `play` it was made for.
     private var isReading = false
     private var readGeneration = 0
+    private var tracker = EntrylessTracker()
+    /// The song we take the player to be on, and the one staged after it.
+    private var currentTrack: QueueTrack?
+    private var stagedTrack: QueueTrack?
+    /// The current library song was started once more after stopping early.
+    private var retriedEarlyStop = false
+    /// Counts starts: one overtaken by a later one while it fetched its song gives up.
+    private var startGeneration = 0
 
     // Playback state as of the last poll. Reading `ApplicationMusicPlayer` goes to an
     // out-of-process service; the UI asks for the time every frame (lyrics takeover), so it
@@ -128,8 +148,20 @@ final class AppleMusicEngine: PlaybackEngine {
     }
 
     func play(_ track: QueueTrack) async throws {
+        try await start(track, retryingEarlyStop: true)
+    }
+
+    /// `play`, or (`retryingEarlyStop` false) a library song's second start after it stopped
+    /// early, which gets no third.
+    private func start(_ track: QueueTrack, retryingEarlyStop: Bool) async throws {
+        startGeneration += 1
+        let generation = startGeneration
         let song = try await cache.song(for: track)
+        // A later start has begun meanwhile (the session gave up on this one): it's the one wanted.
+        guard generation == startGeneration else { throw CancellationError() }
         stagedTrackID = nil
+        stagedTrack = nil
+        retriedEarlyStop = !retryingEarlyStop
         reportedEnd = false
         pausedByUs = false
         sawPlaying = false
@@ -147,7 +179,7 @@ final class AppleMusicEngine: PlaybackEngine {
         do {
             try await player.play()
             log("play(): returned after \((ContinuousClock.now - start).inMilliseconds)")
-            currentEntryID = readsOffMain ? try await startedEntry(of: track) : player.queue.currentEntry?.id
+            currentEntryID = readsOffMain ? try await startedLibrarySong(track, song) : player.queue.currentEntry?.id
         } catch {
             log("play(): threw after \((ContinuousClock.now - start).inMilliseconds): \(error)")
             // Don't read the player back after a failure (nor if the session gave up waiting and
@@ -159,17 +191,57 @@ final class AppleMusicEngine: PlaybackEngine {
         }
         isReplacingQueue = false
         pollingPaused = false
+        currentTrack = track
         cache(playing: true, time: 0)
-        cachedDuration = song.duration
+        cachedDuration = song.duration ?? track.duration
+        tracker.start(duration: cachedDuration, at: Date())
         noteCommand()
     }
 
-    /// A song only in the library, on tvOS: its entry once a read on another thread finds the
-    /// player playing, within `libraryStartDeadline` of now. Past it (the player not answering,
-    /// or never playing) it didn't start: `AppleMusicError.libraryPlaybackStalled`.
-    private func startedEntry(of track: QueueTrack) async throws -> String? {
-        let start = ContinuousClock.now
+    /// A song only in the library, on tvOS: its entry (if it comes) once a read on another
+    /// thread finds the player playing, then the first `librarySettle` seconds of it watched. One
+    /// that halts on its own then is started once more (unless it's already the second start),
+    /// all within `libraryStartDeadline` of now. Past it (the player not answering, or never
+    /// playing), or halting again, it didn't start: `AppleMusicError.libraryPlaybackStalled`.
+    private func startedLibrarySong(_ track: QueueTrack, _ song: Song) async throws -> String? {
         let deadline = Date().addingTimeInterval(Self.libraryStartDeadline)
+        let entry = try await startedEntry(of: track, by: deadline)
+        guard try await stoppedEarly(track, by: deadline) else { return entry }
+        guard !retriedEarlyStop else { throw AppleMusicError.libraryPlaybackStalled }
+        retriedEarlyStop = true
+        log("library song \(track.title): starting it once more")
+        player.queue = ApplicationMusicPlayer.Queue(for: [song])
+        try await player.play()
+        let again = try await startedEntry(of: track, by: deadline)
+        guard try await stoppedEarly(track, by: deadline) else { return again }
+        throw AppleMusicError.libraryPlaybackStalled
+    }
+
+    /// Whether the song, just found playing, halts on its own before it has played
+    /// `librarySettle` seconds (or `deadline`). A read that doesn't come back leaves it to `poll`.
+    private func stoppedEarly(_ track: QueueTrack, by deadline: Date) async throws -> Bool {
+        while deadline.timeIntervalSinceNow > 0 {
+            guard let reading = await PlayerReading.takeOffMain(within: min(Self.readDeadline, deadline.timeIntervalSinceNow)),
+                  !pausedByUs else { return false }
+            switch reading.status {
+            case .playing where reading.time >= Self.librarySettle:
+                return false
+            case .stopped, .paused:
+                log("library song \(track.title): \(reading.status) on its own at t=\(reading.time)")
+                return true
+            default:
+                break
+            }
+            try await Task.sleep(for: .milliseconds(250))
+        }
+        return false
+    }
+
+    /// A song only in the library, on tvOS: its entry once a read on another thread finds the
+    /// player playing, by `deadline`. Past it (the player not answering, or never playing) it
+    /// didn't start: `AppleMusicError.libraryPlaybackStalled`.
+    private func startedEntry(of track: QueueTrack, by deadline: Date) async throws -> String? {
+        let start = ContinuousClock.now
         var last: PlayerReading?
         while deadline.timeIntervalSinceNow > 0 {
             guard let reading = await PlayerReading.takeOffMain(within: min(Self.readDeadline, deadline.timeIntervalSinceNow)) else {
@@ -195,6 +267,8 @@ final class AppleMusicEngine: PlaybackEngine {
         log("stage \(track?.title ?? "nil")\(playerDetails)")
         defer { log("staged;\(playerDetails)") }
         stagedTrackID = nil
+        stagedTrack = nil
+        tracker.unstage()
         stagedIsLibraryOnly = track?.isLibraryOnly ?? false
         guard let track else { return }
         // A song only in the library is fetched from it by its library id, which is its id here
@@ -202,6 +276,8 @@ final class AppleMusicEngine: PlaybackEngine {
         let song = try await cache.song(for: track)
         try await player.queue.insert(song, position: .afterCurrentEntry)
         stagedTrackID = track.id
+        stagedTrack = track
+        tracker.stage(duration: song.duration ?? track.duration)
     }
 
     func resume() async throws {
@@ -222,17 +298,28 @@ final class AppleMusicEngine: PlaybackEngine {
     func skipToStaged() async throws {
         guard stagedTrackID != nil else { throw CancellationError() }
         try await player.skipToNextEntry()
+        // A song only in the library, on tvOS: no entry will say the player got there, nor will
+        // the clock (the time starts over mid-song), so the skip itself does.
+        if Self.readsLibrarySongsOffMain, stagedIsLibraryOnly, stagedTrackID != nil {
+            log("skipped to the staged library song")
+            cache(playing: cachedPlaying, time: 0)
+            advanced()
+            tracker.moved(to: 0, at: Date())
+            onEvent?(.advancedToStaged)
+        }
         noteCommand()
     }
 
     func restartCurrent() {
         cache(playing: cachedPlaying, time: 0)
+        tracker.moved(to: 0, at: Date())
         _player?.restartCurrentEntry()
         noteCommand()
     }
 
     func seek(to time: TimeInterval) {
         cache(playing: cachedPlaying, time: time)
+        tracker.moved(to: time, at: Date())
         _player?.playbackTime = time
         noteCommand()
     }
@@ -283,16 +370,20 @@ final class AppleMusicEngine: PlaybackEngine {
         // Before any event: the session snapshots the time as it handles them.
         cache(playing: status == .playing, time: time)
         let duration = reading.duration
-        cachedDuration = duration
+        // A library song's entry, with its length, may never come (tvOS): its length from the
+        // library, for pacing.
+        cachedDuration = duration ?? tracker.duration
+        let verdict = Self.readsLibrarySongsOffMain
+            ? tracker.read(Self.activity(status), time: time, at: Date(), pausedByUs: pausedByUs) : nil
         if reading.entryID != currentEntryID {
             let previous = currentEntryID
             currentEntryID = reading.entryID
             if let staged = stagedTrackID, reading.itemID == staged {
-                stagedTrackID = nil
-                reportedEnd = false
-                currentIsLibraryOnly = stagedIsLibraryOnly
-                stagedIsLibraryOnly = false
+                advanced()
                 onEvent?(.advancedToStaged)
+            } else if reading.itemID != nil, reading.itemID == currentTrack?.id {
+                // The entry of the song we took the player to be on (the clock or a skip moved
+                // us there first, or an entry that came late): nothing to report.
             } else if previous != nil, reading.entryID != nil, !reportedEnd {
                 // Landed on something Canopy didn't stage (a stale entry, or the system's
                 // "previous" command). Hand control back to the queue.
@@ -301,6 +392,7 @@ final class AppleMusicEngine: PlaybackEngine {
                 onEvent?(.reachedEnd)
             }
         }
+        if let verdict { act(on: verdict, entry: reading.entryID) }
 
         if status == .playing { sawPlaying = true }
         if status != lastStatus {
@@ -315,6 +407,83 @@ final class AppleMusicEngine: PlaybackEngine {
             reportedEnd = true
             log("reachedEnd")
             onEvent?(.reachedEnd)
+        }
+    }
+
+    /// The player is on the staged song now.
+    private func advanced() {
+        stagedTrackID = nil
+        reportedEnd = false
+        retriedEarlyStop = false
+        currentIsLibraryOnly = stagedIsLibraryOnly
+        stagedIsLibraryOnly = false
+        currentTrack = stagedTrack
+        stagedTrack = nil
+        tracker.advance(at: Date())
+    }
+
+    /// What the clock says (`EntrylessTracker`), on tvOS. The move on and the end count only
+    /// while the player has no entry (one that comes says them first); a library song's early
+    /// stop counts either way.
+    private func act(on verdict: EntrylessTracker.Verdict, entry: String?) {
+        switch verdict {
+        case .movedOn:
+            guard entry == nil, readsOffMain else { return }
+            if stagedTrackID != nil {
+                log("moved on to \(stagedTrack?.title ?? "?") (by the clock)")
+                advanced()
+                onEvent?(.advancedToStaged)
+            } else if !reportedEnd {
+                // Onto an entry no longer staged: as `handle` does with one it can see.
+                log("moved on past what's staged (by the clock)")
+                reportedEnd = true
+                onEvent?(.reachedEnd)
+            }
+        case .ended:
+            guard entry == nil, readsOffMain, !reportedEnd, stagedTrackID == nil else { return }
+            reportedEnd = true
+            log("reachedEnd (by the clock)")
+            onEvent?(.reachedEnd)
+        case .stoppedEarly:
+            guard currentIsLibraryOnly, let track = currentTrack else { return }
+            restartAfterEarlyStop(track)
+        }
+    }
+
+    /// A library song halted on its own just after it started: started once more, with what was
+    /// staged after it staged again. A second time, or if that fails, the session moves on.
+    private func restartAfterEarlyStop(_ track: QueueTrack) {
+        guard !retriedEarlyStop else {
+            guard !reportedEnd else { return }
+            log("library song \(track.title) stopped early again; moving on")
+            reportedEnd = true
+            onEvent?(.reachedEnd)
+            return
+        }
+        log("library song \(track.title) stopped early; starting it once more")
+        retriedEarlyStop = true
+        let staged = stagedTrack
+        let generation = startGeneration
+        Task {
+            // A pause, another song, or the session gone, since: not this song's to start.
+            guard !pausedByUs, !isShutDown, generation == startGeneration else { return }
+            do {
+                try await start(track, retryingEarlyStop: false)
+                if let staged, stagedTrackID == nil { try await stage(staged) }
+            } catch is CancellationError {
+            } catch {
+                guard generation + 1 == startGeneration, !reportedEnd else { return }
+                reportedEnd = true
+                onEvent?(.reachedEnd)
+            }
+        }
+    }
+
+    private static func activity(_ status: MusicPlayer.PlaybackStatus) -> EntrylessTracker.Activity {
+        switch status {
+        case .playing: .playing
+        case .stopped, .paused: .halted
+        default: .other
         }
     }
 

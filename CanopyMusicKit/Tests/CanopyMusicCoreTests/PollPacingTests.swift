@@ -60,6 +60,17 @@ import Testing
         #expect(PollPacing.sonos(crossfade: true).interval(playing: true, remaining: 15, sinceCommand: longAgo) == .seconds(1))
     }
 
+    @Test func spotifyReadsLessMidSongAndPaused() {
+        let spotify = PollPacing.spotify
+        #expect(spotify.interval(playing: true, remaining: 120, sinceCommand: longAgo) == .seconds(6))
+        // The last 16 s, as before: our next song's arrival is seen as quickly.
+        #expect(spotify.interval(playing: true, remaining: 15, sinceCommand: longAgo) == .seconds(3))
+        // A play that didn't take is retried within the 10 s it's allowed (`FollowRules.playRequestWindow`).
+        #expect(spotify.interval(playing: true, remaining: 180, sinceCommand: 0) == .seconds(2))
+        #expect(spotify.interval(playing: true, remaining: 180, sinceCommand: 5.9) == .seconds(2))
+        #expect(spotify.interval(playing: false, remaining: nil, sinceCommand: longAgo) == .seconds(10))
+    }
+
     @Test func fixedIgnoresEverything() {
         let fixed = PollPacing.fixed(.milliseconds(50))
         #expect(fixed.interval(playing: true, remaining: 1, sinceCommand: 0) == .milliseconds(50))

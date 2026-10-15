@@ -48,20 +48,47 @@ final class SpotifyEngine: FollowingPlaybackEngine {
     /// What Spotify is on as last seen (ours or not), and its length.
     private(set) var playerTrackID: String?
     private(set) var playerDuration: TimeInterval?
+    /// The device Spotify's player was on at the last reading (nil: no active device), once
+    /// there's been one: the device list is read again when it isn't the chosen one.
+    private(set) var playerDevice: String??
 
     /// Each poll is one Web API request, so this sets most of the request rate.
-    private static let pollInterval: Duration = .seconds(3)
+    private static let pacing = PollPacing.spotify
+    private var lastCommandAt = Date.distantPast
+    /// A poll's request is out: a command doesn't start the loop over under it.
+    private var isPolling = false
 
     init(api: SpotifyAPI) {
         self.api = api
+        startPolling()
+    }
+
+    private func startPolling() {
+        guard !isShutDown else { return }
+        poller?.cancel()
         poller = Task { [weak self] in
             while !Task.isCancelled {
-                try? await Task.sleep(for: Self.pollInterval)
+                guard let interval = self?.nextPollInterval() else { return }
+                try? await Task.sleep(for: interval)
                 // A dropped engine (a service change) stops polling.
-                guard let self else { return }
+                guard !Task.isCancelled, let self else { return }
+                self.isPolling = true
                 await self.poll()
+                self.isPolling = false
             }
         }
+    }
+
+    private func nextPollInterval() -> Duration {
+        let remaining = playerDuration.map { $0 - currentTime }
+        return Self.pacing.interval(playing: cachedPlaying, remaining: remaining, sinceCommand: Date().timeIntervalSince(lastCommandAt))
+    }
+
+    /// A request went to the player: the next reads come quickly, as before, the first without
+    /// waiting out a long paused-state wait.
+    private func noteCommand() {
+        lastCommandAt = Date()
+        if !isPolling { startPolling() }
     }
 
     var isPlaying: Bool { cachedPlaying }
@@ -81,6 +108,8 @@ final class SpotifyEngine: FollowingPlaybackEngine {
         reportedEnd = false
         attachedAwaitingFirstReading = true
         log("attached: expecting \(trackID)")
+        // The first reading soon, as for a command: until then the restored song shows paused.
+        noteCommand()
     }
 
     private func cache(playing: Bool, time: TimeInterval) {
@@ -111,6 +140,7 @@ final class SpotifyEngine: FollowingPlaybackEngine {
         playRequestedAt = Date()
         retriedPlay = false
         cache(playing: true, time: 0)
+        noteCommand()
     }
 
     func stage(_ track: QueueTrack?) async throws {
@@ -132,6 +162,7 @@ final class SpotifyEngine: FollowingPlaybackEngine {
     func skipInPlayer() async throws {
         settleUntil = Date().addingTimeInterval(1.5)
         try await api.send("POST", "/me/player/next", query: deviceQuery)
+        noteCommand()
     }
 
     func resume() async throws {
@@ -153,6 +184,7 @@ final class SpotifyEngine: FollowingPlaybackEngine {
             }
         }
         cache(playing: true, time: cachedTime)
+        noteCommand()
     }
 
     func pause() {
@@ -160,12 +192,14 @@ final class SpotifyEngine: FollowingPlaybackEngine {
         settleUntil = Date().addingTimeInterval(1.5)
         cache(playing: false, time: currentTime)
         guard hasStartedPlayback else { return }
+        noteCommand()
         Task { try? await api.send("PUT", "/me/player/pause", query: deviceQuery) }
     }
 
     func skipToStaged() async throws {
         guard stagedURI != nil else { throw CancellationError() }
         try await api.send("POST", "/me/player/next", query: deviceQuery)
+        noteCommand()
     }
 
     func restartCurrent() { seek(to: 0) }
@@ -173,6 +207,7 @@ final class SpotifyEngine: FollowingPlaybackEngine {
     func seek(to time: TimeInterval) {
         settleUntil = Date().addingTimeInterval(1.5)
         cache(playing: cachedPlaying, time: time)
+        noteCommand()
         Task { try? await api.send("PUT", "/me/player/seek", query: deviceQuery.merging(["position_ms": "\(Int(time * 1000))"]) { $1 }) }
     }
 
@@ -225,7 +260,8 @@ final class SpotifyEngine: FollowingPlaybackEngine {
             return
         }
         guard Date() > settleUntil, !isShutDown else { return }
-        log("poll: \(state?.item?.name ?? "nil") \(state?.item?.uri ?? "") playing=\(state?.is_playing ?? false) t=\((state?.progress_ms ?? 0) / 1000) | ours=\(currentURI ?? "nil") staged=\(stagedURI ?? "nil") foreign=\(foreignURI ?? "nil")")
+        playerDevice = .some(state?.device?.id)
+        log("poll:\(state?.item?.name ?? "nil") \(state?.item?.uri ?? "") playing=\(state?.is_playing ?? false) t=\((state?.progress_ms ?? 0) / 1000) | ours=\(currentURI ?? "nil") staged=\(stagedURI ?? "nil") foreign=\(foreignURI ?? "nil")")
 
         var observation: FollowRules.Observation?
         if let state {
@@ -268,6 +304,7 @@ final class SpotifyEngine: FollowingPlaybackEngine {
             struct Body: Encodable { var uris: [String] }
             settleUntil = Date().addingTimeInterval(2)
             _ = try? await api.send("PUT", "/me/player/play", query: deviceQuery, body: Body(uris: [expected]))
+            noteCommand()
         case .advancedToStaged:
             currentURI = state?.item?.uri
             stagedURI = nil

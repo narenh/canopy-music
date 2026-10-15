@@ -118,7 +118,9 @@ public final class PartySession {
     static let lateStageLead: TimeInterval = 20
 
     public private(set) var state: QueueState
-    public private(set) var isPlaying = false
+    public private(set) var isPlaying = false {
+        didSet { if isPlaying { resumeTicker() } }
+    }
     /// Set when this session mirrors another device's zone (display mode).
     @ObservationIgnored public let remote: (any ZoneRemote)?
     /// Identifies this session object in its snapshots. `state.version` counts up within it; a
@@ -306,6 +308,10 @@ public final class PartySession {
     @ObservationIgnored private let storeURL: URL?
     @ObservationIgnored private var saveTask: Task<Void, Never>?
     @ObservationIgnored private var tickTask: Task<Void, Never>?
+    /// The engine stages late, so the ticker runs whenever music plays (`resumeTicker`).
+    @ObservationIgnored private var wantsTicker = false
+    /// For tests: the late-staging ticker is running.
+    var isTicking: Bool { tickTask != nil }
     /// Drops displays that stopped checking in (`noteDisplay`), while any are listed.
     @ObservationIgnored private var displayExpiry: Task<Void, Never>?
     /// Playback as last sent to listeners, and the loop that resends it if the player drifts.
@@ -479,6 +485,7 @@ public final class PartySession {
         loadedItemID = nil
         isPlaying = false
         self.engine.onEvent = nil
+        wantsTicker = false
         tickTask?.cancel()
         tickTask = nil
         resetFollow(keepPlayerQueue: false)
@@ -538,6 +545,7 @@ public final class PartySession {
             self.saveTask = nil
             if let data = try? JSONEncoder().encode(state) { try? data.write(to: storeURL, options: .atomic) }
         }
+        wantsTicker = false
         tickTask?.cancel()
         tickTask = nil
         driftTask?.cancel()
@@ -1190,6 +1198,8 @@ public final class PartySession {
     }
 
     private func handle(_ event: PlaybackEvent) {
+        // The player may be playing again without the session having pressed Play.
+        if engine.isPlaying { resumeTicker() }
         switch event {
         case .advancedToStaged:
             var id = skippedToStagedID ?? stagedItemID
@@ -1552,11 +1562,27 @@ public final class PartySession {
         }
     }
 
+    /// The engine stages late (it can't replace a staged song): the ticker runs while music plays.
     private func startLateStagingTicker() {
+        wantsTicker = true
+        tickTask?.cancel()
+        tickTask = nil
+        resumeTicker()
+    }
+
+    /// Starts the ticker if it's wanted and stopped. Paused, nothing it watches moves (the
+    /// position stands still), so it stops then; it starts again with the music, or with any
+    /// news from the player (another app on the account playing).
+    private func resumeTicker() {
+        guard wantsTicker, tickTask == nil else { return }
         tickTask = Task { [weak self] in
             while !Task.isCancelled {
                 try? await Task.sleep(for: .seconds(self?.followTiming.tick ?? 1))
-                guard let self else { return }
+                guard !Task.isCancelled, let self else { return }
+                guard self.isPlaying || self.engine.isPlaying else {
+                    self.tickTask = nil
+                    return
+                }
                 if self.follower != nil {
                     self.followTick()
                     continue

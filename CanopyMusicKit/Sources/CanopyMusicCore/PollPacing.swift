@@ -48,6 +48,13 @@ public struct PollPacing: Equatable, Sendable {
                    afterCommand: .seconds(1), afterCommandWindow: 3, idle: .seconds(10))
     }
 
+    /// Spotify's `/me/player` (one Web API request a read): near the end as often as it always
+    /// was, a little more often after a command. Spotify's crossfade is set in its own app and
+    /// isn't known here, so the window allows for one. Other apps on the account change what
+    /// plays mid-song too; they're seen within 6 s (3 s before), or 10 s while paused.
+    public static let spotify = PollPacing(midSong: .seconds(6), nearEnd: .seconds(3), nearEndWindow: 4 + defaultCrossfade,
+                                           afterCommand: .seconds(2), afterCommandWindow: 6, idle: .seconds(10))
+
     /// The wait before the next read. `remaining`: seconds left in the song (nil when unknown);
     /// `sinceCommand`: seconds since the last command sent to the player. Mid-song, the wait
     /// ends as the song comes within `nearEndWindow` of its end, so the fast reads start on time.

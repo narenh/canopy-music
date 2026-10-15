@@ -527,25 +527,48 @@ final class AppModel {
         if let id = me.id { spotifyAuth.setAccount(userID: id) }
     }
 
+    /// When the device list was last read, and whether that read failed (`refreshSpotifyDevicesIfNeeded`).
+    @ObservationIgnored private var spotifyDevicesReadAt = Date.distantPast
+    @ObservationIgnored private var spotifyDevicesReadFailed = false
+
+    /// The party and start screens' check, every few seconds: the list is read again only when it
+    /// may have changed, so a party with its device in place asks Spotify once a minute (it was
+    /// every 10 s). At once when the chosen device isn't listed, the last read failed, or Spotify's
+    /// player turned up on another device (or none) at the engine's last reading.
+    func refreshSpotifyDevicesIfNeeded() async {
+        let playerDevice = (session.engine as? SpotifyEngine)?.playerDevice
+        let playerMoved = playerDevice.map { $0 != spotifyDeviceID } ?? false
+        guard !spotifyDevicesLoaded || !spotifyDeviceAvailable || spotifyDevicesReadFailed || playerMoved
+              || Date().timeIntervalSince(spotifyDevicesReadAt) >= 60 else { return }
+        await refreshSpotifyDevices()
+    }
+
     /// Quietly refreshes the device list; failures keep the last list rather than alerting.
+    /// Only what changed is set, so the screens showing it don't redraw for nothing.
     func refreshSpotifyDevices() async {
         struct Reply: Decodable { var devices: [SpotifyDevice] }
-        guard spotifyAuth.isSignedIn,
-              let reply = try? await spotifyAPI.get("/me/player/devices", as: Reply.self) else { return }
+        guard spotifyAuth.isSignedIn else { return }
+        spotifyDevicesReadAt = Date()
+        guard let reply = try? await spotifyAPI.get("/me/player/devices", as: Reply.self) else {
+            spotifyDevicesReadFailed = true
+            return
+        }
+        spotifyDevicesReadFailed = false
         let wasAvailable = spotifyDevicesLoaded && spotifyDeviceAvailable
-        spotifyDevices = reply.devices.filter { $0.id != nil }
+        let devices = reply.devices.filter { $0.id != nil }
+        if devices != spotifyDevices { spotifyDevices = devices }
         #if DEBUG
         print("[spotify-devices] " + reply.devices.map { "\($0.name) type=\($0.type) active=\($0.is_active) volume=\($0.supports_volume.map(String.init) ?? "?")" }.joined(separator: " | "))
         #endif
-        spotifyDevicesLoaded = true
+        if !spotifyDevicesLoaded { spotifyDevicesLoaded = true }
         // Spotify plays on one device per account. If playback moved (e.g. picked in the Spotify
         // app), follow it, so commands don't pull it back and the AirPlay button is right.
         if let active = spotifyDevices.first(where: \.is_active), active.id != spotifyDeviceID {
             spotifyDeviceID = active.id
         }
         if let id = spotifyDeviceID, let device = spotifyDevices.first(where: { $0.id == id }) {
-            spotifyDeviceName = device.name
-            spotifyDeviceType = device.type
+            if device.name != spotifyDeviceName { spotifyDeviceName = device.name }
+            if device.type != spotifyDeviceType { spotifyDeviceType = device.type }
         }
         #if DEBUG
         print("[spotify-devices] chosen=\(spotifyDeviceName ?? "nil") type=\(spotifyDeviceType ?? "nil")")

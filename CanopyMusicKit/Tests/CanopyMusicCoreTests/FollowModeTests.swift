@@ -395,6 +395,29 @@ func longSong(_ id: String) -> QueueTrack { QueueTrack(id: id, title: id, artist
         #expect(session.partySaveInfo.requestCount == 1)
     }
 
+    /// Paused, the ticker stops (the position doesn't move, so it has nothing to do); Play starts
+    /// it again, and the next song is staged on time as before. So does the player playing again
+    /// by itself (another app on the account).
+    @Test func theTickerRestsWhilePaused() async throws {
+        let engine = FakeSpotifyEngine()
+        let session = try await makeSession(engine)
+        #expect(session.isTicking)
+        session.pause()
+        await waitUntil { !session.isTicking }
+        #expect(!session.isTicking)
+        try await session.play()
+        #expect(session.isTicking)
+        engine.currentTime = 85
+        await waitUntil { engine.stages.contains("b") }
+        #expect(engine.stages.contains("b"))
+
+        session.pause()
+        await waitUntil { !session.isTicking }
+        engine.otherAppPlays(longSong("f"))
+        await settle()
+        #expect(session.isTicking)
+    }
+
     // MARK: Apple Music and demo stay as they were
 
     @Test func otherEnginesNeverFollow() async throws {

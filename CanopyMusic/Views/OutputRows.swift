@@ -11,11 +11,12 @@ struct OutputRow: View {
 
     var body: some View {
         playsOn
-        // Keep the Spotify device's status current while host mode is open (one request every 10 s).
+        // Keep the Spotify device's status current while host mode is open: read again when it
+        // may have changed, else once a minute (`refreshSpotifyDevicesIfNeeded`).
         .task(id: model.provider) {
             guard model.provider == .spotify else { return }
             while !Task.isCancelled {
-                await model.refreshSpotifyDevices()
+                await model.refreshSpotifyDevicesIfNeeded()
                 try? await Task.sleep(for: .seconds(10))
             }
         }

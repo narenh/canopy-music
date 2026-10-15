@@ -615,8 +615,10 @@ public final class ZoneConnection: ZoneRemote {
                 struct Add: Encodable { var track: QueueTrack; var name: String; var clientId: String; var itemId: UUID; var origin: String }
                 try await post("/api/add", Add(track: track, name: name, clientId: clientID, itemId: itemID, origin: "ipad"))
             case .move(let id, let after):
-                struct Move: Encodable { var id: UUID; var after: UUID? }
-                try await post("/api/move", Move(id: id, after: after))
+                // With its client ID, so the hub knows it's a display (not limited by "Limit
+                // reorders") rather than a page from before the limit.
+                struct Move: Encodable { var id: UUID; var after: UUID?; var clientId: String }
+                try await post("/api/move", Move(id: id, after: after, clientId: clientID))
             case .remove(let id):
                 // The phones' endpoint: the hub removes only requests carrying this client ID
                 // (`/api/add` records it on a display's adds), and never the locked next song.

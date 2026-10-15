@@ -710,10 +710,27 @@ private struct SettingsSheet: View {
                 }
                 Section {
                     Toggle("Queue from phones", isOn: $model.phoneQueueEnabled)
-                    Toggle("Reorder from phones", isOn: $model.phoneReorderEnabled)
                     LabeledContent("Address", value: model.localAddress)
                 } footer: {
                     Text("Guests search and queue from their phones at \(model.localAddress), which follows the zone name. Turning it off hides the QR code; Host Control and displays keep working.")
+                }
+                .listRowBackground(Color.white.opacity(0.08))
+                // Reordering in its own section: each toggle only brings in the rows below it.
+                Section {
+                    Toggle("Reorder from phones", isOn: $model.phoneReorderEnabled)
+                    if model.phoneReorderEnabled {
+                        Toggle("Limit reorders", isOn: $model.reorderLimit.isOn)
+                        if model.reorderLimit.isOn {
+                            Stepper(value: $model.reorderLimit.allowance, in: ReorderLimit.allowances) {
+                                LabeledContent("Initial balance", value: "\(model.reorderLimit.allowance)")
+                            }
+                            Picker("Refill", selection: $model.reorderLimit.refillMinutes) {
+                                ForEach(ReorderLimit.refillChoices, id: \.self) { Text(ReorderLimit.refillLabel($0)).tag($0) }
+                            }
+                        }
+                    }
+                } footer: {
+                    if model.phoneReorderEnabled && model.reorderLimit.isOn { Text(model.reorderLimit.summary) }
                 }
                 .listRowBackground(Color.white.opacity(0.08))
                 if let hostURL = model.hostControlURL {

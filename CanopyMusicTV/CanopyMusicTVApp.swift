@@ -314,6 +314,7 @@ final class TVModel {
         // Same settings, saved under the same names, as an iPad hub.
         session.phonesCanQueue = defaults.object(forKey: "phoneQueueEnabled") as? Bool ?? true
         session.phonesCanReorder = defaults.object(forKey: "phoneReorderEnabled") as? Bool ?? true
+        session.reorderLimit = ReorderLimit(defaults: defaults)
         session.displaysCanControl = defaults.object(forKey: "displaysCanControl") as? Bool ?? true
         session.screensaverWhilePlaying = defaults.bool(forKey: "screensaverWhilePlaying")
         session.wifi = WifiDetails(ssid: defaults.string(forKey: "wifiSSID") ?? "", password: defaults.string(forKey: "wifiPassword") ?? "",
@@ -330,6 +331,7 @@ final class TVModel {
             guard let self else { return }
             self.defaults.set(self.session.phonesCanQueue, forKey: "phoneQueueEnabled")
             self.defaults.set(self.session.phonesCanReorder, forKey: "phoneReorderEnabled")
+            self.session.reorderLimit.save(to: self.defaults)
             self.defaults.set(self.session.displaysCanControl, forKey: "displaysCanControl")
             self.defaults.set(self.session.screensaverWhilePlaying, forKey: "screensaverWhilePlaying")
             if let crossfade = self.session.crossfade { self.defaults.set(crossfade, forKey: "crossfade") }

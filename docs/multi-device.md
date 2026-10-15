@@ -14,12 +14,13 @@ Status: built on the `tvos-spike` branch (see "Build status" at the end). Screen
 | | Hub (iPad) | Web page, Host Control | Web page, guest | Display iPad | Display TV |
 |---|---|---|---|---|---|
 | Search and add | ✓ | ✓ | ✓ | ✓ | |
-| Reorder | ✓ | ✓ | if *Reorder from phones* | if *Reorder from phones* | |
+| Reorder | ✓ | ✓ | if *Reorder from phones*, within *Limit reorders* | if *Reorder from phones* | |
 | Play/pause, skip, scrub | ✓ | ✓ (no scrub) | | if *Playback controls on displays* | remote play/pause if that setting is on |
 | Delete anything | ✓ | ✓ | own requests | own requests | |
 | Base playlist, settings | ✓ (host mode) | ✓ | | | |
 
 - *Playback controls on displays* is a new hub setting, on by default.
+- *Limit reorders* (off by default, under *Reorder from phones*): each guest, by client ID, starts with an initial balance of reorders (1 to 10, 3 by default) and gets one back every 5, 10, 15 (default), or 30 minutes, or never, up to that balance. One drag is one reorder; moving your own song further down is free. Hosts and displays aren't limited. The hub counts and enforces it (`/api/move` with `clientId`; 403 when none are left); snapshots carry `reorderLimit` and `reorderSpends` so a guest's page shows its own balance and countdown.
 - Displays have no admin at all. Long-pressing the logo (iPad), or Menu (TV), only offers **Leave**.
 
 ## What each hub can do
@@ -51,6 +52,7 @@ Status: built on the `tvos-spike` branch (see "Build status" at the end). Screen
 | Guest QR code on the party screen | ✓ | ✓ |
 | Queue from phones | iPad, web | web |
 | Reorder from phones | iPad, web | web |
+| Limit reorders (initial balance, refill) | iPad, web | web |
 | Wi‑Fi join QR code | iPad, web | web |
 | **Hosts** | | |
 | Host Control QR code | iPad settings | Scan to host screen |
@@ -94,7 +96,7 @@ Status: built on the `tvos-spike` branch (see "Build status" at the end). Screen
   - `GET /api/host/playlists`: the hub's library. The web picker (Change base playlist, and a TV zone's first setup) filters it as you type, ignoring case and accents. Both pickers scroll as one sheet (heading, fields, search, list), so the list gets the whole screen; the search sticks to the top once the rest has scrolled off, and a fixed footer has a **Shuffle** switch (on by default) and the button (**Start the music**, or **Use this playlist**: in Change, a row selects and the button confirms; it asks first only if nothing has played yet and there are requests to clear, since mid-party the song and the requests stay). There's no shuffle in the web settings mid-party (the iPad keeps its shuffle button).
   - `GET /api/host/playlists/search?q=`: the music service's playlists, shown below the library matches while typing (as on the iPad; not for Spotify).
   - `POST /api/host/playlist`: load a base playlist (`shuffle: true` shuffles it as it loads, before anything plays, so the first song is random too). Before anything has played (a TV's setup) it starts the queue over and `play: true` starts it; mid-party the song playing plays on and the new playlist follows the requests, as on the iPad, and `play` changes nothing. Answers with how many of its songs were left out (not on the music service, e.g. iTunes Match uploads with no catalog match) and the first few titles. Snapshots carry the same (`skippedOnLoad`, `skippedTitles`) until another playlist loads: the iPad shows "3 songs aren't on Apple Music" under the base playlist (tap for the list), the web settings sheet shows it under Base playlist, and an Apple TV's host also gets it once as a toast. Debug builds' demo library has "Road trip", which leaves 4 out.
-  - `POST /api/host/settings`: zone name, queue and reorder from phones, display controls, Wi‑Fi, and `crossfade` (the party page's Crossfade button; the hub keeps its own length); any subset (the web sheet saves each change as it's made). Not the iPad's unlock PIN, which is set only on the iPad.
+  - `POST /api/host/settings`: zone name, queue and reorder from phones, `reorderLimit` (all three values), display controls, Wi‑Fi, and `crossfade` (the party page's Crossfade button; the hub keeps its own length); any subset (the web sheet saves each change as it's made). Not the iPad's unlock PIN, which is set only on the iPad.
   - `GET /api/host/details`: the Wi‑Fi details and the connected displays. The Wi‑Fi password is never in the snapshots guests get; displays' socket (`/ws?display=1`) carries the Wi‑Fi details, so they show the hub's Join Wi‑Fi code and follow changes live.
   - `POST /api/host/stop`: ends the zone (any hub), exactly as ending it on the hub does. The page asks first.
   - `POST /api/host/save-playlist`: saves the party as a playlist (`name`, `onlyRequests`). Answers `{saved: n}`, or an error with `{error: "…"}` (409 when there's nothing matching to save, 502 when the service failed). `GET /api/host/details` also carries `party`: the suggested name, how many songs would be saved either way, and where it saves.

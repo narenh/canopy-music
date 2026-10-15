@@ -3,7 +3,7 @@ import UIKit
 
 /// Host Music section rows for Spotify: who's signed in, and where music plays with a live status.
 /// On the start screen (`switchService` set) the first row, and its chevron, open the service
-/// dropdown (`ServiceDropdown`, rows right under it). Signed out, its Sign in opens Spotify's
+/// dropdown (`ServiceDropdown`, floating under it). Signed out, its Sign in opens Spotify's
 /// setup page (`openSetup`).
 struct SpotifyStatusRows: View {
     @Environment(AppModel.self) private var model
@@ -33,7 +33,7 @@ struct SpotifyStatusRows: View {
                     ServiceMenu(isOpen: $choosingService, choose: switchService) { ServiceChevron(isOpen: choosingService) }
                 }
             }
-            ServiceDropdown(isOpen: $choosingService, choose: switchService)
+            .serviceRow()
             // Spotify's "Invalid redirect URI" page can't be seen from here: say what to check.
             if model.spotifySignInClosed {
                 Text("Add \(model.spotifyRedirectURI) to your Spotify app's Redirect URIs.")
@@ -60,12 +60,12 @@ struct SpotifyStatusRows: View {
                     ServiceMenu(isOpen: $choosingService, choose: switchService) { ServiceChevron(isOpen: choosingService) }
                 }
             }
+            .serviceRow()
             .task {
                 if model.spotifyDisplayName == nil || model.spotifyAuth.accountFingerprint == nil {
                     await model.refreshSpotifyProfile()
                 }
             }
-            ServiceDropdown(isOpen: $choosingService, choose: switchService)
 
             // Where music plays: a Spotify Connect device, or Sonos rooms (`OutputRow`).
             OutputRow()

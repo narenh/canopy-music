@@ -65,7 +65,9 @@ final class TVModel {
         }
     }
 
-    private(set) var role: Role = .choosing
+    private(set) var role: Role = .choosing {
+        didSet { if role != oldValue { updateSonosDiscovery() } }
+    }
     private(set) var service: Service
     /// Spotify: sign-in from the host's phone, the device music plays on (docs/multi-device.md).
     let spotify = TVSpotify()
@@ -422,8 +424,22 @@ final class TVModel {
 
     /// Tells the host's page (hosts' snapshots) about the Sonos rooms.
     private func pushSonosSetup() {
+        // The music may have started (rooms can't be chosen any more), or moved onto Sonos.
+        updateSonosDiscovery()
         guard role == .hub else { return }
         session.sonosSetup = sonos.setup()    }
+
+    /// Sonos discovery (the `_sonos._tcp` browse, and the household read again on its news) runs
+    /// while the host's page can choose rooms (the zone waits for setup) or the zone plays on
+    /// them. Not once the music plays on this TV or a Spotify Connect device (rooms can't be
+    /// chosen then), nor on a display or the zone list. The rooms found stay listed.
+    private func updateSonosDiscovery() {
+        if role == .hub, session.isWaitingForSetup || sonos.output != nil {
+            sonos.household.start()
+        } else {
+            sonos.household.stop()
+        }
+    }
 
     /// The service's readiness for the host's setup page: Apple Music access, or Spotify's
     /// sign-in and devices (read again, at most every 3 s).

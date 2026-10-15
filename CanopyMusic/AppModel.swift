@@ -680,11 +680,15 @@ final class AppModel {
         case display
     }
 
-    private(set) var zoneRole: ZoneRole
+    private(set) var zoneRole: ZoneRole {
+        didSet { if zoneRole != oldValue { updateSonosDiscovery() } }
+    }
     var isDisplay: Bool { zoneRole == .display }
     /// The zone has started (or came back after a crash): it's recorded, the phone server runs,
     /// and it's announced with its `.local` name. False on the start screen, where nothing is.
-    private(set) var isLive = false
+    private(set) var isLive = false {
+        didSet { if isLive != oldValue { updateSonosDiscovery() } }
+    }
     /// Start was pressed and the music is starting (the button shows a spinner).
     private(set) var isStartingZone = false
     var zoneName: String {
@@ -916,7 +920,8 @@ final class AppModel {
         // Zones on the network: the list, and checking for another zone on this Spotify account.
         zoneBrowser.start()
         // Sonos rooms for the output picker and the phone's Devices (read-only until a room is chosen and played).
-        sonos.start()
+        hasStartedDiscovery = true
+        updateSonosDiscovery()
         // A sign-in from before zones announced their account (or one made offline).
         if spotifyAuth.isSignedIn, spotifyAuth.accountFingerprint == nil {
             Task { await refreshSpotifyProfile() }
@@ -1399,9 +1404,26 @@ final class AppModel {
 
     /// What a host's phone shows of the rooms (hosts' snapshots). Not on a display.
     private func publishSonosSetup() {
+        // The output may have moved onto Sonos rooms or off them.
+        updateSonosDiscovery()
         guard zoneRole != .display else { return }
         session.sonosSetup = sonosController.setup()
     }
+
+    /// Sonos discovery (the `_sonos._tcp` browse, and the household read again on its news) runs
+    /// where rooms can be chosen or the music plays on them: the zone list and start screen, and
+    /// a zone on Sonos. Not in a live zone on this device (or a Spotify Connect device), whose
+    /// party screen and phones offer no rooms, nor on a display. The rooms found stay listed.
+    private func updateSonosDiscovery() {
+        // From launch on (`startOnLaunch`), as before.
+        guard hasStartedDiscovery else { return }
+        if zoneRole != .display, !isLive || sonosController.output != nil {
+            sonos.start()
+        } else {
+            sonos.stop()
+        }
+    }
+    @ObservationIgnored private var hasStartedDiscovery = false
 
     /// Discovery has news: rooms may have new addresses, accounts may have turned up
     /// (`SonosOutputController.householdRefreshed`).

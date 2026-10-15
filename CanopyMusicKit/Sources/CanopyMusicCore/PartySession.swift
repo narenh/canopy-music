@@ -98,9 +98,6 @@ public struct PartySnapshot: Codable, Equatable, Sendable {
     /// Whether a link pasted into a phone's search is looked up as a song (`PartySession.linkService`
     /// is set). nil when it isn't, and from older hubs: a pasted link is then just a search.
     public var links: Bool?
-    /// Something everyone's phone shows for a moment, once (by `id`): a link that couldn't
-    /// download, say. nil when there's nothing new.
-    public var notice: PartyNotice?
 
     // Reorder limits (`ReorderLimit`). Optional so older pages and clients still decode.
     /// The hub's "Limit reorders" setting, on or off, for the host's settings sheet and guests'
@@ -126,17 +123,6 @@ public struct PartySnapshot: Codable, Equatable, Sendable {
     /// Apple TV hubs: the cmdlp address and the token's last four characters, for the settings
     /// sheet's Links section. Hosts only, as `musicAccess`; never the token.
     public var linkSetup: LinkSetup?
-}
-
-/// A line every phone shows once, for a moment (`PartySnapshot.notice`).
-public struct PartyNotice: Codable, Equatable, Sendable {
-    public var id: String
-    public var text: String
-
-    public init(id: String = UUID().uuidString, text: String) {
-        self.id = id
-        self.text = text
-    }
 }
 
 /// Owns the queue and keeps the player in step with it. Both the iPad UI and the phone server
@@ -295,7 +281,7 @@ public final class PartySession {
     /// An engine call that was in flight across one of those (a song change as the zone ended)
     /// belongs to the session that was: when it returns, the music is paused and nothing is
     /// recorded, saved or staged from it.
-    @ObservationIgnored private(set) var generation = 0
+    @ObservationIgnored private var generation = 0
     /// The queue item the engine currently has loaded as its current track.
     @ObservationIgnored private var loadedItemID: UUID?
     /// A skip or previous moved the queue on without the player, which is still on the song
@@ -333,29 +319,26 @@ public final class PartySession {
     /// ends (`end`). Set by the app, which keeps it across relaunches.
     @ObservationIgnored public var linkZone: String?
     /// cmdlp's latest on each link this zone has looked up, by cmdlp id: the audio's address
-    /// for a phone's pick (phones never get it), and what the queue shows.
+    /// for a phone's pick (phones never get it).
     @ObservationIgnored var linkRecords: [String: CmdlpTrack] = [:]
     /// Lookups in flight or just done, by link, so a phone asking again joins the one running.
     @ObservationIgnored var linkLookups: [String: Task<CmdlpTrack, any Error>] = [:]
-    /// The once-a-second check of each link still downloading.
+    /// Links added while still downloading, by cmdlp id: each joins Up Next once it's ready.
+    /// Saved beside the queue (`saveLinkPreparations`).
+    @ObservationIgnored var linkPreparations: [String: LinkPreparation] = [:]
+    /// What each link being prepared has shown of its download, by cmdlp id (not saved).
+    @ObservationIgnored var linkDownloads: [String: LinkDownload] = [:]
+    /// Links that failed to prepare, by the client IDs of the phones that added them, until that
+    /// phone has been told. Saved with the preparations.
+    @ObservationIgnored var linkFailures: [String: [LinkFailure]] = [:]
+    /// The once-a-second check of each link being prepared.
     @ObservationIgnored var linkPolls: [String: Task<Void, Never>] = [:]
     @ObservationIgnored var linkPollInterval: Duration = .seconds(1)
+    /// The app dropped this session (`shutdown`): the next one carries the links on.
+    @ObservationIgnored var linksStopped = false
     /// How long a phone's request waits for a lookup before it's told to ask again: well inside
     /// the server's 15 s for a request.
     @ObservationIgnored var linkLookupWait: TimeInterval = 10
-    /// How long a link still downloading at its turn is waited for before the next song plays
-    /// instead (`postponeLink`).
-    @ObservationIgnored var linkWaitAtTurn: TimeInterval = 4
-    /// Links already put back once for downloading at their turn: the next time, they're skipped.
-    @ObservationIgnored var postponedLinks: Set<UUID> = []
-    /// The current song is a link still downloading with nothing else to play: it starts as soon
-    /// as its download is ready.
-    @ObservationIgnored var awaitingLinkID: UUID?
-    /// Something every phone shows once (a link that couldn't download), for a little while.
-    public internal(set) var notice: PartyNotice? {
-        didSet { if notice != oldValue { broadcast() } }
-    }
-    @ObservationIgnored var noticeExpiry: Task<Void, Never>?
 
     /// Where the current song is. The engine's time, except after a skip or previous the player
     /// hasn't followed yet: that's the song before's, and the new song is at 0:00 until it plays.
@@ -374,7 +357,8 @@ public final class PartySession {
     /// Snapshot listeners, whether each gets the Wi‑Fi details (displays do, phones don't), and
     /// the Host Control key it connected with (hosts also get `musicAccess`).
     @ObservationIgnored private var listeners: [UUID: (continuation: AsyncStream<PartySnapshot>.Continuation, withWifi: Bool, hostKey: String?)] = [:]
-    @ObservationIgnored private let storeURL: URL?
+    /// Where the hub's queue is saved (and, beside it, reorders spent and links being prepared).
+    @ObservationIgnored let storeURL: URL?
     @ObservationIgnored private var saveTask: Task<Void, Never>?
     @ObservationIgnored private var tickTask: Task<Void, Never>?
     /// The engine stages late, so the ticker runs whenever music plays (`resumeTicker`).
@@ -409,6 +393,9 @@ public final class PartySession {
         } else {
             state = QueueState()
         }
+        // Links still being prepared, and failures not yet told: cmdlp's downloads went on
+        // while the app was gone, and are watched again once the app sets `linkService`.
+        if let storeURL { restoreLinkPreparations(beside: storeURL) }
         engine.onEvent = { [weak self] event in self?.handle(event) }
         if !engine.canReplaceStaged { startLateStagingTicker() }
         // A followed player (Spotify) or a Sonos group keeps playing while the app is gone: after
@@ -629,8 +616,10 @@ public final class PartySession {
         driftTask = nil
         displayExpiry?.cancel()
         displayExpiry = nil
-        // The zone goes on with the next session (its downloads too), which checks them again.
+        // The zone goes on with the next session (its links being prepared too, read back from
+        // their file), which checks them again.
         stopLinkPolls()
+        linksStopped = true
     }
 
     public var hasParty: Bool { state.current != nil || !state.upNext.isEmpty }
@@ -717,7 +706,6 @@ public final class PartySession {
         if engine.isPlaying { engine.pause() }
         stagedItemID = nil
         loadedItemID = nil
-        awaitingLinkID = nil
         isPlaying = false
         skippedOnLoad = skipped
         // The player's own queue is still there and plays first; the rest starts over.
@@ -773,20 +761,7 @@ public final class PartySession {
             isPlaying = engine.isPlaying
             broadcast()
         } else {
-            do {
-                try await play(current)
-            } catch LinkPlaybackError.notReady where state.current?.id == current.id {
-                // A link still downloading at its turn (`planForDownloadingLink`).
-                switch planForDownloadingLink(current) {
-                case .playInstead(let next): try await play(next)
-                case .waitForIt: return
-                case .skipIt: throw LinkPlaybackError.notReady
-                }
-            } catch LinkPlaybackError.failed where state.current?.id == current.id {
-                // Gone with a notice (`failLink`): the next song plays.
-                guard let next = mutate({ $0.dropCurrent() }) else { return }
-                try await play(next)
-            }
+            try await play(current)
         }
     }
 
@@ -803,8 +778,6 @@ public final class PartySession {
         engine.pause()
         isPlaying = engine.isPlaying
         if landingPlays != nil { landingPlays = false }
-        // A link waited for doesn't start by itself once paused.
-        awaitingLinkID = nil
         broadcast()
         guard pendingOperations > 0 else { return }
         Task {
@@ -884,9 +857,7 @@ public final class PartySession {
     /// skips to the staged song could outrun the polls that report them. Returns once the
     /// player has followed, or a later tap has taken over.
     private func step(_ change: (inout QueueState) -> Void) async {
-        // Skipping past a link waited for (nothing playing) lands playing, as it would have.
-        if landingPlays == nil { landingPlays = engine.isPlaying || awaitingLinkID != nil }
-        awaitingLinkID = nil
+        if landingPlays == nil { landingPlays = engine.isPlaying }
         cancelStaging()
         // The player stays on the song before (playing or paused) until the landing.
         playerOnOldSong = true
@@ -1146,8 +1117,7 @@ public final class PartySession {
             externalCurrent: externalCurrent,
             foreignUpcoming: foreignUpcoming.isEmpty ? nil : foreignUpcoming,
             playerIssue: playerIssue,
-            links: linksEnabled ? true : nil,
-            notice: notice
+            links: linksEnabled ? true : nil
         )
         if remote == nil {
             snap.reorderLimit = reorderLimit
@@ -1224,14 +1194,11 @@ public final class PartySession {
         playerOnOldSong = false
         skippedToStagedID = nil
         awaitingAttach = false
-        awaitingLinkID = nil
         // A new song of ours: any staging for the old one is off.
         cancelStaging()
         let generation = generation
         do {
-            // A link plays with its download's latest (its audio's address), once it's ready.
-            let track = item.track.link == nil ? item.track : try await readyLink(item)
-            try await timed("play") { try await self.engine.play(track) }
+            try await timed("play") { try await self.engine.play(item.track) }
         } catch {
             // Nothing is loaded, so nothing gets staged behind it. Staging onto a player whose
             // play just failed can hang (Apple Music on tvOS reconnects on the main thread).
@@ -1264,7 +1231,7 @@ public final class PartySession {
     /// player can't play it (unavailable, refused), the queue moves on to the next song rather
     /// than go quiet, and the host is told which were skipped. After `maxSongsFailingInARow` in
     /// a row the music stops, with an issue, until Play. Runs on the chain (`serially`).
-    func playMovingOn(_ item: QueueItem) async {
+    private func playMovingOn(_ item: QueueItem) async {
         var item = item
         var skipped: [QueueItem] = []
         let generation = generation
@@ -1280,34 +1247,6 @@ public final class PartySession {
                 // The session started over, or a tap moved the queue meanwhile: its landing plays.
                 guard generation == self.generation, landingTimer == nil, landingPlays == nil,
                       state.current?.id == item.id else { return }
-                switch error as? LinkPlaybackError {
-                case .notReady?:
-                    switch planForDownloadingLink(item) {
-                    case .playInstead(let next):
-                        item = next
-                        continue
-                    case .waitForIt:
-                        if engine.isPlaying { engine.pause() }
-                        isPlaying = engine.isPlaying
-                        broadcast()
-                        return
-                    case .skipIt:
-                        break
-                    }
-                case .failed?:
-                    // A link whose download failed: it has gone with a notice (`failLink`), and
-                    // doesn't count as played.
-                    mutate { $0.dropCurrent() }
-                    guard let next = state.current else {
-                        isPlaying = engine.isPlaying
-                        broadcast()
-                        return
-                    }
-                    item = next
-                    continue
-                case nil:
-                    break
-                }
                 skipped.append(item)
                 guard skipped.count < Self.maxSongsFailingInARow else {
                     if engine.isPlaying { engine.pause() }
@@ -1326,7 +1265,7 @@ public final class PartySession {
         }
     }
 
-    func showSongFailure(_ notice: String, until songID: UUID?) {
+    private func showSongFailure(_ notice: String, until songID: UUID?) {
         playerIssue = notice
         showsSongFailure = true
         songFailureShownWith = songID
@@ -1362,7 +1301,7 @@ public final class PartySession {
     ///
     /// Throws only `CancellationError`, when the caller is cancelled while waiting (an HTTP
     /// handler past its timeout): it stops waiting, the operation still runs in its turn.
-    func serially<T: Sendable>(_ operation: @escaping @MainActor @Sendable () async -> T) async throws -> T {
+    private func serially<T: Sendable>(_ operation: @escaping @MainActor @Sendable () async -> T) async throws -> T {
         let previous = engineChain
         pendingOperations += 1
         let task = Task<T, any Error> { @MainActor in
@@ -1774,10 +1713,6 @@ public final class PartySession {
             // Staged into a session that has since started over: not this queue's next song.
             guard generation == self.generation else { return }
             stagedItemID = desired?.id
-        } catch is LinkPlaybackError {
-            // A link still downloading: the engine has let go of what it had staged, and the
-            // link is staged again as its download moves on (each step is a change).
-            stagedItemID = nil
         } catch {
             // Leave stagedItemID alone (a timeout has cleared it); the next change retries, and
             // `.reachedEnd` covers a miss.

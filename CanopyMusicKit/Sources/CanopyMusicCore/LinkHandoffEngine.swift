@@ -1,18 +1,11 @@
 import Foundation
 
-/// A link track that can't be played (yet).
+/// A link track a player can't start: it has no audio address (links join the queue only once
+/// they're ready, so this is a player's guard, not a song's turn).
 public enum LinkPlaybackError: Error, Equatable, LocalizedError {
-    /// Still downloading, or no audio address.
     case notReady
-    /// Its download failed: cmdlp's reason.
-    case failed(String?)
 
-    public var errorDescription: String? {
-        switch self {
-        case .notReady: "It's still downloading."
-        case .failed(let reason): reason ?? "Its download failed."
-        }
-    }
+    public var errorDescription: String? { "It has no audio to play." }
 }
 
 /// One side of a `LinkHandoffEngine`: Apple Music's player, or the link player (an AVPlayer).
@@ -44,8 +37,7 @@ public extension HandoffSide {
 /// - Across a switch, the side playing is told nothing comes next, so it runs out and reports the
 ///   end; meanwhile the other side gets the next song ready (the link's item loads, or Apple
 ///   Music `prepareToPlay`s), and the session's `play` of it then starts at once. No crossfade
-///   across a switch. A link still downloading can't be got ready: staging it throws, and the
-///   session stages it again as its download moves on.
+///   across a switch.
 /// - With links on, an Apple Music song is lined up in its player only in the last
 ///   `musicStageLead` seconds of the one before: an entry lined up earlier can't be taken back
 ///   without a dropout, so a link queued after it would play after a moment of the wrong song.
@@ -156,8 +148,6 @@ public final class LinkHandoffEngine: PlaybackEngine {
                 return
             }
             here.setEndsIntoHandoff(true)
-            // A link still downloading has nothing to get ready yet.
-            if let link = track.link, !link.isPlayable { throw LinkPlaybackError.notReady }
             try await engine(other).prepare(track)
             return
         }

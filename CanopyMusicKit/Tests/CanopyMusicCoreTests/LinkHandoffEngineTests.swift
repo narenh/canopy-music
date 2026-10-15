@@ -146,20 +146,6 @@ final class FakeSide: HandoffSide {
         #expect(music.staged == nil)
     }
 
-    /// A link still downloading can't be got ready: staging it throws (the session tries again
-    /// as the download moves on), and the song playing still runs out.
-    @Test func aLinkStillDownloadingCantBeStaged() async throws {
-        let (engine, music, links, _) = engine()
-        try await engine.play(longSong("a"))
-        try await engine.stage(longSong("b"))
-        await #expect(throws: LinkPlaybackError.notReady) { try await engine.stage(Self.link("L", ready: false)) }
-        #expect(music.staged == nil)
-        #expect(music.endsIntoHandoff)
-        #expect(links.prepared == nil)
-        try await engine.stage(Self.link("L"))
-        #expect(links.prepared?.id == "link:L")
-    }
-
     /// The song after a link is got ready in Apple Music's player while the link plays, and its
     /// play then uses it.
     @Test func appleMusicGetsReadyDuringALink() async throws {

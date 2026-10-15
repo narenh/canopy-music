@@ -15,9 +15,9 @@ import Testing
      "audioUrl": "https://cmdlp.example.com/audio/M9xQFZLlR5L-VkfG3YQQLp.m4a?sig=k82Gxp4VBgSbf1T", "createdAt": "2026-10-14T20:00:00Z"}
     """#.utf8)
 
-    static func link(_ id: String = "M9xQFZLlR5L-VkfG3YQQLp", status: LinkTrack.Status = .ready, percent: Double? = nil) -> QueueTrack {
+    static func link(_ id: String = "M9xQFZLlR5L-VkfG3YQQLp", status: LinkTrack.Status = .ready) -> QueueTrack {
         var track = QueueTrack(id: QueueTrack.linkID(id), title: "Flickermood", artist: "Forss", duration: 214)
-        track.link = LinkTrack(id: id, service: "SoundCloud", status: status, stage: status == .pending ? "downloading" : nil, percent: percent,
+        track.link = LinkTrack(id: id, service: "SoundCloud", status: status,
                                audioURL: URL(string: "https://cmdlp.example.com/audio/\(id).m4a?sig=secret"))
         return track
     }
@@ -35,9 +35,8 @@ import Testing
         #expect(track.artworkURL?.absoluteString == "https://i1.sndcdn.com/artworks-000-t500x500.jpg")
         #expect(track.thumbnailURL == track.artworkURL)
         #expect(track.link?.service == "SoundCloud")
-        #expect(track.link?.stage == "downloading")
-        // Whole percents: each change is a snapshot to every phone.
-        #expect(track.link?.percent == 42)
+        #expect(found.progress?.percent == 42.7)
+        #expect(found.progress?.eta == 3)
         #expect(track.link?.audioURL?.query() == "sig=k82Gxp4VBgSbf1T")
         #expect(track.link?.isPlayable == false)
     }
@@ -60,7 +59,7 @@ import Testing
     // MARK: Coding in the queue
 
     @Test func roundTrips() throws {
-        let track = Self.link(status: .pending, percent: 40)
+        let track = Self.link()
         #expect(try JSONDecoder().decode(QueueTrack.self, from: JSONEncoder().encode(track)) == track)
     }
 
@@ -109,18 +108,37 @@ import Testing
         #expect(song.forGuests == song)
     }
 
-    @Test func rowsSayHowFarTheDownloadHasGot() {
-        #expect(Self.link(status: .pending, percent: 40).rowSubtitle == "Downloading 40% · Forss")
-        var track = Self.link(status: .pending)
-        #expect(track.rowSubtitle == "Downloading · Forss")
-        track.link?.stage = "queued"
-        #expect(track.rowSubtitle == "Waiting to download · Forss")
-        track.link?.stage = "converting"
-        #expect(track.rowSubtitle == "Converting · Forss")
-        track.artist = ""
-        #expect(track.rowSubtitle == "Converting")
-        #expect(Self.link().rowSubtitle == "Forss")
-        #expect(QueueTrack(id: "1", title: "T", artist: "A").rowSubtitle == "A")
+    /// Queues saved while links still showed their download (`stage`, `percent`) still load.
+    @Test func olderLinkFieldsAreIgnored() throws {
+        let json = Data(#"{"id": "A", "service": "YouTube", "status": "ready", "stage": "converting", "percent": 40, "audioURL": "https://x.example/a.m4a"}"#.utf8)
+        let link = try JSONDecoder().decode(LinkTrack.self, from: json)
+        #expect(link.isPlayable)
+    }
+
+    // MARK: Preparing
+
+    /// "More than 15 seconds" from when it was added: yt-dlp's ETA when there is one, otherwise
+    /// the rate between the first and latest percentages, once they're a second apart.
+    @Test func estimatesWhetherPreparingTakesLong() {
+        let added = Date(timeIntervalSince1970: 1000)
+        func at(_ seconds: TimeInterval, _ percent: Double) -> LinkPrepEstimate.Sample {
+            LinkPrepEstimate.Sample(at: added.addingTimeInterval(seconds), percent: percent)
+        }
+        func now(_ seconds: TimeInterval) -> Date { added.addingTimeInterval(seconds) }
+        // Nothing to go on yet.
+        #expect(!LinkPrepEstimate.takesLong(addedAt: added, first: nil, latest: nil, eta: nil, now: now(2)))
+        #expect(!LinkPrepEstimate.takesLong(addedAt: added, first: at(1, 10), latest: at(1, 10), eta: nil, now: now(1)))
+        // 10% a second from 10% at 1 s: done around 10 s.
+        #expect(!LinkPrepEstimate.takesLong(addedAt: added, first: at(1, 10), latest: at(3, 30), eta: nil, now: now(3)))
+        // 2% a second from 10% at 1 s: around 45 s.
+        #expect(LinkPrepEstimate.takesLong(addedAt: added, first: at(1, 10), latest: at(3, 14), eta: nil, now: now(3)))
+        // Less than a second apart: not yet a rate.
+        #expect(!LinkPrepEstimate.takesLong(addedAt: added, first: at(1, 10), latest: at(1.5, 11), eta: nil, now: now(1.5)))
+        // cmdlp's ETA wins over the rate.
+        #expect(LinkPrepEstimate.takesLong(addedAt: added, first: at(1, 10), latest: at(3, 30), eta: 20, now: now(3)))
+        #expect(!LinkPrepEstimate.takesLong(addedAt: added, first: at(1, 10), latest: at(3, 14), eta: 5, now: now(3)))
+        // Past 15 s, it has taken long, whatever the estimate.
+        #expect(LinkPrepEstimate.takesLong(addedAt: added, first: at(1, 10), latest: at(16, 99), eta: 0, now: now(16)))
     }
 
     // MARK: Telling a link from a search
@@ -181,7 +199,7 @@ import Testing
     /// The same cmdlp id is the same song: queued once, and "playing" while it plays.
     @Test func theSameLinkIsTheSameSong() {
         var state = queue()
-        guard case .added(let first, _) = state.addRequest(LinkTrackTests.link(status: .pending), by: requester) else {
+        guard case .added(let first, _) = state.addRequest(LinkTrackTests.link(), by: requester) else {
             Issue.record("not added")
             return
         }
@@ -199,69 +217,6 @@ import Testing
         state.advance(to: first.id)
         let playing = state.addRequest(LinkTrackTests.link(), by: requester)
         #expect(playing == .nowPlaying)
-    }
-
-    @Test func progressReachesEveryCopy() {
-        var state = queue()
-        state.addRequest(LinkTrackTests.link(status: .pending, percent: 10), by: requester)
-        let version = state.version
-        var link = LinkTrackTests.link(status: .pending, percent: 55).link!
-        let changed = state.updateLink(link)
-        #expect(changed)
-        #expect(state.version == version + 1)
-        #expect(state.upNext.first { $0.track.link != nil }?.track.link?.percent == 55)
-        // The same again changes nothing, so nothing is sent.
-        let again = state.updateLink(link)
-        #expect(!again)
-        #expect(state.version == version + 1)
-        link.status = .ready
-        link.percent = nil
-        state.updateLink(link)
-        #expect(state.upNext.first { $0.track.link != nil }?.track.link?.isPlayable == true)
-    }
-
-    /// A failed link leaves Up next, even as the locked next song.
-    @Test func aFailedLinkLeavesEvenWhenLocked() {
-        var state = queue()
-        state.addRequest(LinkTrackTests.link(status: .pending), by: requester)
-        #expect(state.upNext.first?.track.link != nil)
-        state.lockNext()
-        let removed = state.removeLink("M9xQFZLlR5L-VkfG3YQQLp")
-        #expect(removed.count == 1)
-        #expect(state.lockedNextID == nil)
-        #expect(!state.upNext.contains { $0.track.link != nil })
-        let none = state.removeLink("M9xQFZLlR5L-VkfG3YQQLp")
-        #expect(none.isEmpty)
-    }
-
-    /// A link still downloading at its turn: the next song that isn't plays, the link right after it.
-    @Test func postponingPlaysTheNextReadySong() {
-        var state = QueueState()
-        state.addRequest(LinkTrackTests.link(status: .pending), by: requester)
-        state.addRequest(LinkTrackTests.link("BBBBBBBBBBBBBBBBBBBBBB", status: .pending), by: requester)
-        state.addRequest(track("x"), by: requester)
-        state.advance()
-        #expect(state.current?.track.link?.id == "M9xQFZLlR5L-VkfG3YQQLp")
-        let postponed = state.postponeCurrent()
-        #expect(postponed)
-        #expect(state.current?.track.id == "x")
-        #expect(state.upNext.map(\.track.id) == ["link:M9xQFZLlR5L-VkfG3YQQLp", "link:BBBBBBBBBBBBBBBBBBBBBB"])
-        #expect(state.history.isEmpty)
-        // Nothing but links still downloading after it: nothing to play instead.
-        state.advance()
-        let postponedAgain = state.postponeCurrent()
-        #expect(!postponedAgain)
-        #expect(state.current?.track.link?.id == "M9xQFZLlR5L-VkfG3YQQLp")
-    }
-
-    @Test func droppingTheCurrentSongDoesntCountItAsPlayed() {
-        var state = queue()
-        state.addRequest(LinkTrackTests.link(status: .failed), by: requester)
-        state.advance()
-        let history = state.history
-        let next = state.dropCurrent()
-        #expect(next?.track.id == "b")
-        #expect(state.history == history)
     }
 
     /// A link isn't the music service's to put in a saved playlist.

@@ -197,10 +197,14 @@ public final class PartyServer: Sendable {
             if requester.origin == .phone, !(await session.phonesCanQueue), !(await session.isHost(key: body.key)) {
                 return HTTPResponse(statusCode: .forbidden)
             }
-            // A song from a link (a phone's pick from `/api/link`): the hub fills in its audio.
+            // A song from a link (a phone's pick from `/api/link`): the hub fills in its audio. Still
+            // downloading, it's "preparing" (`/api/link/progress`), and queued once it's ready.
             if body.track.link != nil {
                 do {
-                    return try .json(AddReply(try await session.addLink(body.track, by: requester, id: body.itemId ?? UUID())))
+                    switch try await session.addLink(body.track, by: requester, id: body.itemId ?? UUID()) {
+                    case .queued(let result): return try .json(AddReply(result))
+                    case .preparing(let progress): return try .json(AddReply(preparing: progress))
+                    }
                 } catch {
                     return .linkRefused(error)
                 }
@@ -230,6 +234,15 @@ public final class PartyServer: Sendable {
             } catch {
                 return .linkRefused(error)
             }
+        }
+
+        // The links this phone added that are still being prepared ("Preparing… 37%"), and
+        // those that failed since it last asked, each told once (`LinkProgressReply`). Asked
+        // about once a second while it has some, and when the page opens.
+        await server.appendRoute("POST /api/link/progress") { request in
+            let body = try JSONDecoder.api.decode(LinkProgressBody.self, from: await request.bodyData)
+            return HTTPResponse(statusCode: .ok, headers: [.contentType: "application/json", .cacheControl: "no-store"],
+                                body: try JSONEncoder().encode(await session.linkProgress(for: body.clientId)))
         }
 
         await server.appendRoute("POST /api/move") { request in
@@ -667,6 +680,10 @@ struct LinkBody: Decodable {
     var key: String?
 }
 
+struct LinkProgressBody: Decodable {
+    var clientId: String
+}
+
 struct DisplayHello: Decodable {
     var clientId: String
     var name: String
@@ -747,6 +764,8 @@ struct AddReply: Encodable {
     var result: String
     var index: Int?
     var itemId: UUID?
+    /// A link still downloading ("preparing"): how far it's got.
+    var progress: LinkProgress?
 
     init(_ result: AddResult) {
         switch result {
@@ -757,6 +776,11 @@ struct AddReply: Encodable {
         case .nowPlaying:
             self.result = "nowPlaying"
         }
+    }
+
+    init(preparing progress: LinkProgress) {
+        result = "preparing"
+        self.progress = progress
     }
 }
 

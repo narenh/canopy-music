@@ -432,12 +432,6 @@ public final class SonosEngine: PlaybackEngine {
         }
         // Already right after the current song (found there by `attach`, say): nothing to send.
         if let track, track.id == stagedTrack?.id, stagedNumber != nil { return }
-        // A link still downloading can't go in the queue yet: what was staged comes out, so the
-        // current song ends there, and the session stages the link again once it's ready.
-        if let link = track?.link, !link.isPlayable {
-            try await stage(nil)
-            throw LinkPlaybackError.notReady
-        }
         let uri = try track.map { try reference.uri(for: $0) }
         let metadata = try track.map { try reference.metadata(for: $0) }
         busy += 1

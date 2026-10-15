@@ -31,7 +31,8 @@ import Testing
         }
     }
 
-    @Test func aLinkStillDownloadingHasNoAddressYet() {
+    /// Links are queued only once they're ready; one without its audio has nothing to send.
+    @Test func aLinkNotReadyHasNoAddress() {
         let reference = SonosTrackReference(service: .appleMusic, accountSerial: 3)
         #expect(throws: LinkPlaybackError.notReady) { try reference.uri(for: Self.link(ready: false)) }
     }
@@ -100,19 +101,6 @@ import Testing
         _ = try await engine.applyLatestObservation()
         #expect(!engine.hasLostControl)
         #expect(engine.isPlaying)
-    }
-
-    /// Staging a link still downloading takes the song staged before out (the current one ends
-    /// there), and throws, so the session stages the link again once it's ready.
-    @Test func aLinkStillDownloadingUnstages() async throws {
-        let fake = FakeSonos()
-        let (engine, _) = engine(fake)
-        try await engine.play(spotifyTrack("a"))
-        try await engine.stage(spotifyTrack("b"))
-        await #expect(throws: LinkPlaybackError.notReady) { try await engine.stage(Self.link(ready: false)) }
-        #expect(fake.queue == [sonosURI("a")])
-        try await engine.stage(Self.link())
-        #expect(fake.queue == [sonosURI("a"), Self.audio])
     }
 
     /// A link Sonos refuses isn't the account's doing: the account isn't counted as rejected.

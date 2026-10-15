@@ -26,9 +26,10 @@ final class FakeLinkService: LinkService {
     }
 
     static func track(_ id: String, title: String = "Song", zone: String = "zone-1", status: LinkTrack.Status, percent: Double? = nil,
-                      error: String? = nil) -> CmdlpTrack {
+                      eta: Double? = nil, error: String? = nil) -> CmdlpTrack {
         CmdlpTrack(id: id, zone: zone, status: status, title: title, artist: "Artist", duration: 200, artwork: "https://art.example/\(id).jpg",
-                   service: "YouTube", stage: status == .pending ? "downloading" : nil, progress: percent.map { .init(percent: $0) },
+                   service: "YouTube", stage: status == .pending ? "downloading" : nil,
+                   progress: percent == nil && eta == nil ? nil : .init(percent: percent, eta: eta),
                    audioUrl: "https://cmdlp.example/audio/\(id).m4a?sig=secret-\(id)", error: error)
     }
 
@@ -57,32 +58,38 @@ final class FakeLinkService: LinkService {
     }
 }
 
-/// Links on the hub: looked up for a phone, queued, watched while they download, failed ones
-/// dropped with a notice, the zone's downloads deleted when it ends, and the rule for a link
-/// still downloading at its turn (`DownloadingLinkPlan`).
+/// Links on the hub: looked up for a phone; added, prepared while they download (only the phones
+/// that added them see how it's going), and queued as the guest's request only once they're
+/// ready; failures told only to those phones; preparations kept across a relaunch; the zone's
+/// downloads deleted when it ends.
 @MainActor
 @Suite struct LinkSessionTests {
     let guest = Requester(name: "Sam", clientID: "phone-1", origin: .phone)
+    let other = Requester(name: "Kim", clientID: "phone-2", origin: .phone)
     static let youtube = "https://www.youtube.com/watch?v=abc"
     static let soundcloud = "https://soundcloud.com/forss/flickermood"
 
-    func session(_ service: FakeLinkService, engine: FakeEngine = FakeEngine(), ids: [String] = ["a", "b", "c"]) async throws -> PartySession {
+    func session(_ service: FakeLinkService, engine: FakeEngine = FakeEngine(), ids: [String] = ["a", "b", "c"],
+                 storeURL: URL? = nil) async throws -> PartySession {
         engine.playsLinks = true
-        let session = PartySession(catalog: StubCatalog(ids: ids), engine: engine)
+        let session = PartySession(catalog: StubCatalog(ids: ids), engine: engine, storeURL: storeURL)
         session.landingDelay = 0.05
         session.linkPollInterval = .milliseconds(10)
-        session.linkWaitAtTurn = 0.3
         session.linkZone = "zone-1"
         session.linkService = service
         try await session.load(playlist: base)
         return session
     }
 
-    /// A guest pastes the YouTube link and adds it; the session restages behind it.
-    func queueLink(_ session: PartySession) async throws {
-        _ = try await session.addLink(try #require(try await session.resolveLink(Self.youtube)), by: guest)
+    /// A guest pastes the YouTube link and adds it.
+    @discardableResult
+    func addLink(_ session: PartySession, by requester: Requester? = nil, link: String = LinkSessionTests.youtube) async throws -> LinkAddResult {
+        let result = try await session.addLink(try #require(try await session.resolveLink(link)), by: requester ?? guest)
         await settle()
+        return result
     }
+
+    func linkItem(_ session: PartySession) -> QueueItem? { session.state.upNext.first { $0.track.link != nil } }
 
     /// Waits (up to 3 s) until `condition` holds, the polls and the session's own work running
     /// meanwhile. The checks after it say whether it did.
@@ -172,11 +179,12 @@ final class FakeLinkService: LinkService {
         #expect(service.resolveCalls.count == 1)
     }
 
-    // MARK: Queueing and downloading
+    // MARK: Preparing
 
-    /// Picked from the results: queued at once with its art, its progress shown as it downloads,
-    /// and the hub (never a phone) holding its audio's address.
-    @Test func aQueuedLinkShowsItsDownload() async throws {
+    /// Added while it downloads: it isn't in Up Next (nor any snapshot) until it's ready, only
+    /// the phone that added it sees "Preparing… N%", and then it's queued as that guest's
+    /// request, with the hub's audio address (never the phone's).
+    @Test func aLinkJoinsUpNextOnlyOnceReady() async throws {
         let service = FakeLinkService()
         service.add(Self.youtube, id: "L1", steps: [
             FakeLinkService.track("L1", status: .pending, percent: 30),
@@ -186,61 +194,74 @@ final class FakeLinkService: LinkService {
         let session = try await session(service)
         // Each check made here, one at a time.
         session.linkPollInterval = .seconds(3600)
-        let found = try #require(try await session.resolveLink(Self.youtube))
-        // The phone's copy has no audio address, and a made-up one is ignored.
-        var picked = found
+        var picked = try #require(try await session.resolveLink(Self.youtube))
         picked.link?.audioURL = URL(string: "https://evil.example/x.m4a")
-        guard case .added(let item, let index) = try await session.addLink(picked, by: guest) else {
-            Issue.record("not added")
-            return
-        }
-        #expect(index == 0)
-        #expect(item.track.artworkURL?.absoluteString == "https://art.example/L1.jpg")
-        #expect(item.track.link?.audioURL?.absoluteString == "https://cmdlp.example/audio/L1.m4a?sig=secret-L1")
-        #expect(item.track.link?.status == .pending)
-        func row() -> QueueTrack? { session.state.upNext.first { $0.track.link != nil }?.track }
+        let itemID = UUID()
+        let added = try await session.addLink(picked, by: guest, id: itemID)
+        #expect(added == .preparing(LinkProgress(id: "link:L1", title: "Song", percent: 30, takesLong: false)))
+        #expect(linkItem(session) == nil)
+        #expect(session.snapshot().current?.track.link == nil)
+        #expect(!String(decoding: try JSONEncoder().encode(session.snapshot()), as: UTF8.self).contains("link:L1"))
+
         #expect(await session.pollLink("L1"))
-        #expect(row()?.rowSubtitle == "Downloading 30% · Artist")
-        #expect(session.snapshot().upNext.first?.track.link?.percent == 30)
-        #expect(await session.pollLink("L1"))
-        #expect(row()?.rowSubtitle == "Downloading 80% · Artist")
-        // Ready: nothing more to ask.
+        #expect(session.linkProgress(for: "phone-1").preparing.map(\.percent) == [80])
+        // Nobody else sees it.
+        #expect(session.linkProgress(for: "phone-2") == LinkProgressReply(preparing: [], failed: []))
+        #expect(linkItem(session) == nil)
+
+        // Ready: queued, and nothing more to ask.
         #expect(await !session.pollLink("L1"))
-        #expect(row()?.rowSubtitle == "Artist")
-        #expect(row()?.link?.isPlayable == true)
+        let item = try #require(linkItem(session))
+        #expect(item.id == itemID)
+        #expect(item.requester == guest)
+        #expect(item.track.artworkURL?.absoluteString == "https://art.example/L1.jpg")
+        #expect(item.track.link?.isPlayable == true)
+        #expect(item.track.link?.audioURL?.absoluteString == "https://cmdlp.example/audio/L1.m4a?sig=secret-L1")
+        #expect(session.linkProgress(for: "phone-1") == LinkProgressReply(preparing: [], failed: []))
     }
 
-    /// Snapshots (phones, displays, hosts) never carry a link's signed audio address.
-    @Test func snapshotsNeverCarryTheAudioAddress() async throws {
+    /// cmdlp already has it (a link pasted before): queued at once, with nothing to prepare.
+    @Test func anAlreadyDownloadedLinkQueuesAtOnce() async throws {
         let service = FakeLinkService()
         service.add(Self.youtube, id: "L1", steps: [FakeLinkService.track("L1", status: .ready)])
         let session = try await session(service)
-        session.hostKey = "host"
-        try await session.play()
-        try await queueLink(session)
-        await poll(3)
-        #expect(session.state.upNext.first?.track.link?.audioURL != nil)
-        for snapshot in [session.snapshot(), session.snapshot(includingWifi: true), session.snapshot(hostKey: "host")] {
-            let text = String(decoding: try JSONEncoder().encode(snapshot), as: UTF8.self)
-            #expect(text.contains("link:L1"))
-            #expect(!text.contains("secret-L1"))
-            #expect(!text.contains("/audio/"))
+        guard case .queued(.added(let item, let index)) = try await addLink(session) else {
+            Issue.record("not queued")
+            return
         }
+        #expect(index == 0)
+        #expect(item.requester == guest)
+        #expect(linkItem(session)?.id == item.id)
+        #expect(session.linkPreparations.isEmpty)
+        #expect(session.linkPolls.isEmpty)
     }
 
-    @Test func theSameLinkTwiceIsQueuedOnce() async throws {
+    /// The same link added again while it's being prepared (the same address or another for the
+    /// same song: cmdlp gives both one id), by this guest or another: one preparation, which the
+    /// second phone follows too, queued once, as the first guest's request.
+    @Test func theSameLinkTwiceIsPreparedOnce() async throws {
         let service = FakeLinkService()
         service.add(Self.youtube, id: "L1", steps: [])
         service.tracks["https://youtu.be/abc"] = service.tracks[Self.youtube]
         let session = try await session(service)
-        let first = try #require(try await session.resolveLink(Self.youtube))
-        let second = try #require(try await session.resolveLink("https://youtu.be/abc"))
-        #expect(first.id == second.id)
-        guard case .added = try await session.addLink(first, by: guest) else { Issue.record("not added"); return }
-        guard case .alreadyQueued = try await session.addLink(second, by: Requester(name: "Kim", clientID: "phone-2", origin: .phone)) else {
-            Issue.record("queued twice")
+        session.linkPollInterval = .seconds(3600)
+        guard case .preparing = try await addLink(session) else { Issue.record("not preparing"); return }
+        guard case .preparing(let second) = try await addLink(session, by: other, link: "https://youtu.be/abc") else {
+            Issue.record("not preparing for the second phone")
             return
         }
+        guard case .preparing = try await addLink(session) else { Issue.record("not preparing again"); return }
+        #expect(second.id == "link:L1")
+        #expect(session.linkPreparations.count == 1)
+        #expect(session.linkPolls.count == 1)
+        #expect(session.linkPreparations["L1"]?.clients == ["phone-1", "phone-2"])
+        #expect(session.linkProgress(for: "phone-2").preparing.map(\.id) == ["link:L1"])
+
+        service.steps["L1"] = [FakeLinkService.track("L1", status: .ready)]
+        #expect(await !session.pollLink("L1"))
+        #expect(session.state.upNext.filter { $0.track.link != nil }.map(\.requester) == [guest])
+        // Added once it's queued: it's already there.
+        guard case .queued(.alreadyQueued) = try await addLink(session, by: other) else { Issue.record("queued twice"); return }
     }
 
     /// Picked after the hub relaunched (it has no record of the lookup): cmdlp still has it.
@@ -249,8 +270,8 @@ final class FakeLinkService: LinkService {
         service.add(Self.youtube, id: "L1", steps: [FakeLinkService.track("L1", status: .ready)])
         let session = try await session(service)
         let picked = FakeLinkService.track("L1", status: .pending).queueTrack.forGuests
-        _ = try await session.addLink(picked, by: guest)
-        #expect(session.state.upNext.first?.track.link?.audioURL != nil)
+        guard case .queued(.added) = try await session.addLink(picked, by: guest) else { Issue.record("not queued"); return }
+        #expect(linkItem(session)?.track.link?.audioURL != nil)
         // Not another zone's download.
         service.steps["L2"] = [FakeLinkService.track("L2", zone: "other-zone", status: .ready)]
         await #expect(throws: LinkRefusal.unavailable) {
@@ -258,50 +279,134 @@ final class FakeLinkService: LinkService {
         }
     }
 
-    /// A download that fails leaves the queue at once, and everyone's told why.
-    @Test func aFailedDownloadLeavesWithANotice() async throws {
+    /// A download that fails never touches Up Next or anyone else's screen: each phone that
+    /// added it is told once, in plain words (cmdlp's reason stays in the log).
+    @Test func aFailedPreparationIsToldOnlyToItsPhones() async throws {
         let service = FakeLinkService()
         service.add(Self.youtube, id: "L1", title: "Gone", steps: [
-            FakeLinkService.track("L1", status: .pending, percent: 20),
-            FakeLinkService.track("L1", status: .failed, error: "ERROR: [youtube] abc: Video unavailable"),
+            FakeLinkService.track("L1", title: "Gone", status: .pending, percent: 20),
+            FakeLinkService.track("L1", title: "Gone", status: .failed, error: "ERROR: [youtube] abc: Video unavailable"),
         ])
         let session = try await session(service)
         session.linkPollInterval = .seconds(3600)
-        try await queueLink(session)
-        #expect(await session.pollLink("L1"))
-        #expect(session.state.upNext.contains { $0.track.link != nil })
+        let upNext = session.state.upNext
+        try await addLink(session)
+        try await addLink(session, by: other)
         #expect(await !session.pollLink("L1"))
-        #expect(!session.state.upNext.contains { $0.track.link != nil })
-        // cmdlp's reason stays out of what people see.
-        #expect(session.playerIssue == "Skipped “Gone”: Download failed")
-        #expect(session.snapshot().notice?.text == "Skipped “Gone”: Download failed")
+        #expect(session.state.upNext == upNext)
+        #expect(session.playerIssue == nil)
+        let failure = LinkFailure(id: "link:L1", text: "Couldn’t add “Gone”")
+        #expect(session.linkProgress(for: "phone-1") == LinkProgressReply(preparing: [], failed: [failure]))
+        // Once.
+        #expect(session.linkProgress(for: "phone-1").failed.isEmpty)
+        #expect(session.linkProgress(for: "phone-2").failed == [failure])
+        #expect(session.linkProgress(for: "phone-3").failed.isEmpty)
     }
 
     /// cmdlp lost it (its zone swept, say): as a failure.
-    @Test func aDownloadCmdlpLostLeaves() async throws {
+    @Test func aDownloadCmdlpLostFails() async throws {
         let service = FakeLinkService()
-        service.add(Self.youtube, id: "L1", steps: [])
+        service.add(Self.youtube, id: "L1", title: "Lost", steps: [])
         let session = try await session(service)
-        try await queueLink(session)
+        try await addLink(session)
         service.trackError = CmdlpError(status: 404, reason: "not_found")
-        await eventually { !session.state.upNext.contains { $0.track.link != nil } }
-        #expect(!session.state.upNext.contains { $0.track.link != nil })
-        #expect(session.playerIssue?.hasSuffix(": Download failed") == true)
+        await eventually { session.linkPreparations.isEmpty }
+        #expect(linkItem(session) == nil)
+        #expect(session.linkProgress(for: "phone-1").failed.map(\.text) == ["Couldn’t add “Lost”"])
     }
 
     /// cmdlp not answering for a moment isn't a failure: it's asked again.
     @Test func cmdlpNotAnsweringIsntAFailure() async throws {
         let service = FakeLinkService()
-        service.add(Self.youtube, id: "L1", steps: [FakeLinkService.track("L1", status: .ready)])
+        service.add(Self.youtube, id: "L1", steps: [
+            FakeLinkService.track("L1", status: .pending, percent: 10),
+            FakeLinkService.track("L1", status: .ready),
+        ])
         let session = try await session(service)
         session.linkPollInterval = .seconds(3600)
-        try await queueLink(session)
+        try await addLink(session)
         service.trackError = URLError(.timedOut)
         #expect(await session.pollLink("L1"))
-        #expect(session.state.upNext.first?.track.link?.status == .pending)
+        #expect(session.linkPreparations["L1"] != nil)
         service.trackError = nil
         #expect(await !session.pollLink("L1"))
-        #expect(session.state.upNext.first?.track.link?.isPlayable == true)
+        #expect(linkItem(session)?.track.link?.isPlayable == true)
+    }
+
+    /// "Your song will queue automatically…" once it's expected to take more than 15 seconds:
+    /// yt-dlp's ETA says so here.
+    @Test func aSlowPreparationSaysSo() async throws {
+        let service = FakeLinkService()
+        service.add(Self.youtube, id: "L1", steps: [FakeLinkService.track("L1", status: .pending, percent: 5, eta: 40)])
+        service.add(Self.soundcloud, id: "L2", steps: [FakeLinkService.track("L2", status: .pending, percent: 50, eta: 3)])
+        let session = try await session(service)
+        session.linkPollInterval = .seconds(3600)
+        guard case .preparing(let slow) = try await addLink(session),
+              case .preparing(let quick) = try await addLink(session, link: Self.soundcloud) else {
+            Issue.record("not preparing")
+            return
+        }
+        #expect(slow.takesLong)
+        #expect(slow.percent == 5)
+        #expect(!quick.takesLong)
+        // It stays said, whatever the ETA says next.
+        service.steps["L1"] = [FakeLinkService.track("L1", status: .pending, percent: 90, eta: 1)]
+        #expect(await session.pollLink("L1"))
+        #expect(session.linkProgress(for: "phone-1").preparing.first { $0.id == "link:L1" }?.takesLong == true)
+    }
+
+    /// Ready after the zone moved to a player that can't play links: not queued, and the guest
+    /// is told.
+    @Test func readyWhereLinksCantPlayIsAFailure() async throws {
+        let service = FakeLinkService()
+        service.add(Self.youtube, id: "L1", title: "Late", steps: [FakeLinkService.track("L1", title: "Late", status: .pending, percent: 10)])
+        let engine = FakeEngine()
+        let session = try await session(service, engine: engine)
+        session.linkPollInterval = .seconds(3600)
+        try await addLink(session)
+        engine.playsLinks = false
+        service.steps["L1"] = [FakeLinkService.track("L1", status: .ready)]
+        #expect(await !session.pollLink("L1"))
+        #expect(linkItem(session) == nil)
+        #expect(session.linkProgress(for: "phone-1").failed.map(\.text) == ["Couldn’t add “Late”"])
+    }
+
+    // MARK: Relaunch
+
+    /// The hub relaunched while links were being prepared (cmdlp's downloads carried on): the
+    /// new session picks them up, queues each as its guest's request once ready, and still tells
+    /// a phone about a failure it hadn't heard of.
+    @Test func preparationsSurviveARelaunch() async throws {
+        let folder = FileManager.default.temporaryDirectory.appending(path: "link-relaunch-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: folder) }
+        let store = folder.appending(path: "queue.json")
+        let service = FakeLinkService()
+        service.add(Self.youtube, id: "L1", title: "Keeps", steps: [FakeLinkService.track("L1", status: .pending, percent: 10)])
+        service.add(Self.soundcloud, id: "L2", title: "Breaks", steps: [FakeLinkService.track("L2", title: "Breaks", status: .pending, percent: 10)])
+        let first = try await session(service, storeURL: store)
+        first.linkPollInterval = .seconds(3600)
+        try await addLink(first)
+        try await addLink(first, by: other, link: Self.soundcloud)
+        service.steps["L2"] = [FakeLinkService.track("L2", status: .failed, error: "ERROR: gone")]
+        #expect(await !first.pollLink("L2"))
+        first.shutdown()
+
+        service.steps["L1"] = [FakeLinkService.track("L1", status: .ready)]
+        let engine = FakeEngine()
+        engine.playsLinks = true
+        let relaunched = PartySession(catalog: StubCatalog(ids: ["a", "b", "c"]), engine: engine, storeURL: store)
+        relaunched.linkPollInterval = .milliseconds(10)
+        relaunched.linkZone = "zone-1"
+        #expect(relaunched.linkPreparations["L1"]?.requester == guest)
+        relaunched.linkService = service
+        await eventually { linkItem(relaunched) != nil }
+        #expect(linkItem(relaunched)?.requester == guest)
+        #expect(relaunched.linkProgress(for: "phone-2").failed.map(\.text) == ["Couldn’t add “Breaks”"])
+
+        // Ending the zone forgets them, file and all.
+        relaunched.end()
+        #expect(!FileManager.default.fileExists(atPath: PartySession.linkPreparationsURL(beside: store).path()))
     }
 
     // MARK: Zone end
@@ -310,8 +415,9 @@ final class FakeLinkService: LinkService {
         let service = FakeLinkService()
         service.add(Self.youtube, id: "L1", steps: [])
         let session = try await session(service)
-        try await queueLink(session)
+        try await addLink(session)
         session.end()
+        #expect(session.linkPreparations.isEmpty)
         await eventually { !service.deletedZones.isEmpty }
         #expect(service.deletedZones == ["zone-1"])
         let calls = service.trackCalls
@@ -332,7 +438,7 @@ final class FakeLinkService: LinkService {
         let engine = FakeEngine()
         let session = try await session(service, engine: engine)
         try await session.play()
-        try await queueLink(session)
+        try await addLink(session)
         await eventually { engine.staged?.id == "link:L1" }
         #expect(engine.staged?.id == "link:L1")
         #expect(engine.staged?.link?.audioURL != nil)
@@ -342,94 +448,53 @@ final class FakeLinkService: LinkService {
         #expect(engine.playing?.link?.isPlayable == true)
     }
 
-    /// Still downloading at its turn, the first time: after a short wait, the next song plays
-    /// and the link goes right after it.
-    @Test func aLinkStillDownloadingAtItsTurnLetsTheNextSongGoFirst() async throws {
+    /// Snapshots (phones, displays, hosts) never carry a link's signed audio address.
+    @Test func snapshotsNeverCarryTheAudioAddress() async throws {
         let service = FakeLinkService()
-        service.add(Self.youtube, id: "L1", steps: [FakeLinkService.track("L1", status: .pending, percent: 5)])
-        let engine = FakeEngine()
-        let session = try await session(service, engine: engine)
+        service.add(Self.youtube, id: "L1", steps: [FakeLinkService.track("L1", status: .ready)])
+        let session = try await session(service)
+        session.hostKey = "host"
         try await session.play()
-        try await queueLink(session)
-        engine.finishTrack()
-        await eventually { engine.playing?.id == "b" }
-        #expect(session.state.current?.track.id == "b")
-        #expect(engine.playing?.id == "b")
-        #expect(session.state.upNext.first?.track.id == "link:L1")
-        #expect(session.state.history.map(\.track.id) == ["a"])
-        #expect(session.playerIssue == nil)
-
-        // Ready by the time "b" ends: it plays.
-        service.steps["L1"] = [FakeLinkService.track("L1", status: .ready)]
-        await eventually { engine.staged?.id == "link:L1" }
-        engine.finishTrack()
-        await settle()
-        #expect(session.state.current?.track.id == "link:L1")
-        #expect(engine.playing?.id == "link:L1")
+        try await addLink(session)
+        #expect(linkItem(session)?.track.link?.audioURL != nil)
+        for snapshot in [session.snapshot(), session.snapshot(includingWifi: true), session.snapshot(hostKey: "host")] {
+            let text = String(decoding: try JSONEncoder().encode(snapshot), as: UTF8.self)
+            #expect(text.contains("link:L1"))
+            #expect(!text.contains("secret-L1"))
+            #expect(!text.contains("/audio/"))
+        }
     }
 
-    /// Put back once already, and still downloading at its turn again: it's skipped.
-    @Test func aLinkPutBackOnceIsSkippedTheSecondTime() async throws {
+    /// On Sonos the same: prepared, then queued, and staged into the group's queue as its audio.
+    @Test func onSonosItQueuesWhenReadyToo() async throws {
         let service = FakeLinkService()
-        service.add(Self.youtube, id: "L1", steps: [FakeLinkService.track("L1", status: .pending, percent: 5)])
-        let engine = FakeEngine()
-        let session = try await session(service, engine: engine)
-        try await session.play()
-        try await queueLink(session)
-        engine.finishTrack()
-        await eventually { engine.playing?.id == "b" }
-        #expect(session.state.current?.track.id == "b")
-        engine.finishTrack()
-        await eventually { engine.playing?.id == "c" }
-        #expect(session.state.current?.track.id == "c")
-        #expect(engine.playing?.id == "c")
-        #expect(!session.state.upNext.contains { $0.track.link != nil })
-        #expect(session.playerIssue == "Skipped “Song”, which couldn't play")
-    }
-
-    /// Nothing else to play: the music waits on it, and starts it as soon as it's ready.
-    @Test func withNothingElseItWaitsForTheDownload() async throws {
-        let service = FakeLinkService()
-        service.add(Self.youtube, id: "L1", steps: [FakeLinkService.track("L1", status: .pending, percent: 5)])
-        let engine = FakeEngine()
-        engine.playsLinks = true
-        let session = PartySession(catalog: StubCatalog(ids: []), engine: engine)
-        session.linkPollInterval = .milliseconds(10)
-        session.linkWaitAtTurn = 0.2
+        service.add(Self.youtube, id: "L1", steps: [FakeLinkService.track("L1", status: .pending, percent: 40)])
+        let fake = FakeSonos()
+        let engine = SonosEngine(target: sonosTarget, reference: SonosTrackReference(service: .spotify, accountSerial: 4), transport: fake)
+        engine.pollInterval = (.seconds(3600), .seconds(3600))
+        let session = PartySession(catalog: SonosLinkCatalog(ids: ["a", "b"]), engine: engine)
+        session.linkPollInterval = .seconds(3600)
         session.linkZone = "zone-1"
         session.linkService = service
-        try await queueLink(session)
+        try await session.load(playlist: base)
         try await session.play()
-        await settle()
-        #expect(session.state.current?.track.id == "link:L1")
-        #expect(engine.playing == nil)
-        #expect(!session.isPlaying)
+        await eventually { fake.queue.count == 2 }
+        #expect(fake.queue == [sonosURI("a"), sonosURI("b")])
+        guard case .preparing = try await addLink(session) else { Issue.record("not preparing"); return }
+        #expect(fake.queue == [sonosURI("a"), sonosURI("b")])
         service.steps["L1"] = [FakeLinkService.track("L1", status: .ready)]
-        await eventually { engine.playing?.id == "link:L1" }
-        #expect(engine.playing?.id == "link:L1")
-        #expect(session.isPlaying)
+        #expect(await !session.pollLink("L1"))
+        await eventually { fake.queue.contains("https://cmdlp.example/audio/L1.m4a?sig=secret-L1") }
+        #expect(fake.queue == [sonosURI("a"), "https://cmdlp.example/audio/L1.m4a?sig=secret-L1"])
+        #expect(session.state.upNext.first?.requester == guest)
     }
+}
 
-    /// The link waited for fails: it goes, and doesn't count as played.
-    @Test func aLinkWaitedForThatFailsGivesWay() async throws {
-        let service = FakeLinkService()
-        service.add(Self.youtube, id: "L1", steps: [FakeLinkService.track("L1", status: .pending, percent: 5)])
-        let engine = FakeEngine()
-        engine.playsLinks = true
-        let session = PartySession(catalog: StubCatalog(ids: []), engine: engine)
-        session.linkPollInterval = .milliseconds(10)
-        session.linkWaitAtTurn = 0.2
-        session.linkZone = "zone-1"
-        session.linkService = service
-        try await queueLink(session)
-        try await session.play()
-        await settle()
-        session.add(track("x"), by: guest)
-        service.steps["L1"] = [FakeLinkService.track("L1", status: .failed, error: "Removed")]
-        await eventually { engine.playing?.id == "x" }
-        #expect(session.state.current?.track.id == "x")
-        #expect(engine.playing?.id == "x")
-        #expect(session.state.history.isEmpty)
-        #expect(session.partyLog.songs.map(\.track.id) == ["x"])
-    }
+/// A playlist of Spotify songs, for a session on Sonos.
+struct SonosLinkCatalog: MusicCatalog {
+    var ids: [String]
+    func searchSongs(_ term: String) async throws -> [QueueTrack] { [] }
+    func libraryPlaylists() async throws -> [PlaylistSummary] { [] }
+    func searchPlaylists(_ term: String) async throws -> [PlaylistSummary] { [] }
+    func tracks(in playlist: PlaylistSummary) async throws -> [QueueTrack] { ids.map(spotifyTrack) }
 }

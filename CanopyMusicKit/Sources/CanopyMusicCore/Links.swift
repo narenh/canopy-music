@@ -2,10 +2,12 @@ import Foundation
 
 // Link tracks: a guest pastes a YouTube, SoundCloud, Bandcamp, Mixcloud, or archive.org link into
 // a phone's search, the hub resolves it through canopy-cmdlp (which downloads it and serves an
-// AAC .m4a at a signed `audioUrl`), and it joins the queue like any other song. Hidden and inert
-// unless the hub has a cmdlp address and token (`PartySession.linkService`).
+// AAC .m4a at a signed `audioUrl`), and once it's downloaded it joins the queue like any other
+// song (`LinkPreparation`). Hidden and inert unless the hub has a cmdlp address and token
+// (`PartySession.linkService`).
 
-/// A song from a link, as cmdlp last described it (`QueueTrack.link`).
+/// A song from a link, as cmdlp last described it (`QueueTrack.link`). In the queue it's always
+/// ready: a link joins Up Next only once its download is.
 public struct LinkTrack: Codable, Hashable, Sendable {
     public enum Status: String, Codable, Sendable {
         case pending, ready, failed
@@ -21,40 +23,19 @@ public struct LinkTrack: Codable, Hashable, Sendable {
     /// "YouTube", "SoundCloud"…
     public var service: String?
     public var status: Status
-    /// While pending: "queued", "downloading" or "converting".
-    public var stage: String?
-    /// 0–100 while downloading, when cmdlp knows.
-    public var percent: Double?
     /// The signed audio. Only the hub and Sonos need it: snapshots and search results leave it
     /// out (`forGuests`).
     public var audioURL: URL?
-    /// Why the download failed.
-    public var error: String?
 
-    public init(id: String, service: String? = nil, status: Status, stage: String? = nil, percent: Double? = nil,
-                audioURL: URL? = nil, error: String? = nil) {
+    public init(id: String, service: String? = nil, status: Status, audioURL: URL? = nil) {
         self.id = id
         self.service = service
         self.status = status
-        self.stage = stage
-        self.percent = percent
         self.audioURL = audioURL
-        self.error = error
     }
 
     /// Ready, with its audio's address: a player can start it.
     public var isPlayable: Bool { status == .ready && audioURL != nil }
-
-    /// The row's second line while it downloads: "Downloading 40%", "Waiting to download",
-    /// "Converting". nil once it's ready.
-    public var progressText: String? {
-        guard status == .pending else { return nil }
-        switch stage {
-        case "queued": return "Waiting to download"
-        case "converting": return "Converting"
-        default: return percent.map { "Downloading \(Int($0.rounded(.down)))%" } ?? "Downloading"
-        }
-    }
 }
 
 public extension QueueTrack {
@@ -67,13 +48,6 @@ public extension QueueTrack {
         var track = self
         track.link?.audioURL = nil
         return track
-    }
-
-    /// A row's second line: the artist, and while a link downloads, how far it's got (first, so
-    /// a narrow row cuts the artist rather than the progress).
-    var rowSubtitle: String {
-        guard let progress = link?.progressText else { return artist }
-        return artist.isEmpty ? progress : "\(progress) · \(artist)"
     }
 }
 
@@ -106,9 +80,13 @@ public struct CmdlpTrack: Codable, Equatable, Sendable {
         public var downloadedBytes: Int?
         public var totalBytes: Int?
         public var speed: Double?
+        /// Seconds yt-dlp expects the download still to take, when it knows.
         public var eta: Double?
 
-        public init(percent: Double? = nil) { self.percent = percent }
+        public init(percent: Double? = nil, eta: Double? = nil) {
+            self.percent = percent
+            self.eta = eta
+        }
     }
 
     public var id: String
@@ -142,10 +120,7 @@ public struct CmdlpTrack: Codable, Equatable, Sendable {
     }
 
     public var link: LinkTrack {
-        // Whole percents: rows show no more, and each change is a snapshot to every phone.
-        LinkTrack(id: id, service: service, status: status, stage: status == .pending ? stage : nil,
-                  percent: status == .pending ? progress?.percent.map { min(100, max(0, $0.rounded(.down))) } : nil,
-                  audioURL: audioUrl.flatMap(URL.init(string:)), error: status == .failed ? error : nil)
+        LinkTrack(id: id, service: service, status: status, audioURL: audioUrl.flatMap(URL.init(string:)))
     }
 
     /// As a queue song. Its art is the site's (or cmdlp's own SoundCloud logo, which needs no
@@ -156,6 +131,123 @@ public struct CmdlpTrack: Codable, Equatable, Sendable {
                                duration: duration.flatMap { $0 > 0 ? $0 : nil }, artworkURL: art, thumbnailURL: art)
         track.link = link
         return track
+    }
+}
+
+// MARK: - Preparing
+
+/// A link a guest added while cmdlp was still downloading it. It joins Up Next as their request
+/// once the download is ready, whether or not their page is still open; nothing half-downloaded
+/// is ever queued. Only the phones that added it see how it's going (`LinkProgress`). Saved
+/// beside the queue, so a hub relaunched meanwhile carries on watching it.
+public struct LinkPreparation: Codable, Equatable, Sendable {
+    /// cmdlp's track id.
+    public var linkID: String
+    /// The cmdlp zone it's downloading in.
+    public var zone: String?
+    public var title: String
+    /// Who it's queued for: the guest (or host) who added it first.
+    public var requester: Requester
+    /// The queue item's id once it's queued (a display's chosen id, or a new one).
+    public var itemID: UUID
+    /// When it was added: the request's time, and where "more than 15 seconds" counts from.
+    public var addedAt: Date
+    /// The phones that added it, first the requester's: each sees it preparing, and is told if
+    /// it fails.
+    public var clients: [String]
+    /// It's expected to take more than `LinkPrepEstimate.limit` (`LinkProgress.takesLong`). Once
+    /// set it stays, so the phone's message doesn't come and go.
+    public var takesLong: Bool
+
+    public init(linkID: String, zone: String?, title: String, requester: Requester, itemID: UUID, addedAt: Date,
+                clients: [String], takesLong: Bool = false) {
+        self.linkID = linkID
+        self.zone = zone
+        self.title = title
+        self.requester = requester
+        self.itemID = itemID
+        self.addedAt = addedAt
+        self.clients = clients
+        self.takesLong = takesLong
+    }
+}
+
+/// How a link being prepared is getting on, for the phones that added it: "Preparing… 37%", and
+/// once it's expected to take more than 15 seconds, a line saying it will queue by itself.
+public struct LinkProgress: Codable, Equatable, Sendable {
+    /// The song's id, as in the phone's results ("link:…").
+    public var id: String
+    public var title: String
+    /// Whole percents, at most 99 until it's ready; nil before cmdlp knows.
+    public var percent: Int?
+    public var takesLong: Bool
+
+    public init(id: String, title: String, percent: Int?, takesLong: Bool) {
+        self.id = id
+        self.title = title
+        self.percent = percent
+        self.takesLong = takesLong
+    }
+}
+
+/// A link that couldn't be prepared, for a phone that added it: the song's id and the sentence
+/// to show ("Couldn’t add “Title”").
+public struct LinkFailure: Codable, Equatable, Sendable {
+    public var id: String
+    public var text: String
+
+    public init(id: String, text: String) {
+        self.id = id
+        self.text = text
+    }
+}
+
+/// What a phone hears about the links it added (`PartySession.linkProgress(for:)`): those still
+/// preparing, and those that failed since it last asked (each told once).
+public struct LinkProgressReply: Codable, Equatable, Sendable {
+    public var preparing: [LinkProgress]
+    public var failed: [LinkFailure]
+
+    public init(preparing: [LinkProgress], failed: [LinkFailure]) {
+        self.preparing = preparing
+        self.failed = failed
+    }
+}
+
+/// What became of a link a phone added: queued at once (it was already downloaded), or
+/// preparing, to be queued when it's ready.
+public enum LinkAddResult: Equatable, Sendable {
+    case queued(AddResult)
+    case preparing(LinkProgress)
+}
+
+/// Whether a link being prepared will take more than `limit` seconds from when it was added: the
+/// time so far, plus what's left (yt-dlp's ETA when cmdlp passes it on, otherwise the download's
+/// rate between the first and latest percentages seen, once they're a second apart). Without an
+/// estimate, only once the time so far is past the limit.
+public enum LinkPrepEstimate {
+    public static let limit: TimeInterval = 15
+
+    public struct Sample: Equatable, Sendable {
+        public var at: Date
+        public var percent: Double
+
+        public init(at: Date, percent: Double) {
+            self.at = at
+            self.percent = percent
+        }
+    }
+
+    public static func takesLong(addedAt: Date, first: Sample?, latest: Sample?, eta: Double?, now: Date,
+                                 limit: TimeInterval = limit) -> Bool {
+        let elapsed = now.timeIntervalSince(addedAt)
+        if elapsed > limit { return true }
+        if let eta, eta.isFinite, eta >= 0 { return elapsed + eta > limit }
+        guard let first, let latest else { return false }
+        let span = latest.at.timeIntervalSince(first.at)
+        guard span >= 1, latest.percent > first.percent else { return false }
+        let remaining = (100 - min(latest.percent, 100)) / ((latest.percent - first.percent) / span)
+        return elapsed + remaining > limit
     }
 }
 

@@ -8,11 +8,13 @@ import Testing
 /// token, never a link's signed audio address), and an Apple TV's `POST /api/host/links`.
 @MainActor
 @Suite(.serialized) struct LinkServerTests {
-    /// cmdlp without a network: every link one pending track, the lookup as slow as asked.
+    /// cmdlp without a network: every link one track, pending when looked up and then as
+    /// `status` says (ready: already downloaded), the lookup as slow as asked.
     @MainActor
     final class Links: LinkService {
         var lookupDelay: Duration = .zero
         var refusal: CmdlpError?
+        var status: LinkTrack.Status = .ready
         private(set) var resolved: [String] = []
 
         static let track = CmdlpTrack(id: "L1L1L1L1L1L1L1L1L1L1L1", zone: "zone-1", status: .pending, title: "Pasted", artist: "Uploader",
@@ -26,7 +28,13 @@ import Testing
             return Self.track
         }
 
-        func track(id: String) async throws -> CmdlpTrack { Self.track }
+        func track(id: String) async throws -> CmdlpTrack {
+            var track = Self.track
+            track.status = status
+            if status == .pending { track.progress = .init(percent: 37) }
+            if status == .failed { track.error = "ERROR: [youtube] abc: Video unavailable" }
+            return track
+        }
         func deleteZone(_ zone: String) async throws {}
     }
 
@@ -111,7 +119,7 @@ import Testing
         #expect(track.link?.service == "YouTube")
         #expect(!String(decoding: data, as: UTF8.self).contains("TOPSECRETSIG"))
 
-        // Picked: queued, and the hub (only) has its audio.
+        // Picked (already downloaded): queued, and the hub (only) has its audio.
         let body = try #require(try JSONSerialization.jsonObject(with: data) as? [String: Any])
         let (added, reply) = try await post("\(hub.base)/api/add", ["track": body, "clientId": "phone-1", "name": "Sam"])
         #expect(added == 200)
@@ -140,6 +148,58 @@ import Testing
         let (status, _) = try await post("\(hub.base)/api/add", ["track": body, "clientId": "phone-1"])
         #expect(status == 200)
         #expect(hub.session.state.upNext.first?.track.link?.audioURL?.host() == "cmdlp.example")
+    }
+
+    /// Still downloading: `/api/add` says "preparing" with its progress, which only the phones
+    /// that added it can follow (`/api/link/progress`), and it's queued once it's ready.
+    @Test func aLinkStillDownloadingIsPreparedForItsPhone() async throws {
+        let hub = try await hub(port: 18959)
+        defer { Task { await hub.stop() } }
+        hub.links.status = .pending
+        hub.session.linkPollInterval = .milliseconds(20)
+        let body = try #require(try JSONSerialization.jsonObject(with: JSONEncoder().encode(Links.track.queueTrack.forGuests)) as? [String: Any])
+        let (status, data) = try await post("\(hub.base)/api/add", ["track": body, "clientId": "phone-1", "name": "Sam"])
+        #expect(status == 200)
+        let reply = try #require(try JSONSerialization.jsonObject(with: data) as? [String: Any])
+        #expect(reply["result"] as? String == "preparing")
+        let progress = try #require(reply["progress"] as? [String: Any])
+        #expect(progress["id"] as? String == "link:L1L1L1L1L1L1L1L1L1L1L1")
+        #expect(progress["percent"] as? Int == 37)
+        #expect(progress["takesLong"] as? Bool == false)
+        #expect(hub.session.state.upNext.isEmpty)
+        #expect(!(try await text("\(hub.base)/api/state")).contains("L1L1L1"))
+
+        let (_, mine) = try await post("\(hub.base)/api/link/progress", ["clientId": "phone-1"])
+        let following = try JSONDecoder().decode(LinkProgressReply.self, from: mine)
+        #expect(following.preparing.map(\.id) == ["link:L1L1L1L1L1L1L1L1L1L1L1"])
+        let (_, theirs) = try await post("\(hub.base)/api/link/progress", ["clientId": "phone-2"])
+        #expect(try JSONDecoder().decode(LinkProgressReply.self, from: theirs) == LinkProgressReply(preparing: [], failed: []))
+
+        hub.links.status = .ready
+        for _ in 0..<100 where hub.session.state.upNext.isEmpty { try await Task.sleep(for: .milliseconds(20)) }
+        #expect(hub.session.state.upNext.first?.track.id == "link:L1L1L1L1L1L1L1L1L1L1L1")
+        #expect(hub.session.state.upNext.first?.requester?.clientID == "phone-1")
+        let (_, done) = try await post("\(hub.base)/api/link/progress", ["clientId": "phone-1"])
+        #expect(try JSONDecoder().decode(LinkProgressReply.self, from: done) == LinkProgressReply(preparing: [], failed: []))
+    }
+
+    /// One that fails: the phone that added it hears so once, in plain words; Up Next is untouched.
+    @Test func aFailedPreparationIsToldToItsPhoneOnce() async throws {
+        let hub = try await hub(port: 18960)
+        defer { Task { await hub.stop() } }
+        hub.links.status = .pending
+        hub.session.linkPollInterval = .milliseconds(20)
+        let body = try #require(try JSONSerialization.jsonObject(with: JSONEncoder().encode(Links.track.queueTrack.forGuests)) as? [String: Any])
+        _ = try await post("\(hub.base)/api/add", ["track": body, "clientId": "phone-1"])
+        hub.links.status = .failed
+        for _ in 0..<100 where !hub.session.linkPreparations.isEmpty { try await Task.sleep(for: .milliseconds(20)) }
+        let (_, first) = try await post("\(hub.base)/api/link/progress", ["clientId": "phone-1"])
+        let told = try JSONDecoder().decode(LinkProgressReply.self, from: first)
+        #expect(told.failed.map(\.text) == ["Couldn’t add “Pasted”"])
+        #expect(!String(decoding: first, as: UTF8.self).contains("ERROR"))
+        let (_, again) = try await post("\(hub.base)/api/link/progress", ["clientId": "phone-1"])
+        #expect(try JSONDecoder().decode(LinkProgressReply.self, from: again).failed.isEmpty)
+        #expect(hub.session.state.upNext.isEmpty)
     }
 
     @Test func refusalsSayWhyToThePhone() async throws {

@@ -232,8 +232,7 @@ private struct UpNextRow: View {
                 Text(item.track.title)
                     .font(.system(size: 17, weight: .medium))
                     .foregroundStyle(.white)
-                // A link still downloading says how far it's got.
-                Text(item.track.rowSubtitle)
+                Text(item.track.artist)
                     .font(.system(size: 14))
                     .foregroundStyle(.white.opacity(0.6))
             }

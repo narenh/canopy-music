@@ -105,6 +105,13 @@ struct TVLibraryPlayTestView: View {
 
         // 2. Played by the engine, as a zone plays it ("[engine]" lines: queue set, play()
         // returned or threw, and on tvOS the off-main check that it started).
+        // `-libraryPlayTestAttach`: the libraries get the account first (private API, as
+        // `privatelib`), and the engine may line library songs up again: does the account also
+        // stop the freeze lining one up caused?
+        if args.contains("-libraryPlayTestAttach") {
+            log("attach: \(LibraryTestPrivate.giveLibrariesTheActiveAccount())")
+            AppleMusicEngine.debugLinesUpLibrarySongs = true
+        }
         let engine = AppleMusicEngine(cache: cache)
         engine.onEvent = { event in log("engine event: \(event)") }
         log("engine.play…")

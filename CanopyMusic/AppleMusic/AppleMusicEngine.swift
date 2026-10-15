@@ -76,6 +76,13 @@ final class AppleMusicEngine: PlaybackEngine {
     static let libraryStartDeadline: TimeInterval = 8
     /// A library song watched in `play` until it has played this far.
     static let librarySettle: TimeInterval = 2
+    #if DEBUG
+    /// Debug builds: line library songs up on tvOS after all (the library play test, with the
+    /// account attached by private API).
+    nonisolated(unsafe) static var debugLinesUpLibrarySongs = false
+    #else
+    private static let debugLinesUpLibrarySongs = false
+    #endif
     private var currentIsLibraryOnly = false
     /// A library song's start, on tvOS: the time the watch last read it playing at, and when.
     private var startReading: (time: TimeInterval, at: Date)?
@@ -288,7 +295,7 @@ final class AppleMusicEngine: PlaybackEngine {
         // connection and froze the main thread on a real Apple TV, so neither it nor anything
         // behind one is lined up. The session's `.reachedEnd` then starts the next song itself,
         // after a short gap (the clock notices the end: `EntrylessTracker`).
-        if Self.readsLibrarySongsOffMain, track.isLibraryOnly || currentIsLibraryOnly {
+        if Self.readsLibrarySongsOffMain, track.isLibraryOnly || currentIsLibraryOnly, !Self.debugLinesUpLibrarySongs {
             stagedIsLibraryOnly = false
             log("not lining up \(track.title) (a library song on tvOS)")
             throw AppleMusicError.libraryStagingRefused

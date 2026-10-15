@@ -30,6 +30,8 @@ struct MotionArtworkView: View {
     @State private var found: Found?
     @State private var url: URL?
     @State private var isShowing = false
+    /// Whether the video is actually moving (not stopped, nor starting up after a pause).
+    @State private var isMoving = false
     /// Whether the app is in the background (the video stops there). Not `scenePhase`: under this
     /// app's UIKit scene delegate it reads `.background` even in the foreground, which kept the
     /// video paused on its first frame.
@@ -48,7 +50,12 @@ struct MotionArtworkView: View {
     /// To try (against a plain pause, false): paused, the video fades to the still art over
     /// `pauseFade`, still moving until it's gone, then stops; it plays and fades back in with the music.
     static let fadesWhilePaused = true
-    static let pauseFade: TimeInterval = 0.5
+    static let pauseFade: TimeInterval = 0.8
+
+    /// Shown, not faded to the still art: the music's playing and the video's moving.
+    private var movesShown: Bool {
+        !Self.fadesWhilePaused || (isPlaying && isMoving)
+    }
 
     static func leavesMusicAlone(isDisplay: Bool) -> Bool {
         if isDisplay { return true }
@@ -79,7 +86,8 @@ struct MotionArtworkView: View {
             if let url {
                 LoopingVideo(
                     url: url, pixels: side * displayScale,
-                    isActive: !inBackground && !isHidden && !screenCovered && !LowPowerMode.shared.isOn, isPlaying: isPlaying
+                    isActive: !inBackground && !isHidden && !screenCovered && !LowPowerMode.shared.isOn, isPlaying: isPlaying,
+                    onMoving: { isMoving = $0 }
                 ) {
                     withAnimation(.easeIn(duration: 0.8)) { isShowing = true }
                 } onFailed: {
@@ -87,9 +95,10 @@ struct MotionArtworkView: View {
                 }
                 .id(url)
                 .opacity(isShowing ? 1 : 0)
-                // Paused, the stopped video fades quickly to the still art, and back as it plays.
-                .opacity(isPlaying || !Self.fadesWhilePaused ? 1 : 0)
-                .animation(.easeInOut(duration: Self.pauseFade), value: isPlaying)
+                // Paused, the video fades to the still art (still moving until it's gone). Played,
+                // it fades back once it's moving again, not while it's still a stopped frame.
+                .opacity(movesShown ? 1 : 0)
+                .animation(.easeInOut(duration: Self.pauseFade), value: movesShown)
             }
         }
         .onGeometryChange(for: CGFloat.self, of: { max($0.size.width, $0.size.height) }) { side = $0 }
@@ -102,6 +111,7 @@ struct MotionArtworkView: View {
             found = nil
             url = nil
             isShowing = false
+            isMoving = false
             guard MotionArtwork.isEnabled, Self.leavesMusicAlone(isDisplay: model.isDisplay), let track else { return }
             #if DEBUG
             if let test = Self.testVideo(for: track) {
@@ -244,6 +254,8 @@ private struct LoopingVideo: UIViewRepresentable {
     let pixels: CGFloat
     let isActive: Bool
     let isPlaying: Bool
+    /// Called when the video starts moving (true) and when it stops (false).
+    let onMoving: @MainActor (Bool) -> Void
     /// Called once, when the first frame is ready to show.
     let onReady: @MainActor () -> Void
     /// Called once if the video can't play.
@@ -251,6 +263,7 @@ private struct LoopingVideo: UIViewRepresentable {
 
     func makeUIView(context: Context) -> LoopingVideoView {
         let view = LoopingVideoView()
+        view.onMoving = onMoving
         view.start(url: url, pixels: pixels, onReady: onReady, onFailed: onFailed)
         view.setActive(isActive, playing: isPlaying, animated: false)
         return view
@@ -278,6 +291,7 @@ private final class LoopingVideoView: UIView {
     private var interruptionObserver: NSObjectProtocol?
     private var onReady: (@MainActor () -> Void)?
     private var onFailed: (@MainActor () -> Void)?
+    var onMoving: (@MainActor (Bool) -> Void)?
     /// Whether we want it playing (`setActive`), for the debug log.
     private var wantsToPlay = false
     /// False until the player is cut off from the audio session; `setActive` meanwhile only
@@ -402,6 +416,12 @@ private final class LoopingVideoView: UIView {
         @unknown default: "unknown"
         }
         motionLog("video \(status), rate \(player.rate), at \(String(format: "%.3f", player.currentTime().seconds)) s, wants to play: \(wantsToPlay)")
+        // Waiting (a stall while playing) leaves it as it was.
+        switch player.timeControlStatus {
+        case .playing: onMoving?(true)
+        case .paused: onMoving?(false)
+        default: break
+        }
     }
 
     func stop() {
@@ -418,6 +438,7 @@ private final class LoopingVideoView: UIView {
         looperObservation = nil
         onReady = nil
         onFailed = nil
+        onMoving = nil
         looper?.disableLooping()
         looper = nil
         player?.pause()

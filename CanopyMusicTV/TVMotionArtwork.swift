@@ -21,6 +21,8 @@ struct TVMotionArtworkView: View {
     @State private var found: URL?
     @State private var url: URL?
     @State private var isShowing = false
+    /// Whether the video is actually moving (not stopped, nor starting up after a pause).
+    @State private var isMoving = false
     /// The artwork's side, for the most video worth streaming.
     @State private var side: CGFloat = 0
     @Environment(\.scenePhase) private var scenePhase
@@ -30,7 +32,12 @@ struct TVMotionArtworkView: View {
     /// To try, as the iPad's (`MotionArtworkView.fadesWhilePaused`): paused, the video fades to
     /// the still art, still moving until it's gone, then stops; it plays and fades back in.
     static let fadesWhilePaused = true
-    static let pauseFade: TimeInterval = 0.5
+    static let pauseFade: TimeInterval = 0.8
+
+    /// Shown, not faded to the still art: the music's playing and the video's moving.
+    private var movesShown: Bool {
+        !Self.fadesWhilePaused || (isPlaying && isMoving)
+    }
 
     var body: some View {
         ZStack {
@@ -39,15 +46,17 @@ struct TVMotionArtworkView: View {
             if let url {
                 TVLoopingVideo(
                     url: url, pixels: side * displayScale,
-                    isActive: scenePhase != .background && !screenCovered && !LowPowerMode.shared.isOn, isPlaying: isPlaying
+                    isActive: scenePhase != .background && !screenCovered && !LowPowerMode.shared.isOn, isPlaying: isPlaying,
+                    onMoving: { isMoving = $0 }
                 ) {
                     withAnimation(.easeIn(duration: 0.8)) { isShowing = true }
                 }
                 .id(url)
                 .opacity(isShowing ? 1 : 0)
-                // Paused, the stopped video fades quickly to the still art, and back as it plays.
-                .opacity(isPlaying || !Self.fadesWhilePaused ? 1 : 0)
-                .animation(.easeInOut(duration: Self.pauseFade), value: isPlaying)
+                // Paused, the video fades to the still art (still moving until it's gone). Played,
+                // it fades back once it's moving again, not while it's still a stopped frame.
+                .opacity(movesShown ? 1 : 0)
+                .animation(.easeInOut(duration: Self.pauseFade), value: movesShown)
             }
         }
         .onGeometryChange(for: CGFloat.self, of: { max($0.size.width, $0.size.height) }) { side = $0 }
@@ -58,6 +67,7 @@ struct TVMotionArtworkView: View {
             found = nil
             url = nil
             isShowing = false
+            isMoving = false
             guard MotionArtwork.isEnabled, let track else { return }
             #if DEBUG
             // `-motionArtworkTestURL <HLS URL>`: plays that for every song, to try the video in the
@@ -104,11 +114,14 @@ private struct TVLoopingVideo: UIViewRepresentable {
     let pixels: CGFloat
     let isActive: Bool
     let isPlaying: Bool
+    /// Called when the video starts moving (true) and when it stops (false).
+    let onMoving: @MainActor (Bool) -> Void
     /// Called once, when the first frame is ready to show.
     let onReady: @MainActor () -> Void
 
     func makeUIView(context: Context) -> TVLoopingVideoView {
         let view = TVLoopingVideoView()
+        view.onMoving = onMoving
         view.start(url: url, pixels: pixels, onReady: onReady)
         view.setActive(isActive, playing: isPlaying, animated: false)
         return view
@@ -134,6 +147,7 @@ private final class TVLoopingVideoView: UIView {
     private var statusObservation: NSKeyValueObservation?
     private var interruptionObserver: NSObjectProtocol?
     private var onReady: (@MainActor () -> Void)?
+    var onMoving: (@MainActor (Bool) -> Void)?
     /// Whether we want it playing (`setActive`), for the debug log.
     private var wantsToPlay = false
 
@@ -226,6 +240,12 @@ private final class TVLoopingVideoView: UIView {
         @unknown default: "unknown"
         }
         motionLog("video \(status), wants to play: \(wantsToPlay)")
+        // Waiting (a stall while playing) leaves it as it was.
+        switch player.timeControlStatus {
+        case .playing: onMoving?(true)
+        case .paused: onMoving?(false)
+        default: break
+        }
     }
 
     func stop() {
@@ -239,6 +259,7 @@ private final class TVLoopingVideoView: UIView {
         readyObservation?.invalidate()
         readyObservation = nil
         onReady = nil
+        onMoving = nil
         looper?.disableLooping()
         looper = nil
         player?.pause()

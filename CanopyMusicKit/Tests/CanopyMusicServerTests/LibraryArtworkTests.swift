@@ -51,8 +51,11 @@ struct LibraryArtworkCatalog: MusicCatalog {
 @MainActor
 @Suite(.serialized)
 struct LibraryArtworkTests {
+    /// Without a cache: the relay's responses may be kept a day, and must reach the server here.
+    let http = URLSession(configuration: .ephemeral)
+
     func get(_ url: String) async throws -> (status: Int, type: String?, data: Data) {
-        let (data, response) = try await URLSession.shared.data(from: URL(string: url)!)
+        let (data, response) = try await http.data(from: URL(string: url)!)
         let http = try #require(response as? HTTPURLResponse)
         return (http.statusCode, http.value(forHTTPHeaderField: "Content-Type"), data)
     }
@@ -80,7 +83,8 @@ struct LibraryArtworkTests {
         // An odd size gets the next one up; none gets the largest.
         #expect(pixelWidth(try await get("\(base)/i.bVl4FRZ1zY?size=500").data) == 600)
         #expect(pixelWidth(try await get("\(base)/i.bVl4FRZ1zY").data) == 1200)
-        #expect(await artwork.asked == ["i.bVl4FRZ1zY@160", "i.bVl4FRZ1zY@600", "i.bVl4FRZ1zY@1200"])
+        let asked = await artwork.asked
+        #expect(asked == ["i.bVl4FRZ1zY@160", "i.bVl4FRZ1zY@600", "i.bVl4FRZ1zY@1200"])
     }
 
     @Test func neverScaledUp() async throws {

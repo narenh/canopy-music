@@ -21,6 +21,10 @@ struct MotionArtworkView: View {
     /// Told when the video starts showing over the still art and when it goes (Low Power Mode,
     /// another song): Now Playing hides its equalizer bars while it shows.
     var onShowing: (Bool) -> Void = { _ in }
+    /// Told when a video known ahead to be coming (`MotionArtworkAhead`) won't show after all:
+    /// the lookup found none, the video failed or didn't show in time, or Low Power Mode. Now
+    /// Playing, which left its equalizer bars out for it, brings them back.
+    var onWontShow: () -> Void = {}
 
     /// The video found for the song, until it can start (`waits`).
     @State private var found: Found?
@@ -41,12 +45,27 @@ struct MotionArtworkView: View {
     /// always can. On an iPad hub on iOS 27 the video is cut off from the audio session
     /// (`LoopingVideoView.start`); a Mac hub on macOS 27 has no cut-off but was seen not to pause.
     /// Before 27 a hub keeps the still art: a paused party is far worse than art that doesn't move.
-    private var leavesMusicAlone: Bool {
-        if model.isDisplay { return true }
+    static func leavesMusicAlone(isDisplay: Bool) -> Bool {
+        if isDisplay { return true }
         // On a Mac this is macOS 27 (an iPad app's iOS version follows the Mac's).
         if #available(iOS 27, *) { return true }
         return false
     }
+
+    #if DEBUG
+    /// `-motionArtworkTestURL <URL>`: that video for every song, to try the video in the simulator
+    /// (which can't reach Apple Music) or with any service. With `-motionArtworkTestEveryOther`,
+    /// only songs whose id ends in an even digit (every other demo song), to try songs without.
+    /// nil without the argument; `.some(nil)` for a song left without.
+    static func testVideo(for track: QueueTrack) -> URL?? {
+        let args = ProcessInfo.processInfo.arguments
+        guard let i = args.firstIndex(of: "-motionArtworkTestURL"), i + 1 < args.count else { return nil }
+        if args.contains("-motionArtworkTestEveryOther"), let digit = track.id.last?.wholeNumberValue, digit % 2 == 1 {
+            return .some(nil)
+        }
+        return .some(URL(string: args[i + 1]))
+    }
+    #endif
 
     var body: some View {
         ZStack {
@@ -58,6 +77,8 @@ struct MotionArtworkView: View {
                     isActive: !inBackground && !isHidden && !screenCovered && !LowPowerMode.shared.isOn, isPlaying: isPlaying
                 ) {
                     withAnimation(.easeIn(duration: 0.8)) { isShowing = true }
+                } onFailed: {
+                    onWontShow()
                 }
                 .id(url)
                 .opacity(isShowing ? 1 : 0)
@@ -73,19 +94,19 @@ struct MotionArtworkView: View {
             found = nil
             url = nil
             isShowing = false
-            guard MotionArtwork.isEnabled, leavesMusicAlone, let track else { return }
+            guard MotionArtwork.isEnabled, Self.leavesMusicAlone(isDisplay: model.isDisplay), let track else { return }
             #if DEBUG
-            // `-motionArtworkTestURL <HLS URL>`: plays that for every song, to try the video in the
-            // simulator (which can't reach Apple Music) or with any service.
-            let args = ProcessInfo.processInfo.arguments
-            if let i = args.firstIndex(of: "-motionArtworkTestURL"), i + 1 < args.count {
+            if let test = Self.testVideo(for: track) {
                 // `-motionArtworkTestDelay <seconds>`: as if the lookup took that long, to try a
                 // lookup that answers after the page has slid in.
+                let args = ProcessInfo.processInfo.arguments
                 if let d = args.firstIndex(of: "-motionArtworkTestDelay"), d + 1 < args.count, let seconds = Double(args[d + 1]) {
                     try? await Task.sleep(for: .seconds(seconds))
                     guard !Task.isCancelled else { return }
                 }
-                found = URL(string: args[i + 1]).map { Found(url: $0, trackID: track.id) }
+                MotionArtworkAhead.shared.remember(test, for: track)
+                if test == nil { onWontShow() }
+                found = test.map { Found(url: $0, trackID: track.id) }
                 return
             }
             #endif
@@ -95,13 +116,25 @@ struct MotionArtworkView: View {
             // until the song changes, so one hiccup cost the whole song. An album known to have
             // none answers from the lookup's memory.
             if video == nil {
+                guard !Task.isCancelled else { return }
+                onWontShow()
                 try? await Task.sleep(for: .seconds(4))
                 guard !Task.isCancelled else { return }
                 video = await lookup.videoURL(for: track)
             }
             guard !Task.isCancelled else { return }
             motionLog("lookup \"\(track.title)\" (\(track.id), album \(track.albumID ?? "unknown")): \(video?.absoluteString ?? "none")")
+            MotionArtworkAhead.shared.remember(video, for: track)
             found = video.map { Found(url: $0, trackID: track.id) }
+        }
+        // A video that hasn't shown a while after it started (a stream that stalls) gives the
+        // equalizer bars back; they go again if it shows after all.
+        .task(id: url) {
+            guard url != nil else { return }
+            try? await Task.sleep(for: .seconds(10))
+            guard !Task.isCancelled, !isShowing else { return }
+            motionLog("not showing \"\(track?.title ?? "nothing")\" 10 s after it started")
+            onWontShow()
         }
         // Started from here, not from the task: the task holds this view as it was when the song
         // changed, so `waits` there could still say the page was sliding in. A lookup that
@@ -117,6 +150,7 @@ struct MotionArtworkView: View {
                 startIfReady()
                 return
             }
+            onWontShow()
             withAnimation(.easeOut(duration: 0.8)) { isShowing = false } completion: {
                 if LowPowerMode.shared.isOn { url = nil }
             }
@@ -145,6 +179,54 @@ struct MotionArtworkView: View {
     }
 }
 
+/// Whether a song's animated art will show, known before its page slides in: Now Playing leaves
+/// the equalizer bars out of a song with video from the slide's first frame, rather than showing
+/// them as it arrives and fading them out when the video starts. Filled by looking up the next
+/// songs ahead (`lookAhead`; only the lookup, not the video) and by `MotionArtworkView`'s own.
+@MainActor
+final class MotionArtworkAhead {
+    static let shared = MotionArtworkAhead()
+
+    /// Track id → its video, or nil when it has none (or the lookup failed). Not there: not
+    /// known yet.
+    private var videos: [QueueTrack.ID: URL?] = [:]
+
+    /// True when the song's video was found, motion artwork can show here and Low Power Mode is
+    /// off; false when it can't show; nil when that isn't known yet.
+    func willShow(_ track: QueueTrack?, isDisplay: Bool) -> Bool? {
+        guard let track, Self.allowed(isDisplay: isDisplay) else { return false }
+        guard let known = videos[track.id] else { return nil }
+        return known != nil
+    }
+
+    func remember(_ video: URL?, for track: QueueTrack) {
+        videos[track.id] = .some(video)
+    }
+
+    /// Looks up the videos of the next songs. One known to have a video isn't asked again; the
+    /// others are (`MotionArtworkLookup` answers an album known to have none from memory, and a
+    /// failed lookup gets another go).
+    func lookAhead(_ tracks: [QueueTrack], catalog: any MusicCatalog, isDisplay: Bool) async {
+        for track in tracks where (videos[track.id] ?? nil) == nil {
+            guard Self.allowed(isDisplay: isDisplay), !Task.isCancelled else { return }
+            #if DEBUG
+            if let test = MotionArtworkView.testVideo(for: track) {
+                remember(test, for: track)
+                continue
+            }
+            #endif
+            // Apple Music catalog songs only, as `MotionArtworkLookup` itself checks.
+            guard MotionArtwork.isCatalogID(track.id), let lookup = catalog.motionArtwork else { continue }
+            let video = await lookup.videoURL(for: track)
+            remember(video, for: track)
+        }
+    }
+
+    private static func allowed(isDisplay: Bool) -> Bool {
+        MotionArtwork.isEnabled && MotionArtworkView.leavesMusicAlone(isDisplay: isDisplay) && !LowPowerMode.shared.isOn
+    }
+}
+
 /// A muted, looping `AVPlayerLayer`. It never publishes Now Playing info (no
 /// `AVPlayerViewController`), never plays to AirPlay, never touches the audio session (iOS 27),
 /// pauses while `isActive` is false, and follows the music's play/pause (`isPlaying`).
@@ -156,10 +238,12 @@ private struct LoopingVideo: UIViewRepresentable {
     let isPlaying: Bool
     /// Called once, when the first frame is ready to show.
     let onReady: @MainActor () -> Void
+    /// Called once if the video can't play.
+    let onFailed: @MainActor () -> Void
 
     func makeUIView(context: Context) -> LoopingVideoView {
         let view = LoopingVideoView()
-        view.start(url: url, pixels: pixels, onReady: onReady)
+        view.start(url: url, pixels: pixels, onReady: onReady, onFailed: onFailed)
         view.setActive(isActive, playing: isPlaying, animated: false)
         return view
     }
@@ -182,8 +266,10 @@ private final class LoopingVideoView: UIView {
     private var looper: AVPlayerLooper?
     private var readyObservation: NSKeyValueObservation?
     private var statusObservation: NSKeyValueObservation?
+    private var looperObservation: NSKeyValueObservation?
     private var interruptionObserver: NSObjectProtocol?
     private var onReady: (@MainActor () -> Void)?
+    private var onFailed: (@MainActor () -> Void)?
     /// Whether we want it playing (`setActive`), for the debug log.
     private var wantsToPlay = false
     /// False until the player is cut off from the audio session; `setActive` meanwhile only
@@ -191,8 +277,9 @@ private final class LoopingVideoView: UIView {
     private var canPlay = false
     private var requested = (active: false, playing: false)
 
-    func start(url: URL, pixels: CGFloat, onReady: @escaping @MainActor () -> Void) {
+    func start(url: URL, pixels: CGFloat, onReady: @escaping @MainActor () -> Void, onFailed: @escaping @MainActor () -> Void) {
         self.onReady = onReady
+        self.onFailed = onFailed
         backgroundColor = .clear
         isUserInteractionEnabled = false
         let item = AVPlayerItem(url: url)
@@ -205,7 +292,13 @@ private final class LoopingVideoView: UIView {
         player.allowsExternalPlayback = false
         player.preventsDisplaySleepDuringVideoPlayback = false
         player.audiovisualBackgroundPlaybackPolicy = .pauses
-        looper = AVPlayerLooper(player: player, templateItem: item)
+        let looper = AVPlayerLooper(player: player, templateItem: item)
+        self.looper = looper
+        looperObservation = looper.observe(\.status, options: [.initial, .new]) { [weak self] looper, _ in
+            guard looper.status == .failed else { return }
+            let error = looper.error.map { String(describing: $0) } ?? "no error"
+            Task { @MainActor [weak self] in self?.failOnce(error) }
+        }
         playerLayer.videoGravity = .resizeAspectFill
         playerLayer.player = player
         self.player = player
@@ -331,7 +424,10 @@ private final class LoopingVideoView: UIView {
         interruptionObserver = nil
         readyObservation?.invalidate()
         readyObservation = nil
+        looperObservation?.invalidate()
+        looperObservation = nil
         onReady = nil
+        onFailed = nil
         looper?.disableLooping()
         looper = nil
         player?.pause()
@@ -344,6 +440,13 @@ private final class LoopingVideoView: UIView {
         guard let onReady else { return }
         self.onReady = nil
         onReady()
+    }
+
+    private func failOnce(_ error: String) {
+        guard let onFailed else { return }
+        self.onFailed = nil
+        motionLog("video failed: \(error)")
+        onFailed()
     }
 }
 

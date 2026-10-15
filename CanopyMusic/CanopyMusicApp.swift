@@ -135,6 +135,8 @@ final class SceneDelegate: UIResponder, UIWindowSceneDelegate {
     }
 
     func sceneDidBecomeActive(_ scene: UIScene) {
+        // A display checks in and reconnects at once.
+        model.displayConnection?.resume()
         // iOS tears down listening sockets while suspended; bring the phone server back.
         if wasBackgrounded {
             wasBackgrounded = false
@@ -146,6 +148,8 @@ final class SceneDelegate: UIResponder, UIWindowSceneDelegate {
 
     func sceneDidEnterBackground(_ scene: UIScene) {
         wasBackgrounded = true
+        // A display stops checking in and closes its socket meanwhile (`ZoneConnection.suspend`).
+        model.displayConnection?.suspend()
     }
 }
 

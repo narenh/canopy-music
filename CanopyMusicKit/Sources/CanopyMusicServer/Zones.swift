@@ -364,6 +364,10 @@ public final class ZoneConnection: ZoneRemote {
     @ObservationIgnored private weak var session: PartySession?
     @ObservationIgnored private var loop: Task<Void, Never>?
     @ObservationIgnored private var heartbeat: Task<Void, Never>?
+    /// The socket open now (or opening), so `suspend` and `stop` can close it.
+    @ObservationIgnored private var socket: URLSessionWebSocketTask?
+    /// In the background (`suspend`): nothing runs until `resume`.
+    @ObservationIgnored private var isSuspended = false
     @ObservationIgnored private let urlSession: URLSession = {
         let config = URLSessionConfiguration.ephemeral
         config.timeoutIntervalForRequest = 8
@@ -394,9 +398,31 @@ public final class ZoneConnection: ZoneRemote {
         }
     }
 
+    /// The app went to the background: no check-ins, and the socket closes, until `resume`. The
+    /// hub drops the display from its list after `PartySession.displayTimeout` (30 s), as it
+    /// does one iOS has suspended; a quick trip away keeps it listed.
+    public func suspend() {
+        guard loop != nil else { return }
+        isSuspended = true
+        loop?.cancel()
+        heartbeat?.cancel()
+        loop = nil
+        heartbeat = nil
+        socket?.cancel(with: .goingAway, reason: nil)
+        socket = nil
+        isConnected = false
+    }
+
+    /// Back in the foreground: checks in and reconnects at once.
+    public func resume() {
+        guard isSuspended, let session else { return }
+        isSuspended = false
+        start(session: session)
+    }
+
     public func stop() {
         // Leaving: tell the hub, so it drops this display now rather than after its timeout.
-        if heartbeat != nil {
+        if heartbeat != nil || isSuspended {
             struct Bye: Encodable { var clientId: String }
             let bye = Bye(clientId: clientID)
             Task { [self] in _ = try? await post("/api/display/bye", bye) }
@@ -405,6 +431,9 @@ public final class ZoneConnection: ZoneRemote {
         heartbeat?.cancel()
         loop = nil
         heartbeat = nil
+        isSuspended = false
+        socket?.cancel(with: .goingAway, reason: nil)
+        socket = nil
         isConnected = false
     }
 
@@ -413,6 +442,7 @@ public final class ZoneConnection: ZoneRemote {
         while !Task.isCancelled {
             guard let url = Self.webSocketURL(baseURL) else { return }
             let socket = urlSession.webSocketTask(with: url)
+            self.socket = socket
             socket.resume()
             do {
                 while !Task.isCancelled {

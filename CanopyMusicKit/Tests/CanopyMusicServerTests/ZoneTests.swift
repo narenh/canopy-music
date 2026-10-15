@@ -65,6 +65,31 @@ struct ZoneTests {
         #expect(hub.state.current?.id == current)
     }
 
+    /// In the background a display neither checks in nor keeps its socket (the hub lets it go
+    /// after its timeout); back, it reconnects at once and catches up.
+    @Test func aSuspendedDisplayCatchesUpWhenResumed() async throws {
+        let (hub, server, task) = try await makeHub(port: 18891)
+        defer { task.cancel(); Task { await server.stop() } }
+        let connection = ZoneConnection(baseURL: URL(string: "http://127.0.0.1:18891")!, clientID: "kitchen", name: "Kitchen iPad", kind: .ipad)
+        let display = PartySession(remote: connection)
+        connection.start(session: display)
+        defer { connection.stop() }
+        #expect(await waitFor { connection.isConnected && hub.displays.contains { $0.id == "kitchen" } })
+
+        connection.suspend()
+        #expect(!connection.isConnected)
+        await hub.skip()
+        let current = hub.state.current?.id
+        try? await Task.sleep(for: .milliseconds(300))
+        #expect(display.state.current?.id != current)
+        // The hub's socket for it is gone: no snapshots are made for it.
+        #expect(await waitFor { !hub.isCheckingDrift })
+
+        connection.resume()
+        #expect(await waitFor { connection.isConnected && display.state.current?.id == current })
+        #expect(hub.isCheckingDrift)
+    }
+
     /// A display removes the requests it added, like a phone guest: the hub records its client ID
     /// on them and refuses anything else.
     @Test func displayRemovesItsOwnRequests() async throws {

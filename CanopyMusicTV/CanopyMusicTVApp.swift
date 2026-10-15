@@ -673,7 +673,11 @@ final class TVModel {
         switch phase {
         case .background:
             wasBackgrounded = true
+            // A display stops checking in and closes its socket meanwhile (`ZoneConnection.suspend`).
+            connection?.suspend()
         case .active:
+            // A display checks in and reconnects at once.
+            connection?.resume()
             // Back from Settings, or from the Apple Music prompt: the host's page shows the change.
             if role == .hub { checkService(asking: false) }
             guard wasBackgrounded else { return }

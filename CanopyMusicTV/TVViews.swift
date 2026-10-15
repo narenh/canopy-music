@@ -319,8 +319,9 @@ struct TVZoneListView: View {
 
     var body: some View {
         VStack(spacing: 34) {
-            // The setup screens' "canopy music" lockup (the party screen keeps the wordmark).
-            Image("CanopyMusicLogo").resizable().scaledToFit().frame(height: 150)
+            // The centered "canopy music" lockup, as the phone page's splash (the setup screens
+            // have the left-aligned one; the party screen keeps the wordmark).
+            Image("CanopyMusicLogoCentered").resizable().scaledToFit().frame(height: 120)
             VStack(spacing: 16) {
                 // This TV's own zone from last time comes first.
                 if model.canResumeZone {

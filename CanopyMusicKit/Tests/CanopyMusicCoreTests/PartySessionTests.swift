@@ -15,12 +15,21 @@ final class FakeEngine: PlaybackEngine {
 
     /// Thrown by the next `play`, then cleared.
     var playError: Error?
+    /// Songs the player refuses every time (unavailable): `play` and `stage` throw for them.
+    var unplayable: Set<String> = []
+    /// Every song `play` was asked for, in order, refused ones too.
+    var playAttempts: [String] = []
 
     func play(_ track: QueueTrack) async throws {
+        playAttempts.append(track.id)
         if let playError { self.playError = nil; throw playError }
+        if unplayable.contains(track.id) { throw URLError(.resourceUnavailable) }
         playing = track; staged = nil; isPlaying = true
     }
-    func stage(_ track: QueueTrack?) async throws { staged = track }
+    func stage(_ track: QueueTrack?) async throws {
+        if let track, unplayable.contains(track.id) { throw URLError(.resourceUnavailable) }
+        staged = track
+    }
     func resume() async throws { isPlaying = true }
     func pause() { isPlaying = false }
     func skipToStaged() async throws { finishTrack() }

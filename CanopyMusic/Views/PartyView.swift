@@ -217,7 +217,7 @@ struct PartyView: View {
             .padding(.top, 20)
             .padding(.bottom, 8)
 
-            // Spotify zones: staging the next song failed and Spotify picks what plays next.
+            // Songs that couldn't play were skipped, or (Spotify) the next song couldn't be queued.
             if let issue = session.playerIssue {
                 PlayerIssueLine(text: issue)
                     .padding(.horizontal, 20)

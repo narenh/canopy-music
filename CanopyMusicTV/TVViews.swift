@@ -580,7 +580,8 @@ struct TVPartyView: View {
                     Text("Up next")
                         .font(.system(size: 44, weight: .bold))
                         .holdsRemoteFocus()
-                    // A Spotify hub's next song couldn't be queued on Spotify (quiet, for the host).
+                    // Songs that couldn't play were skipped, or a Spotify hub's next song couldn't
+                    // be queued there (quiet, for the host).
                     if let issue = session.playerIssue {
                         Label(issue, systemImage: "exclamationmark.circle")
                             .font(.system(size: 22, weight: .medium))

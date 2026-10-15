@@ -2536,7 +2536,8 @@
     const skipped = skippedNote(snap);
     $("settings-playlist-skipped").hidden = !skipped;
     $("settings-playlist-skipped").textContent = skipped;
-    // Spotify zones: the next song couldn't be queued on Spotify, which picks what plays next.
+    // A problem with the player: songs that couldn't play were skipped, or (Spotify) the next
+    // song couldn't be queued there.
     $("settings-player-issue").hidden = !snap.playerIssue;
     $("settings-player-issue").textContent = snap.playerIssue || "";
     $("settings-queue").checked = snap.canQueue !== false;

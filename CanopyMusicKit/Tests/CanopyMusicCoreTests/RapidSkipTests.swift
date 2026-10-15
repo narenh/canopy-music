@@ -20,6 +20,8 @@ final class CommandLogEngine: PlaybackEngine {
     var holdPlays = false
     private var held: CheckedContinuation<Void, Never>?
     var isHolding: Bool { held != nil }
+    /// The held play fails once released (the player refused the song).
+    var failHeldPlay = false
     var reportsOnPoll = false
     private var unreported = false
 
@@ -32,7 +34,12 @@ final class CommandLogEngine: PlaybackEngine {
     func play(_ track: QueueTrack) async throws {
         begin("play \(track.id)")
         defer { running -= 1 }
-        if holdPlays { await withCheckedContinuation { held = $0 } } else { await Task.yield() }
+        if holdPlays {
+            await withCheckedContinuation { held = $0 }
+            if failHeldPlay { failHeldPlay = false; throw URLError(.resourceUnavailable) }
+        } else {
+            await Task.yield()
+        }
         // A new queue in the player: a skip not yet reported never will be.
         playing = track; staged = nil; isPlaying = true; currentTime = 0; unreported = false
     }

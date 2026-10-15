@@ -277,6 +277,14 @@ public final class PartySession {
     /// The landing moved the player to its staged song (this item), which the queue is already
     /// on: the player's `.advancedToStaged` confirms it rather than moving the queue on again.
     @ObservationIgnored private var skippedToStagedID: UUID?
+    /// How many songs in a row may fail to play before the session stops moving on: by then it's
+    /// the player or the service, not the songs, and skipping on would empty the queue.
+    static let maxSongsFailingInARow = 3
+    /// `playerIssue` is about songs that couldn't play (`playMovingOn`). It stays while the song
+    /// after them plays (`songFailureShownWith`; nil once a run of failures stopped the music),
+    /// and goes when another song starts.
+    @ObservationIgnored private var showsSongFailure = false
+    @ObservationIgnored private var songFailureShownWith: UUID?
 
     /// Where the current song is. The engine's time, except after a skip or previous the player
     /// hasn't followed yet: that's the song before's, and the new song is at 0:00 until it plays.
@@ -811,7 +819,7 @@ public final class PartySession {
             if skipped { return }
             skippedToStagedID = nil
         }
-        try? await play(current)
+        await playMovingOn(current)
     }
 
     /// Ends a burst of skips without the player following (the session is starting over).
@@ -1042,6 +1050,7 @@ public final class PartySession {
         isUnderWay = true
         onSongStarted?()
         recordPlayed(item)
+        songStarted(item.id)
         isPlaying = engine.isPlaying
         if follower != nil {
             // The player is on our song now.
@@ -1051,6 +1060,60 @@ public final class PartySession {
         }
         broadcast()
         Task { await syncStaging() }
+    }
+
+    /// Plays `item` when nobody pressed Play (a skip's landing, the song before ending): if the
+    /// player can't play it (unavailable, refused), the queue moves on to the next song rather
+    /// than go quiet, and the host is told which were skipped. After `maxSongsFailingInARow` in
+    /// a row the music stops, with an issue, until Play. Runs on the chain (`serially`).
+    private func playMovingOn(_ item: QueueItem) async {
+        var item = item
+        var skipped: [QueueItem] = []
+        let generation = generation
+        while true {
+            do {
+                try await play(item)
+                guard !skipped.isEmpty, generation == self.generation else { return }
+                showSongFailure(skipped.count == 1 ? "Skipped “\(skipped[0].track.title)”, which couldn't play"
+                                                   : "Skipped \(skipped.count) songs that couldn't play", until: item.id)
+                return
+            } catch {
+                ErrorReport.log(error, context: "couldn't play \(item.track.title); moving on")
+                // The session started over, or a tap moved the queue meanwhile: its landing plays.
+                guard generation == self.generation, landingTimer == nil, landingPlays == nil,
+                      state.current?.id == item.id else { return }
+                skipped.append(item)
+                guard skipped.count < Self.maxSongsFailingInARow else {
+                    if engine.isPlaying { engine.pause() }
+                    isPlaying = engine.isPlaying
+                    showSongFailure("Stopped after \(skipped.count) songs in a row couldn't play", until: nil)
+                    return
+                }
+                mutate { $0.advance() }
+                guard let next = state.current else {
+                    isPlaying = engine.isPlaying
+                    broadcast()
+                    return
+                }
+                item = next
+            }
+        }
+    }
+
+    private func showSongFailure(_ notice: String, until songID: UUID?) {
+        playerIssue = notice
+        showsSongFailure = true
+        songFailureShownWith = songID
+        broadcast()
+    }
+
+    /// A song started: a notice about songs that couldn't play before another one goes.
+    private func songStarted(_ id: UUID) {
+        guard showsSongFailure, id != songFailureShownWith else { return }
+        showsSongFailure = false
+        songFailureShownWith = nil
+        playerIssue = nil
+        broadcast()
     }
 
     /// Runs an operation on the engine in turn with the session's own (play, stage, skip), so
@@ -1161,10 +1224,11 @@ public final class PartySession {
             loadedItemID = state.current?.id
             if follower != nil { readPlayerQueueSoon() }
             // Nothing current (the zone ended as the player moved on): nothing started.
-            guard state.current != nil else { return }
+            guard let current = state.current else { return }
             isUnderWay = true
             onSongStarted?()
-            recordPlayed(state.current)
+            recordPlayed(current)
+            songStarted(current.id)
         case .reachedEnd:
             stagedItemID = nil
             loadedItemID = nil
@@ -1177,7 +1241,7 @@ public final class PartySession {
             guard !playerOnOldSong else { return }
             mutate { $0.advance() }
             if let current = state.current {
-                Task { try? await serially { try? await self.play(current) } }
+                Task { try? await serially { await self.playMovingOn(current) } }
             }
         case .statusChanged:
             // After a relaunch, the followed player is found still on the restored song: it's
@@ -1238,6 +1302,7 @@ public final class PartySession {
         cancelStaging()
         externalCurrent = nil
         playerIssue = nil
+        showsSongFailure = false
         if !keepPlayerQueue { foreignUpcoming = [] }
     }
 
@@ -1375,7 +1440,8 @@ public final class PartySession {
         guard isCurrent(run, generation) else { return false }
         stagedItemID = item.id
         stagedConfirmed = true
-        if playerIssue != nil { playerIssue = nil; broadcast() }
+        // Not the notice about songs that couldn't play: it lasts the song.
+        if playerIssue != nil, !showsSongFailure { playerIssue = nil; broadcast() }
         followLog("\(item.track.title) is in the player's queue")
         return true
     }
@@ -1407,6 +1473,7 @@ public final class PartySession {
         stagedItemID = nil
         stagedConfirmed = false
         mutate { $0.unlockNext() }
+        showsSongFailure = false
         playerIssue = "Couldn't queue the next song on \(serviceName ?? "the player")"
         let error = FollowStagingError(titles: tried.map(\.track.title))
         ErrorReport.log(error, context: "follow: gave up staging; the player picks what plays next")

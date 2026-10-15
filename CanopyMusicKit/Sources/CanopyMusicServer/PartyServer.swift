@@ -112,7 +112,7 @@ public final class PartyServer: Sendable {
         // The loading splash's "canopy music" lockup (its background is drawn in CSS).
         await server.appendRoute("GET /logo-music.png", to: StaticFile("logo-music.png", type: "image/png"))
         // A TV zone's setup: the Music bar (the iPad's own Apple Music icon).
-        await server.appendRoute("GET /apple-music.png", to: StaticFile("apple-music.png", type: "image/png"))
+        await server.appendRoute("GET /apple-music.svg", to: StaticFile("apple-music.svg", type: "image/svg+xml"))
         await server.appendRoute("GET /spotify.png", to: StaticFile("spotify.png", type: "image/png"))
         // icon.png is square (iOS rounds home screen icons itself); favicon.png is already rounded.
         await server.appendRoute("GET /icon.png", to: StaticFile("icon.png", type: "image/png"))

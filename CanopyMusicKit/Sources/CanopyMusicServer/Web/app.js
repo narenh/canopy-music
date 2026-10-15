@@ -1764,7 +1764,7 @@
     if (bar.dataset.shown !== shown) {
       bar.dataset.shown = shown;
       bar.dataset.state = status.state;
-      $("setup-music-icon").src = spotifyZone ? "/spotify.png" : "/apple-music.png";
+      $("setup-music-icon").src = spotifyZone ? "/spotify.png" : "/apple-music.svg";
       $("setup-music-icon").classList.toggle("round", spotifyZone);
       $("setup-music-title").textContent = spotifyZone ? "Spotify" : "Apple Music";
       state.innerHTML = status.state === "ok" ? '<span class="dot"></span>Ready'
@@ -1816,7 +1816,7 @@
   function renderServiceOption() {
     const toSpotify = !isSpotify();
     const icon = $("setup-option-icon");
-    icon.src = toSpotify ? "/spotify.png" : "/apple-music.png";
+    icon.src = toSpotify ? "/spotify.png" : "/apple-music.svg";
     icon.classList.toggle("round", toSpotify);
     $("setup-option-title").textContent = toSpotify ? "Spotify" : "Apple Music";
     $("setup-option-note").textContent = toSpotify ? spotifyOptionNote(spotify) : appleMusicOptionNote();

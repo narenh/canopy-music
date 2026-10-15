@@ -51,7 +51,7 @@ struct MotionArtworkView: View {
     /// `pauseFade`, still moving until it's gone, then stops; it plays and fades back in with the
     /// music over `resumeFade`.
     static let fadesWhilePaused = true
-    static let pauseFade: TimeInterval = 0.6
+    static let pauseFade: TimeInterval = 0.4
     static let resumeFade: TimeInterval = 0.8
 
     /// Shown, not faded to the still art: the music's playing and the video's moving.

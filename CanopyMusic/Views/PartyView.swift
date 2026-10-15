@@ -422,7 +422,11 @@ struct NowPlayingView: View {
     @Environment(\.displayScale) private var displayScale
     /// The song whose animated art is showing (`MotionArtworkView.onShowing`), if any.
     @State private var videoShowing: QueueItem.ID?
-    /// Trying it: the equalizer bars go while the song's video shows. False keeps them.
+    /// The song whose video was known ahead to be coming but won't show after all
+    /// (`MotionArtworkView.onWontShow`): its equalizer bars come back.
+    @State private var videoGone: QueueItem.ID?
+    /// Trying it: the equalizer bars go while the song's video shows, and a song known ahead to
+    /// have one slides in without them (`MotionArtworkAhead`). False keeps them.
     private static let barsHideForVideo = true
 
     /// The song shown: the one playing, once it has slid in.
@@ -477,7 +481,21 @@ struct NowPlayingView: View {
         }
         // The right pane's 24 pt vertical padding, so a column that's full stops where Up next does.
         .padding(.bottom, 24)
+        // The next song or two's animated art looked up ahead (only whether there is some), so
+        // their pages know before they slide in whether to bring the equalizer bars. Again when
+        // Low Power Mode ends, which stops the look-ahead.
+        .task(id: LookAhead(trackIDs: lookAheadTracks.map(\.id), lowPower: LowPowerMode.shared.isOn)) {
+            await MotionArtworkAhead.shared.lookAhead(lookAheadTracks, catalog: session.catalog, isDisplay: model.isDisplay)
+        }
     }
+
+    private struct LookAhead: Equatable {
+        let trackIDs: [QueueTrack.ID]
+        let lowPower: Bool
+    }
+
+    /// The first two Up next songs, as `SongPages` loads their still art ahead.
+    private var lookAheadTracks: [QueueTrack] { session.state.upNext.prefix(2).map(\.track) }
 
     /// The song's art, title, artist line and progress: one page of the slide.
     private func page(_ item: QueueItem?, side: CGFloat, width: CGFloat) -> some View {
@@ -496,6 +514,9 @@ struct NowPlayingView: View {
                         withAnimation(.easeInOut(duration: 0.4)) {
                             if showing { videoShowing = id } else if videoShowing == id { videoShowing = nil }
                         }
+                    } onWontShow: {
+                        guard let id = item?.id else { return }
+                        withAnimation(.easeInOut(duration: 0.4)) { videoGone = id }
                     }
                 }
                 .frame(width: side, height: side)
@@ -503,14 +524,11 @@ struct NowPlayingView: View {
             VStack(spacing: 6) {
                 HStack(alignment: .firstTextBaseline, spacing: 12) {
                     // Not while the song's video plays: that already says it's playing. Trying it.
-                    if item != nil, !(Self.barsHideForVideo && videoShowing == item?.id) {
-                        EqualizerBars(isAnimating: session.isPlaying)
-                            // Trying 18 × 22 (was 24 × 24): lighter beside the title.
-                            .frame(width: 18, height: 22)
-                            // On the title's baseline, as a SwiftUI shape would be (a UIKit
-                            // view's baseline isn't its bottom).
-                            .alignmentGuide(.firstTextBaseline) { $0[.bottom] }
-                            .accessibilityHidden(true)
+                    if let item {
+                        TitleBars(
+                            track: item.track, isDisplay: model.isDisplay, hidesForVideo: Self.barsHideForVideo,
+                            isAnimating: session.isPlaying, videoShowing: videoShowing == item.id, videoGone: videoGone == item.id
+                        )
                     }
                     Text(item?.track.title ?? "Nothing playing yet")
                         .font(.system(size: 36, weight: .bold))
@@ -572,6 +590,42 @@ struct NowPlayingView: View {
 
     /// Nothing playing but Up next has songs: a lone Play button starts it.
     private var startsUpNext: Bool { item == nil && showsTransport && !session.state.upNext.isEmpty }
+}
+
+/// The equalizer bars before the song's title, left out while its animated art shows. A song whose
+/// video is known ahead to be coming (`MotionArtworkAhead`) leaves them out from its page's first
+/// frame, so it slides in without them, its title laid out without them, rather than losing them
+/// a moment after it lands; they come back if that video won't show after all.
+private struct TitleBars: View {
+    let isAnimating: Bool
+    /// The song's video is showing (`MotionArtworkView.onShowing`).
+    let videoShowing: Bool
+    /// The song's video won't show after all (`MotionArtworkView.onWontShow`).
+    let videoGone: Bool
+    private let hidesForVideo: Bool
+    /// Decided as the page is made, before it slides in, and kept: a lookup answering once the
+    /// page is in doesn't take the bars away (they go as its video fades in).
+    @State private var videoAhead: Bool
+
+    init(track: QueueTrack, isDisplay: Bool, hidesForVideo: Bool, isAnimating: Bool, videoShowing: Bool, videoGone: Bool) {
+        self.isAnimating = isAnimating
+        self.videoShowing = videoShowing
+        self.videoGone = videoGone
+        self.hidesForVideo = hidesForVideo
+        _videoAhead = State(initialValue: hidesForVideo && MotionArtworkAhead.shared.willShow(track, isDisplay: isDisplay) == true)
+    }
+
+    var body: some View {
+        if !(hidesForVideo && videoShowing), !(videoAhead && !videoGone) {
+            EqualizerBars(isAnimating: isAnimating)
+                // Trying 18 × 22 (was 24 × 24): lighter beside the title.
+                .frame(width: 18, height: 22)
+                // On the title's baseline, as a SwiftUI shape would be (a UIKit
+                // view's baseline isn't its bottom).
+                .alignmentGuide(.firstTextBaseline) { $0[.bottom] }
+                .accessibilityHidden(true)
+        }
+    }
 }
 
 /// Play, alone, for when nothing is current but Up next has songs: plays its first song.

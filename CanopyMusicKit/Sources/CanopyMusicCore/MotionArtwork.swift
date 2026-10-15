@@ -3,7 +3,8 @@ import Foundation
 /// Animated ("motion") album artwork, shown only on the iPad's large Now Playing artwork, for
 /// Apple Music zones. Experimental: everything about it hangs off `isEnabled`, and removing it
 /// means deleting this file, `MotionArtworkView.swift`, the `motionArtwork` lines in `MusicCatalog`
-/// and `AppleMusicCatalog`, the overlay line in `NowPlayingView` and `/api/debug/motion`.
+/// and `AppleMusicCatalog`, the overlay line, the look-ahead and `MotionArtworkAhead` in
+/// `NowPlayingView` and `TitleBars`, and `/api/debug/motion`.
 ///
 /// Apple Music API albums can carry an `editorialVideo` attribute when asked for it with
 /// `extend=editorialVideo`: HLS (`.m3u8`) videos in several shapes, of which a square one suits

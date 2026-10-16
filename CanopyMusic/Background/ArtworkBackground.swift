@@ -159,12 +159,17 @@ struct ArtworkDrift<Content: View>: View {
         return 1
     }
 
-    /// How fast it drifts: 1 normally. Debug builds: `-driftSpeed <multiplier>`.
+    /// How fast it drifts: 1.5× on the TV (trying it, 15 Oct), 1 on the iPad. Debug builds:
+    /// `-driftSpeed <multiplier>`.
     static var speed: Double {
         #if DEBUG
         if let value = debugValue("-driftSpeed") { return value }
         #endif
+        #if os(tvOS)
+        return 1.5
+        #else
         return 1
+        #endif
     }
 
     #if DEBUG

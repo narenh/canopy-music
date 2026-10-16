@@ -464,7 +464,7 @@ struct TVZoneBadge: View {
         if let zone = model.shownZone {
             // Plain text, not a capsule, so it can't be mistaken for a requester pill.
             HStack(spacing: 12) {
-                Image(systemName: zone.kind == .tv ? "tv.fill" : DeviceSymbol.name(kind: zone.kind, device: zone.device))
+                Image(systemName: zone.kind == .tv ? "tv" : DeviceSymbol.name(kind: zone.kind, device: zone.device))
                     .font(.system(size: 22, weight: .medium))
                 Text("Playing from \(zone.name)")
                     .font(.system(size: 24, weight: .medium))

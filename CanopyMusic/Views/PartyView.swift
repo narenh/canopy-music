@@ -1060,7 +1060,7 @@ private struct DisplayZoneLine: View {
         let kind = session.hubKind ?? listing?.kind ?? .ipad
         let device = session.hubKind != nil ? session.hubDevice : listing?.device
         HStack(spacing: 7) {
-            Image(systemName: kind == .tv ? "tv.fill" : DeviceSymbol.name(kind: kind, device: device))
+            Image(systemName: kind == .tv ? "tv" : DeviceSymbol.name(kind: kind, device: device))
                 .font(.system(size: 13, weight: .medium))
             Text("Playing from \(name ?? "another device")")
                 .font(.system(size: 15, weight: .medium))

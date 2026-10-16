@@ -111,6 +111,10 @@ struct TVRootView: View {
                 easterEgg.dismissedItemID = item.id
             } else if model.canSaveParty {
                 endingWithSave = true
+            } else if model.role == .hub, model.session.isWaitingForSetup, !model.hostJoined {
+                // A new zone no phone has scanned yet: nothing has happened, so straight back
+                // without asking. Once a host has scanned they may be mid setup, so it asks.
+                model.stopZone()
             } else {
                 confirming = true
             }

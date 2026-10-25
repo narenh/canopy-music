@@ -25,7 +25,7 @@ struct HostView: View {
 
     /// The Music row's service menu: only on the start screen (nil in a live zone).
     private var switchService: ((AppModel.Provider) -> Void)? {
-        model.isLive ? nil : { next in chooseService(next) }
+        model.isLive || AppModel.appleMusicOnly ? nil : { next in chooseService(next) }
     }
 
     /// Spotify signs in first if it isn't yet, on its setup page (backing out keeps the current

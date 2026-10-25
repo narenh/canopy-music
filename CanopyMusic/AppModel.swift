@@ -45,6 +45,11 @@ final class AppModel {
         }
     }
 
+    /// App Store build: Apple Music only. Setup skips the service chooser and the start screen's
+    /// Music row has no service menu; a Spotify choice saved by an earlier build becomes Apple
+    /// Music. The Spotify code stays in, just unreachable.
+    static let appleMusicOnly = true
+
     /// True until a music service has been chosen on the first-launch screen.
     private(set) var needsOnboarding: Bool
 
@@ -208,7 +213,8 @@ final class AppModel {
         // Nothing saved (or a choice this build doesn't have, e.g. "demo" in a release build):
         // start with no service, and "Create a new zone" runs setup first.
         let saved = Provider(rawValue: defaults.string(forKey: "provider") ?? "")
-        let provider = saved == Provider.none ? nil : saved
+        var provider = saved == Provider.none ? nil : saved
+        if Self.appleMusicOnly, provider == .spotify { provider = .appleMusic }
         self.provider = provider ?? .none
         var needsOnboarding = provider == nil
         #if DEBUG
@@ -601,6 +607,7 @@ final class AppModel {
     /// it hasn't yet, and a refusal shows in the row.
     func switchService(to next: Provider) {
         guard zoneRole == .hub, !isLive, !isStartingZone, next != provider else { return }
+        guard !(Self.appleMusicOnly && next == .spotify) else { return }
         chooseProvider(next)
         if next == .appleMusic, MusicAuthorization.currentStatus == .notDetermined {
             Task { await requestAuthorization() }

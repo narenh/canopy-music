@@ -9,7 +9,9 @@ struct OnboardingView: View {
     @Environment(AppModel.self) private var model
 
     private enum Step { case chooser, spotify, network }
-    @State private var step: Step = .chooser
+    /// Apple Music only (`AppModel.appleMusicOnly`): straight to the network step; Apple Music is
+    /// chosen, and its access asked for, when the step appears.
+    @State private var step: Step = AppModel.appleMusicOnly ? .network : .chooser
     /// Where Back on the network step returns to.
     @State private var networkBack: Step = .chooser
 
@@ -35,7 +37,7 @@ struct OnboardingView: View {
                     .tint(AppModel.Provider.spotify.accent)
                     .transition(.move(edge: .trailing).combined(with: .opacity))
                 case .network:
-                    NetworkStep(back: { go(networkBack) })
+                    NetworkStep(back: AppModel.appleMusicOnly ? nil : { go(networkBack) })
                         .transition(.move(edge: .trailing).combined(with: .opacity))
                 }
             }
@@ -44,6 +46,11 @@ struct OnboardingView: View {
         .foregroundStyle(.white)
         // After signing in to Spotify: "Where should music play?"
         .outputPicker(includesSonos: false)
+        .task {
+            guard AppModel.appleMusicOnly else { return }
+            model.chooseProvider(.appleMusic)
+            await model.requestAuthorization()
+        }
         #if DEBUG
         .onAppear {
             if ProcessInfo.processInfo.arguments.contains("-onboardingSpotify") { step = .spotify }
@@ -400,7 +407,8 @@ struct SpotifySetupStep: View {
 /// which starts the phone page and triggers the system prompt; Not now turns queueing off.
 private struct NetworkStep: View {
     @Environment(AppModel.self) private var model
-    let back: () -> Void
+    /// nil: no Back (there's no earlier step).
+    let back: (() -> Void)?
 
     var body: some View {
         VStack(spacing: 28) {
@@ -416,10 +424,12 @@ private struct NetworkStep: View {
                 .frame(maxWidth: 560)
 
             HStack(spacing: 16) {
-                Button("Back", action: back)
-                    .buttonStyle(.glass)
-                    .tint(.primary)
-                    .controlSize(.large)
+                if let back {
+                    Button("Back", action: back)
+                        .buttonStyle(.glass)
+                        .tint(.primary)
+                        .controlSize(.large)
+                }
                 Button {
                     model.phoneQueueEnabled = true
                     model.finishOnboarding()

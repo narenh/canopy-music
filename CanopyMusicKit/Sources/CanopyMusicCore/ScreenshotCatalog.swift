@@ -25,7 +25,7 @@ public struct ScreenshotCatalog: MusicCatalog {
     }
 
     static let albums: [Album] = [
-        Album(title: "Neon Hallways", artist: "Hollow Coast", cover: "1500462918059-b1a0cb512f1d",
+        Album(title: "Neon Hallways", artist: "Tin Lanterns", cover: "1500462918059-b1a0cb512f1d",
               colors: .init(background: "#B0246A", primary: "#FFF0F6", secondary: "#FFB3D1"),
               songs: [("Neon Hallways", 214), ("Slow Satellites", 247), ("Wishing Well Parade", 198)]),
         Album(title: "Afterglow Radio", artist: "Marigold Static", cover: "1481437642641-2f0ae875f836",
@@ -52,9 +52,9 @@ public struct ScreenshotCatalog: MusicCatalog {
         Album(title: "Paper Waves", artist: "Oslo Moth", cover: "1558591710-4b4a1ae0f04d",
               colors: .init(background: "#5D6675", primary: "#FFFFFF", secondary: "#D7DCE4"),
               songs: [("Paper Waves", 219), ("Quiet Machines", 247)]),
-        Album(title: "Colour Theory", artist: "Ruby Fathom", cover: "1604871000636-074fa5117945",
+        Album(title: "Tidal Paint", artist: "Ruby Fathom", cover: "1604871000636-074fa5117945",
               colors: .init(background: "#0B2140", primary: "#EAF4FF", secondary: "#F47B5B"),
-              songs: [("Colour Theory", 207), ("Undertow Dance", 232), ("Coral Sleep", 195)]),
+              songs: [("Tidal Paint", 207), ("Undertow Dance", 232), ("Coral Sleep", 195)]),
         // Guests' requests only (`request`): not in "Saturday Night", so no cover shows twice in Up Next.
         Album(title: "Wire Garden", artist: "Echo Parlour", cover: "1549317336-206569e8475c",
               colors: .init(background: "#10153A", primary: "#EEF1FF", secondary: "#FF4FA0"),
@@ -104,7 +104,7 @@ public struct ScreenshotCatalog: MusicCatalog {
         ("shot-saturday", "Saturday Night", partyOrder),
         ("shot-dinner", "Dinner Party", songs(of: ["Afterglow Radio", "Paper Waves", "Pine & Ember", "Low Tide Hearts"])),
         ("shot-sunday", "Sunday Morning", songs(of: ["Spectrum Kids", "Paper Waves", "Northbound Lights"])),
-        ("shot-roadtrip", "Road Trip", songs(of: ["Northbound Lights", "Afterglow Radio", "Colour Theory", "Neon Hallways"])),
+        ("shot-roadtrip", "Road Trip", songs(of: ["Northbound Lights", "Afterglow Radio", "Tidal Paint", "Neon Hallways"])),
         ("shot-latenight", "Late Night", songs(of: ["Fever Bloom", "Red Shift Summer", "Neon Hallways"])),
     ]
 

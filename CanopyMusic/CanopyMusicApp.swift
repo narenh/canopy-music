@@ -14,8 +14,7 @@ final class AppDelegate: UIResponder, UIApplicationDelegate {
         // Each debug line out at once when stdout is a pipe (`devicectl … --console`), not in
         // 4 KB batches that leave the last lines unseen.
         setvbuf(stdout, nil, _IOLBF, 0)
-        super.init()
-    }
+        super.init()    }
     #endif
 }
 
@@ -47,6 +46,15 @@ enum Capture {
         #else
         false
         #endif
+    }
+}
+
+extension View {
+    /// `-capture`: a sheet's content turned as the window's is (`CaptureRotated`). The sheet is
+    /// presented outside the turned content, so it would come out sideways; the portrait form
+    /// sheet's frame, turned, is about a landscape one's shape.
+    @ViewBuilder func captureRotated() -> some View {
+        if Capture.isOn { CaptureRotated { self } } else { self }
     }
 }
 
@@ -340,6 +348,10 @@ struct RootView: View {
                     model.session.add(ScreenshotCatalog.request(0), by: Requester(name: "Maya", clientID: "shot-maya", origin: .phone))
                     model.session.add(ScreenshotCatalog.request(1), by: Requester(name: "Theo", clientID: "shot-theo", origin: .phone))
                     // A minute in, so the progress bar reads as a song under way.
+                    // `-screenshotSkips <n>`: on n songs first, for another song playing.
+                    if let i = args.firstIndex(of: "-screenshotSkips"), i + 1 < args.count {
+                        for _ in 0..<(Int(args[i + 1]) ?? 0) { await model.session.skip() }
+                    }
                     if let current = model.session.state.current { await model.session.seekInTurn(to: 72, on: current.id) }
                 }
             }

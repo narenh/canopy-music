@@ -95,7 +95,7 @@ struct HostView: View {
         .preferredColorScheme(.dark)
         // Presented views get the model explicitly: on a Mac, a sheet's view was seen without it
         // ("No Observable object of type AppModel found" on End Zone).
-        .sheet(isPresented: $showPicker) { PlaylistPickerView().environment(model) }
+        .sheet(isPresented: $showPicker) { PlaylistPickerView().environment(model).captureRotated() }
         .modifier(AppleMusicOffer(enabled: model.provider == .appleMusic, isPresented: $showSubscriptionOffer))
         .sheet(isPresented: $showSettings) {
             SettingsSheet()

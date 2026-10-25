@@ -102,11 +102,16 @@ public struct ScreenshotCatalog: MusicCatalog {
 
     static let playlists: [(id: String, name: String, tracks: [QueueTrack])] = [
         ("shot-saturday", "Saturday Night", partyOrder),
-        ("shot-dinner", "Dinner Party", allTracks.filter { ["Afterglow Radio", "Paper Waves", "Pine & Ember", "Low Tide Hearts"].contains($0.album) }),
-        ("shot-sunday", "Sunday Morning", allTracks.filter { ["Spectrum Kids", "Paper Waves", "Northbound Lights"].contains($0.album) }),
-        ("shot-roadtrip", "Road Trip", allTracks.filter { ["Northbound Lights", "Afterglow Radio", "Colour Theory", "Neon Hallways"].contains($0.album) }),
-        ("shot-latenight", "Late Night", allTracks.filter { ["Red Shift Summer", "Fever Bloom", "Neon Hallways"].contains($0.album) }),
+        ("shot-dinner", "Dinner Party", songs(of: ["Afterglow Radio", "Paper Waves", "Pine & Ember", "Low Tide Hearts"])),
+        ("shot-sunday", "Sunday Morning", songs(of: ["Spectrum Kids", "Paper Waves", "Northbound Lights"])),
+        ("shot-roadtrip", "Road Trip", songs(of: ["Northbound Lights", "Afterglow Radio", "Colour Theory", "Neon Hallways"])),
+        ("shot-latenight", "Late Night", songs(of: ["Fever Bloom", "Red Shift Summer", "Neon Hallways"])),
     ]
+
+    /// The albums' songs, album by album in this order.
+    static func songs(of albumTitles: [String]) -> [QueueTrack] {
+        albumTitles.flatMap { title in allTracks.filter { $0.album == title } }
+    }
 
     public func searchSongs(_ term: String) async throws -> [QueueTrack] {
         try await Task.sleep(for: .milliseconds(150))
@@ -117,7 +122,14 @@ public struct ScreenshotCatalog: MusicCatalog {
     }
 
     public func libraryPlaylists() async throws -> [PlaylistSummary] {
-        Self.playlists.map { PlaylistSummary(id: $0.id, name: $0.name, songCount: $0.tracks.count, kind: .library) }
+        // Each with its first song's cover, as a file: the hub's picker loads playlist art itself
+        // (`AsyncImage`), not through the relay.
+        Self.playlists.map { playlist in
+            let cover = playlist.tracks.first.flatMap { track in Self.albums.first { $0.title == track.album } }
+            return PlaylistSummary(id: playlist.id, name: playlist.name,
+                                   artworkURL: cover.map { ScreenshotCovers.folder.appending(path: "\($0.cover).jpg") },
+                                   songCount: playlist.tracks.count, kind: .library)
+        }
     }
 
     public func searchPlaylists(_ term: String) async throws -> [PlaylistSummary] { [] }

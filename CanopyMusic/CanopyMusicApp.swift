@@ -326,6 +326,8 @@ struct RootView: View {
                 Task { await session.previous() }
                 Task { await session.skip() }
             }
+            // `-screenshots`: "Living Room" and `music.local`, not the simulator's own names.
+            if AppModel.isScreenshots { ScreenshotHub.pose(model) }
             // `-autoParty` starts a demo party (Start: live and locked), for screenshots and UI work
             // in the simulator.
             if ProcessInfo.processInfo.arguments.contains("-autoParty"), model.isDemo {
@@ -333,6 +335,13 @@ struct RootView: View {
                     await model.load(first)
                 }
                 await model.startZone()
+                // `-screenshots`: a couple of guests' requests in Up Next.
+                if AppModel.isScreenshots {
+                    model.session.add(ScreenshotCatalog.request(0), by: Requester(name: "Maya", clientID: "shot-maya", origin: .phone))
+                    model.session.add(ScreenshotCatalog.request(1), by: Requester(name: "Theo", clientID: "shot-theo", origin: .phone))
+                    // A minute in, so the progress bar reads as a song under way.
+                    if let current = model.session.state.current { await model.session.seekInTurn(to: 72, on: current.id) }
+                }
             }
             // `-autoChangePlaylist <id>` (with `-autoParty`): 8 s into the party, picks that demo
             // playlist as host mode's picker does, to check that the song plays on.

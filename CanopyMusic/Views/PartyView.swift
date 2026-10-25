@@ -145,7 +145,7 @@ struct PartyView: View {
                     Image(systemName: "magnifyingglass")
                         .font(.system(size: 22, weight: .semibold))
                         .foregroundStyle(.white.opacity(0.6))
-                    TextField("", text: $query, prompt: Text("Search \(searchServiceName) to add a song").foregroundStyle(.white.opacity(0.5)))
+                    TextField("", text: $query, prompt: Text(AppModel.isScreenshots ? "Search for a song to add" : "Search \(searchServiceName) to add a song").foregroundStyle(.white.opacity(0.5)))
                         .font(.system(size: 22))
                         .foregroundStyle(.white)
                         .focused($searchFocused)
@@ -371,6 +371,8 @@ struct PartyView: View {
         guard let i = args.firstIndex(of: "-autoSearch"), i + 1 < args.count else { return }
         try? await Task.sleep(for: .seconds(1.5))
         query = args[i + 1]
+        // `-screenshots`: the results stay up, nothing added.
+        guard !AppModel.isScreenshots else { return }
         try? await Task.sleep(for: .seconds(1.5))
         autoAddTrackID = results.first { status(for: $0) == .add }?.id
     }

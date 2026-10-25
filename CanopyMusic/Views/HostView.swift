@@ -205,7 +205,8 @@ struct HostView: View {
                     } else if model.isDemo {
                         HStack(spacing: 12) {
                             ServiceMenu(isOpen: $choosingService, choose: switchService) {
-                                Label("Demo mode: fake songs, no audio", systemImage: "theatermasks")
+                                Label(AppModel.isScreenshots ? "Your music library" : "Demo mode: fake songs, no audio",
+                                      systemImage: AppModel.isScreenshots ? "music.note" : "theatermasks")
                                     .frame(maxWidth: .infinity, alignment: .leading)
                             }
                             if switchService != nil {

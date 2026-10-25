@@ -27,7 +27,8 @@ final class AppModel {
             case .appleMusic: "Apple Music"
             case .spotify: "Spotify"
             #if DEBUG
-            case .demo: "Demo"
+            // `-screenshots`: no "Demo" anywhere (the phone page and displays get this too).
+            case .demo: ScreenshotCatalog.isOn ? "Music" : "Demo"
             #endif
             }
         }
@@ -207,7 +208,11 @@ final class AppModel {
     init() {
         // Nothing saved (or a choice this build doesn't have, e.g. "demo" in a release build):
         // start with no service, and "Create a new zone" runs setup first.
-        let saved = Provider(rawValue: defaults.string(forKey: "provider") ?? "")
+        var saved = Provider(rawValue: defaults.string(forKey: "provider") ?? "")
+        #if DEBUG
+        // `-screenshots`: the demo provider, with the screenshot catalog (`ScreenshotCatalog`).
+        if ScreenshotCatalog.isOn { saved = .demo }
+        #endif
         let provider = saved == Provider.none ? nil : saved
         self.provider = provider ?? .none
         var needsOnboarding = provider == nil
@@ -463,6 +468,8 @@ final class AppModel {
             links.log = { print("[link-player] \($0)") }
             let engine = LinkHandoffEngine(music: DemoPlaybackEngine(), links: links)
             engine.log = { print("[handoff] \($0)") }
+            // `-screenshots`: invented songs with photo covers, and no saved queue to come back.
+            if ScreenshotCatalog.isOn { return PartySession(catalog: ScreenshotCatalog(), engine: engine) }
             return PartySession(catalog: DemoCatalog(), engine: engine, storeURL: store)
         #endif
         }
@@ -578,6 +585,16 @@ final class AppModel {
     var isDemo: Bool {
         #if DEBUG
         provider == .demo
+        #else
+        false
+        #endif
+    }
+
+    /// `-screenshots` (debug builds): the App Store screenshot catalog (`ScreenshotCatalog`), with
+    /// no service names, logos, or "Demo" on screen. Always false in release builds.
+    static var isScreenshots: Bool {
+        #if DEBUG
+        ScreenshotCatalog.isOn
         #else
         false
         #endif
@@ -959,7 +976,11 @@ final class AppModel {
         isDisplay ? session.lanAddress.flatMap { URL(string: "http://\($0)") } : localGuestURL
     }
     var friendlyURL: URL? {
-        isDisplay ? session.guestAddress.flatMap { URL(string: "http://\($0)") } : localFriendlyURL
+        // `-screenshots`: `music.local` (as `ScreenshotHub` tells displays), not the simulator's `canopytest-` name.
+        if Self.isScreenshots, !isDisplay, localFriendlyURL != nil {
+            return URL(string: "http://music.local")
+        }
+        return isDisplay ? session.guestAddress.flatMap { URL(string: "http://\($0)") } : localFriendlyURL
     }
     var showsGuestQR: Bool { isDisplay ? guestURL != nil && session.phonesCanQueue : phoneQueueEnabled }
 
@@ -1337,7 +1358,8 @@ final class AppModel {
 
     /// The `.local` address guests can type: the confirmed one, or the one being checked.
     var localAddress: String {
-        localFriendlyURL?.host ?? "\(FriendlyHostname.localName(forZone: zoneName)).local"
+        if Self.isScreenshots { return "music.local" }
+        return localFriendlyURL?.host ?? "\(FriendlyHostname.localName(forZone: zoneName)).local"
     }
 
     /// The `.local` name follows the zone name: a renamed zone announces its new name, which is

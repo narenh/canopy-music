@@ -319,6 +319,7 @@ html.sheet-open, html.sheet-open body { overflow: hidden; }
 .music-bar { width: 100%; text-align: left; }
 .music-bar-icon.round { border-radius: 50%; }
 .music-bar-chev { flex: none; width: 22px; margin-right: -4px; display: grid; place-items: center; color: var(--text-2); }
+.music-bar-chev[hidden] { display: none; }
 .music-bar-chev svg { width: 18px; height: 18px; stroke-width: 2.2; transition: transform .2s var(--ease); }
 .music-bar[aria-expanded="true"] .music-bar-chev svg { transform: rotate(180deg); }
 .music-bar[data-state="problem"] .music-bar-chev { margin-top: 8px; }

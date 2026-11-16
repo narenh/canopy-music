@@ -1853,6 +1853,9 @@
 
   /** The zone plays Spotify (an Apple TV set up for it on this page). */
   const isSpotify = () => !!snap && snap.service === "Spotify";
+  /** The hub offers Spotify: it sends its Spotify setup in hosts' snapshots. An Apple Music only
+   * build (`TVModel.appleMusicOnly`) sends none, and the Music bar then has no service menu. */
+  const offersSpotify = () => !!spotify;
 
   /** What the Music bar says for Spotify: `what` (bold) and `todo`, and whether it can play. */
   function spotifyStatus(s) {
@@ -1950,6 +1953,10 @@
         note.textContent = status.todo;
       }
     }
+    // No menu without Spotify (an Apple Music only hub): the bar just says how Apple Music stands.
+    const menuOffered = offersSpotify() || spotifyZone;
+    bar.querySelector(".music-bar-chev").hidden = !menuOffered;
+    if (menuOffered) bar.setAttribute("aria-haspopup", "menu"); else { bar.removeAttribute("aria-haspopup"); closeServiceMenu(); }
     renderServiceOption();
     // Spotify can't play on the TV itself (its tvOS app is only a Connect device while it's on
     // screen, and Canopy Music is), so the music plays wherever the host chooses.
@@ -2011,6 +2018,7 @@
   $("setup-music").addEventListener("click", (event) => {
     event.stopPropagation();
     const menu = $("setup-service-menu");
+    if (menu.hidden && !offersSpotify() && !isSpotify()) return;
     if (menu.hidden) renderServiceOption();
     menu.hidden = !menu.hidden;
     $("setup-music").setAttribute("aria-expanded", String(!menu.hidden));

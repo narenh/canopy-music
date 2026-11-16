@@ -79,6 +79,12 @@ final class TVModel {
     private(set) var role: Role = .choosing {
         didSet { if role != oldValue { updateSonosDiscovery() } }
     }
+    /// App Store build: Apple Music only, as the iPad's `AppModel.appleMusicOnly`. The host's setup
+    /// page gets no Spotify setup (so it shows no service menu), `chooseService` refuses Spotify, a
+    /// Spotify choice saved by an earlier build becomes Apple Music, and `-spotifyFake` is ignored.
+    /// The Spotify code stays in, just unreachable.
+    static let appleMusicOnly = true
+
     private(set) var service: Service
     /// Spotify: sign-in from the host's phone, the device music plays on (docs/multi-device.md).
     let spotify = TVSpotify()
@@ -150,6 +156,7 @@ final class TVModel {
         #if DEBUG
         if spotify.fake != nil { service = .spotify }
         #endif
+        if Self.appleMusicOnly { service = .appleMusic }
         sonos = SonosOutputController(household: Self.makeSonosHousehold(), defaults: Self.isSonosFake ? nil : .standard)
         sonos.service = service.sonos
         #if DEBUG
@@ -359,7 +366,7 @@ final class TVModel {
         session.onStopRequested = { [weak self] in self?.stopZone() }
         // The setup page asks as it opens and every few seconds until the music can play.
         session.onMusicAccessCheck = { [weak self] in self?.checkService(asking: true) }
-        session.spotifySignIn = spotify.signIn
+        session.spotifySignIn = Self.appleMusicOnly ? nil : spotify.signIn
         session.setupHandler = self
         // Sonos: the rooms for the host's page, and a Sonos engine's rooms kept as the output.
         session.sonosHandler = sonos
@@ -614,7 +621,8 @@ final class TVModel {
     /// Tells the host's setup page (hosts' snapshots) where Spotify stands.
     private func pushSpotifySetup() {
         guard role == .hub else { return }
-        session.spotifySetup = spotify.setup(conflict: service == .spotify ? spotifyConflict : nil)
+        // Apple Music only: none, so the page offers no Spotify (no service menu).
+        session.spotifySetup = Self.appleMusicOnly ? nil : spotify.setup(conflict: service == .spotify ? spotifyConflict : nil)
         // The account just became known (a sign-in): the announcement carries it.
         advertise()
     }
@@ -1007,6 +1015,7 @@ extension TVModel: HubSetupHandler {
     /// new service, so the phone stays connected.
     func chooseService(_ name: String) -> Bool {
         guard role == .hub, session.isWaitingForSetup, let next = Service(rawValue: name) else { return false }
+        guard !(Self.appleMusicOnly && next == .spotify) else { return false }
         guard next != service else { return true }
         let previous = service
         service = next
@@ -1027,16 +1036,18 @@ extension TVModel: HubSetupHandler {
     }
 
     func setSpotifyClientID(_ clientID: String) {
+        guard !Self.appleMusicOnly else { return }
         spotify.setClientID(clientID)
     }
 
     func setSpotifySignInPage(_ typed: String) async -> SpotifyRelay.PageCheck {
-        await spotify.setSignInPage(typed)
+        guard !Self.appleMusicOnly else { return .invalid }
+        return await spotify.setSignInPage(typed)
     }
 
     /// A Spotify Connect device plays the music: not Sonos rooms any more.
     func chooseSpotifyDevice(id: String) -> Bool {
-        guard spotify.chooseDevice(id: id) else { return false }
+        guard !Self.appleMusicOnly, spotify.chooseDevice(id: id) else { return false }
         if role == .hub, session.isWaitingForSetup { sonos.leave() }
         return true
     }
